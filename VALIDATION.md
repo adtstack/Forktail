@@ -1,0 +1,185 @@
+# Validation Record
+
+검증일: 2026-06-26
+
+이 파일은 실행한 검증과 실행하지 못한 검증을 명확히 구분한다. AI 에이전트는 이 기록만으로 미실행 검증을 통과했다고 간주하면 안 된다.
+
+## 통과
+
+프로젝트 루트에서 다음 명령을 실행했다.
+
+```bash
+npm ci --cache .npm-cache
+npm run doctor
+npm run check
+npm run tauri dev -- --no-watch --no-dev-server-wait
+npm run tauri build
+
+cd src-tauri
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+결과:
+
+- Desktop readiness doctor: Node.js 22.14.0, npm 11.4.0, rustc 1.96.0, cargo 1.96.0, rustfmt 1.9.0, cargo clippy 0.1.96, Tauri CLI executable 2.11.3, `@tauri-apps/cli` 2.11.3 확인
+- TypeScript project build/typecheck: 통과
+- Vitest: 40 test files, 215 tests 통과
+- Vite production build: 통과
+- Rust fmt: 통과
+- Rust clippy: `cargo clippy --all-targets -- -D warnings` 통과
+- Rust test: 21 tests 통과
+- Tauri dev compile/run: `npm run tauri dev -- --no-watch --no-dev-server-wait`가 `target/debug/forktail` 실행까지 도달함. 확인 후 장기 실행 세션은 Ctrl-C로 종료함
+- Tauri macOS app bundle: `npm run tauri build` 통과. Phase 1 기본 bundle target은 `app`으로 제한한다. `src-tauri/target/release/forktail`와 `src-tauri/target/release/bundle/macos/forktail.app/Contents/MacOS/forktail`는 Mach-O 64-bit arm64 실행 파일이며, `Info.plist`의 display name, executable, bundle id, version, copyright가 `forktail` 설정과 일치함
+- Monaco bundle split 확인: `src/main.tsx`의 eager Monaco import를 제거하고 2-way/3-way 화면을 lazy chunk로 분리했다. 빌드 산출물 기준 초기 `index` JS chunk는 약 248 KiB이고, Monaco editor 본체는 lazy `language` chunk, 언어 tokenizer와 worker는 별도 asset으로 분리됨
+- 텍스트 전용 범위 감사: 제품 문서·백로그·화면 문구에 비텍스트 비교/병합 기능 요구사항 없음
+- 브라우저 실행 확인: `http://127.0.0.1:1420/`에서 시작 화면, 2-way 데모, 폴더 데모, 3-way 데모, F7 diff 탐색, F8 conflict 탐색, Alt+1 충돌 해결 단축키, 충돌 해결 동작, 충돌 해결 undo/redo, 병합 dirty 상태 표시, 저장 안 된 병합 결과 이동 확인 모달의 취소/버리고 이동 분기, 미해결 충돌 저장 확인 모달의 취소 분기, 마지막 개행 차이 경고, 비교 옵션 바 표시와 조작, 폴더 상태 필터와 수정 시각 정렬, 폴더 행 키보드 이동/Enter 열기, active conflict side diff, 시스템/다크/라이트 테마 전환 확인
+- 폴더 키보드 단위 테스트: visible row 선택 index clamp, Arrow/Home/End 이동 규칙 확인
+- command registry 단위 테스트: UX 명세 주요 단축키의 aria-keyshortcuts 생성, exact modifier matching, save/save-as 구분, 탐색/충돌 해결 shortcut, 중복 shortcut 없음, native menu command payload guard 확인
+- 오류 계약 단위 테스트: TS `AppErrorCode`가 단일 tuple에서 파생되고, serialized command error를 우선 표시하며, 빈 command message는 code별 안내로 대체하고 raw OS/stack-shaped debug 문자열은 사용자용 fallback으로 숨기는지 확인
+- 악성 입력 단위 테스트: marker flood가 뒤의 정상 conflict를 숨기지 않는지, 제어문자와 script-like 텍스트가 diff report에서 plain text로 유지되는지, malformed/non-file drop URI가 무시되는지 확인
+- product identity 단위 테스트: `package.json`, Tauri productName/identifier/window title/copyright/icon list, Cargo crate/lib/authors, `index.html` title, StartPage H1이 `forktail` 기준으로 유지되고 desktop icon asset이 존재하는지 확인
+- 2-way 편집 표시 렌더 테스트: 파일 heading이 편집 모드에서만 `EDITING` 배지를 표시하는지 확인
+- 저장 인코딩 경고 단위/렌더 테스트: UTF-8이 아닌 입력, BOM 입력, 디코딩 손실 입력이 현재 UTF-8 저장 경로에서 경고되고 2-way/3-way 화면에 노출되는지 확인
+- Tauri security config 단위 테스트: release CSP가 `csp: null`이 아니며 local worker, Tauri IPC, object blocking을 포함하고, dev-only localhost/ws 허용이 release CSP에 섞이지 않는지 확인
+- Tauri capability 최소화 단위 테스트: main window만 대상으로 `core:default`, `dialog:allow-open`, `dialog:allow-save`만 허용하고, FS/shell/http/opener plugin 권한과 broad plugin dependency가 없는지 확인
+- 네트워크/AI 정책 단위 테스트: 런타임 source와 package manifest에 browser/Rust network API, HTTP/updater plugin, telemetry dependency, AI SDK/API key 경로가 없는지 확인
+- privacy/logging policy 단위 테스트: runtime source에 console/println/eprintln/dbg/tracing/log 호출이 없고 logging/crash-reporting dependency가 없는지 확인
+- 직접 JS dependency policy 단위 테스트: `package.json`과 `package-lock.json`의 루트 dependency/devDependency 목록과 lockfile version을 대조하고, 설치된 직접 npm dependency license가 MIT/Apache 계열 allowlist 안에 있는지 확인
+- CI branch gate policy 단위 테스트: PR/main push에서 frontend/Rust gate가 명시적으로 실행되고 job timeout이 있으며, PR 검증 workflow가 artifact/release build를 만들지 않는지 확인
+- desktop readiness doctor policy 단위 테스트: `npm run doctor`가 Node/npm/Rust/cargo/rustfmt/cargo clippy/Tauri CLI 실행 가능 여부를 확인하고 README의 실행 순서가 doctor를 먼저 안내하는지 확인
+- 폴더 가상 스크롤 단위 테스트: 10,000 row visible window, spacer height, 빈 목록과 비정상 측정값 sanitize 확인
+- 폴더 expand/collapse 단위 테스트: directory row 판별, tree depth, descendant collapse, nested directory collapse, directory row 자체 유지 확인
+- 폴더 expand/collapse 렌더 테스트: visible child가 있는 directory row에 `aria-expanded` toggle과 접기 label이 렌더링되는지 확인
+- 폴더 portable path conflict 단위 테스트: 상대 경로를 slash/NFC/`en-US` lowercase 기준 identity로 정규화하고, case-only 및 Unicode normalization-only 충돌을 감지하는지 확인
+- 폴더 portable path conflict 렌더 테스트: 대소문자만 다른 경로가 있을 때 폴더 화면이 Windows/macOS 기본 파일시스템 위험 경고와 대표 경로 쌍을 표시하는지 확인
+- 폴더 copy/sync dry-run 단위 테스트: 좌→우/우→좌 방향별 복사, 폴더 생성, 덮어쓰기, 차단 계획을 생성하되 target-only 삭제는 계획하지 않고, `..`/절대 경로/drive path/빈 segment는 target path 생성 전에 차단하는지 확인
+- 폴더 copy/sync dry-run 렌더 테스트: 폴더 화면이 실제 파일 변경 없이 양방향 dry-run 요약을 표시하고 적용 버튼을 노출하지 않는지 확인
+- 폴더 스캔 진행 상태 렌더 테스트: 스캔 중 안내, `스캔 취소` 버튼, 취소 후 늦게 도착한 결과를 반영하지 않는다는 안내 표시 확인
+- 폴더 스캔 옵션 렌더 테스트: 비교 방식 select와 hidden/gitignore/symlink 토글이 현재 옵션 상태를 반영하는지 확인
+- 폴더 스캔 옵션 단위 테스트: 비교 모드 변경과 hidden/gitignore/symlink 토글이 다른 옵션을 보존한 새 scan option을 만드는지 확인
+- 폴더 상태 필터 접근성 렌더 테스트: 상태별 count와 표시/숨김 상태가 `aria-label`에 포함되는지 확인
+- 홈 시작 동작 단축키 접근성 렌더 테스트: 파일/폴더/3-way 시작 버튼의 `aria-keyshortcuts` 확인
+- 3-way 병합 접근성 렌더 테스트: merge dirty 상태 chip의 status/live/label, BASE/OURS/THEIRS source region label, result region label, 주요 save/resolution shortcut 속성 확인
+- 3-way merge parser benchmark 단위 테스트: 30-conflict benchmark fixture 생성, 반복 parsing metadata 기록, expected conflict count 불일치 시 즉시 실패하는지 확인
+- 접근성 색상 대비 단위 테스트: dark/light theme의 warning/status/filter/count/toast 토큰 foreground/background 조합이 WCAG AA normal text 기준 4.5:1 이상인지 확인
+- 접근성 포커스 표시 단위 테스트: button/input/select/tabindex 대상 `focus-visible` outline과 shadow, 폴더 row focus ring, dark/light focus token, `outline: none` 금지 확인
+- 대용량 텍스트 전략 단위 테스트: Rust `read_text_file`의 64 MiB cap, `TOO_LARGE` 오류, Architecture 문서, ADR-008의 Phase 1 streaming 제외 결정이 서로 일치하는지 확인
+- 2-way 파일 version 감지 단위 테스트: 열린 파일의 size/mtime 기준선 비교, 한쪽/양쪽 변경 안내 메시지, suppression key 생성 확인
+- 3-way conflict parser hardening 단위 테스트: CRLF, no-final-newline, marker-like content, malformed marker 순서, malformed outer marker가 뒤의 정상 conflict를 삼키지 않는지 확인
+- 병합 저장 상태 단위 테스트: 저장 후 outputPath, clean snapshot, 저장 대상 파일 버전, 백업 경로 포함 완료 메시지 확인
+- 병합 결과 draft 복구 단위 테스트: opt-in 저장소에 result draft와 경로/버전 metadata만 저장, 원본 파일 내용 별도 저장 없음, 입력 파일 version 불일치 거절, oversized draft 거절, 최대 10개 유지, draft 삭제 확인
+- 병합 저장 precondition 단위 테스트: 현재 outputPath 재저장, 입력 파일 덮어쓰기, baseline 없는 Save As 경로 구분 확인
+- 2-way 파일 저장 상태 단위 테스트: 현재 편집 대상 저장 precondition, 반대편 입력 경로 덮어쓰기 guard, 임의 Save As 경로, 왼쪽/오른쪽 저장 후 path/name/encoding/line ending/final newline/size/mtime 갱신 확인
+- 2-way 미저장 변경 단위 테스트: 저장 스냅샷 기준 dirty 판단과 compare 전용 이탈 경고 메시지 확인
+- 미저장 beforeunload guard 단위 테스트: clean 상태에서는 browser close 이벤트를 건드리지 않고, dirty compare/merge 메시지는 `preventDefault`와 빈 `returnValue`로 닫기 방지 처리하는지 확인
+- 2-way diff report 단위 테스트: unified-style plain text report, 현재 비교 옵션 반영, CRLF metadata, no-final-newline marker, 기본 `.diff.txt` 저장 경로 생성 확인
+- CLI 시작 인자 단위 테스트: `forktail left right`, `--compare`, `--folders`, `--merge base ours theirs [output]`, Git mergetool `%O %A %B %P` 순서의 `--mergetool`, `--` separator, 경로 인자 공백 보존, 잘못된 인자 안내 확인
+- Tauri startup command 계약 테스트: frontend bridge `startup_args` invoke, Rust command module, invoke handler wiring이 같은 command 이름을 쓰는지 확인
+- native reveal command 계약 테스트: frontend bridge `reveal_path` invoke, Rust command module, invoke handler wiring, `symlink_metadata` 기반 존재 확인, shell string 미사용, broad opener/shell plugin 미사용 확인
+- 2-way hunk copy 단위 테스트: 변경 line 교체, modified-only insertion 제거, original-only deletion 복원, trailing newline 없는 target 보존, reverse 방향 core 적용 확인
+- 2-way Drag & Drop 단위 테스트: Tauri file path 추출, `file://` URI fallback, 경로 없는 브라우저 File 거절, 시작 화면 2파일 개수 검증, 한쪽 pane 1파일 개수 검증 확인
+- 최근 세션 저장 단위 테스트: 경로·옵션·timestamp만 저장, 최대 20개, 중복 갱신, 특정 항목 제거, 깨진 storage 값 sanitize 확인
+- 마지막 화면 자동 복원 단위 테스트: active session에 경로·옵션만 저장하고 파일 내용/draft text는 저장하지 않으며, clear와 malformed 값 sanitize 확인
+- 홈 화면 최근 세션 실패 처리 렌더 테스트: 실패한 최근 항목 안내와 `이 항목 제거` 버튼 표시, 이미 제거된 항목에는 stale 안내를 표시하지 않는지 확인
+- 설정 저장 단위 테스트: 2-way 비교 옵션과 공백 표시 옵션, 폴더 스캔 기본 옵션, 병합 auto-advance와 draft 복구 opt-in 설정, appearance theme 설정 sanitize와 persistence 확인
+- 브라우저 설정 확인: 2-way 줄바꿈 옵션, 2-way 공백 표시 옵션, 병합 `해결 후 다음`, 라이트 테마 선택이 reload 또는 화면 재진입 뒤 복원되는지 확인
+- 브라우저 2-way 좌우 교환 확인: `좌우 교환` 버튼으로 LEFT/RIGHT 파일명이 뒤집히고, `Control+Shift+X` 단축키로 다시 원래 순서로 돌아오는지 확인
+- 브라우저 2-way 경로 복사 확인: LEFT/RIGHT heading에 `경로 복사` 버튼 2개 표시, 인앱 브라우저 권한 거절 시 전체 fallback 경로 표시와 콘솔 error 0개 확인
+- 브라우저 3-way 경로 복사 확인: BASE/OURS/THEIRS heading에 `경로 복사` 버튼 3개 표시, 인앱 브라우저 권한 거절 시 fallback 경로 `demo/base.ts` 표시와 콘솔 error 0개 확인
+- 브라우저 폴더 검색 확인: 폴더 데모에서 `Control+F`가 `경로 필터` 입력에 포커스를 주고, `src` 검색 시 `src/App.tsx` 한 행만 표시되며, Escape로 필터가 초기화되는지 확인
+- 브라우저 테마 확인: 라이트 모드 2-way 데모에서 Monaco `vs`, 다크 모드 3-way 데모에서 Monaco `vs-dark` 렌더링 확인
+- 브라우저 오류 확인: 2-way 데모와 3-way 데모 콘솔 error 0개
+- 브라우저 실행 상태 확인: `http://127.0.0.1:1420/`에서 document title과 H1이 `forktail`, 시작 액션 3개, 2-way 데모 heading 2개와 경로 복사 버튼 2개, 3-way 데모 source heading 3개, 경로 복사 버튼 3개, conflict count `1 / 2 충돌`, resolution 버튼 4개, 콘솔 error 0개 확인
+- 브라우저 접근성 속성 확인: 홈 시작 버튼, 2-way diff/swap 버튼, 3-way conflict/save/resolution 버튼의 `aria-keyshortcuts`, 2-way diff count와 3-way conflict count `aria-live=polite`, source/result editor region label, 콘솔 error 0개 확인
+- 브라우저 command registry 확인: 홈 open shortcuts, 2-way swap/F7/save shortcuts, 폴더 `Control+F Meta+F` 검색 shortcut, 3-way conflict/undo/redo/save/resolution shortcuts가 registry 값으로 렌더링되고 콘솔 error 0개 확인
+- 브라우저 CSP 설정 회귀 확인: CSP config 변경 뒤 브라우저 미리보기 홈 화면이 `forktail` H1과 시작 action 3개를 렌더링하고 콘솔 error 0개 확인
+- CSS reduced motion 확인: `prefers-reduced-motion: reduce`에서 busy-bar animation 제거 규칙 확인
+- CI gate 정의 확인: `.github/workflows/ci.yml`이 pull_request와 main push에서 frontend `npm ci`/`npm run typecheck`/`npm test`/`npm run build`, Rust `cargo fmt --check`/`cargo clippy --all-targets -- -D warnings`/`cargo test`를 artifact 업로드 없이 실행하도록 구성되어 있음을 확인
+- 실행 준비 진단 소스 보강: `npm run doctor`를 추가해 Node.js/npm/Rust/cargo/rustfmt/cargo clippy/Tauri CLI 실행 상태를 설치 없이 점검하고, 누락 시 `npm run check`와 `npm run tauri dev` 전에 필요한 도구를 명확히 안내하도록 함
+- CI branch gate 소스 보강: frontend/Rust job timeout을 추가하고, PR 검증 workflow가 artifact/release 없이 `npm ci`/typecheck/test/build와 Rust fmt/clippy/test만 실행하는지 고정하는 회귀 테스트 추가
+- Native menu 소스 보강: Tauri `File`/`Edit`/`Navigate`/`Merge` menu scaffold, command id 기반 menu event emit, 프런트엔드 `forktail-command` dispatch bridge, 화면별 command event handler를 추가함. Rust 컴파일은 통과했고 실제 OS menu 클릭 smoke는 아직 수동 확인이 필요함
+- Rust 오류 계약 소스 보강: `AppErrorCode` 모든 variant가 안정된 SCREAMING_SNAKE_CASE 문자열로 직렬화되는지 확인하는 Rust 테스트를 추가했고 `cargo test`에서 통과함
+- 브라우저 2-way 편집 확인: 편집 대상 `읽기 전용`/`왼쪽`/`오른쪽` 선택, 저장/다른 이름 저장 버튼 상태, 저장 관련 `aria-keyshortcuts`, dirty 상태 표시, dirty 시 좌우 교환 비활성화, 이탈 확인 모달의 계속 편집/버리고 이동 분기, 버린 편집 내용이 같은 model path 재오픈 뒤 남지 않는지 확인, 콘솔 error 0개
+- 브라우저 2-way 편집 표시 확인: 읽기 전용 상태에는 `EDITING` 표시가 없고, 오른쪽 편집에서는 RIGHT pane heading과 오른쪽 status bar, 왼쪽 편집에서는 LEFT pane heading과 왼쪽 status bar에 `EDITING`이 표시되며 콘솔 error 0개
+- 브라우저 2-way hunk copy 확인: 읽기 전용 상태에서 양방향 hunk 적용 잠김, 오른쪽 편집에서 `왼쪽→오른쪽` 활성화와 적용 후 오른쪽 dirty/save/undo 상태 확인, undo 후 clean 상태 복귀, 왼쪽 편집에서 `오른쪽→왼쪽` 활성화와 적용 후 LEFT `EDITING`/`DIRTY`/save/undo 상태 확인, 콘솔 error 0개
+- 브라우저 3-way draft 복구 확인: `draft 복구` opt-in을 켠 뒤 OURS 채택으로 dirty result draft 생성, 새 탭에서 같은 3-way 데모를 열었을 때 복구 banner와 `draft 복구`/`삭제` 버튼 표시, 복구 후 banner 제거·`저장 안 됨`·저장 버튼 활성화·성공 toast·콘솔 error 0개 확인
+- 브라우저 마지막 화면 자동 복원 확인: 3-way 데모 진입 후 reload했을 때 홈이 아니라 BASE/RESULT와 `1 / 2 충돌`이 있는 merge 화면으로 복원되고 콘솔 error 0개 확인
+- 브라우저 3-way 접근성 회귀 확인: reload 뒤 복원된 merge 화면에서 병합 결과 저장 상태 `aria-label` 유지와 콘솔 error 0개 확인
+- 브라우저 Monaco lazy loading 회귀 확인: 홈에서 2-way 데모로 진입한 뒤 diff editor가 `calculateTotal` 내용을 렌더링하고 편집 대상 select와 변경 count가 유지되며 콘솔 error 0개 확인
+- 브라우저 focus-visible CSS 회귀 확인: `http://127.0.0.1:1420/` 새로고침 뒤 dark/light focus token, control `:focus-visible` rule, folder row focus rule이 로드되고 콘솔 error 0개 확인
+- 브라우저 Drag & Drop 화면 회귀 확인: 홈 화면의 시작 액션 3개와 2-way 데모의 LEFT/RIGHT heading이 정상 렌더링되고, 새 드롭 대상 class 변경 뒤에도 diff count와 버튼 상태가 유지되며 콘솔 error 0개
+- 브라우저 2-way diff report 확인: `리포트 저장` 버튼 표시와 활성 상태, 브라우저 환경에서 클릭 시 Tauri 데스크톱 런타임 전용 오류 토스트 표시, 콘솔 error 0개 확인
+- 저장 precondition 소스 보강: `write_text_file_atomic`에 expected size/mtime 인자를 추가하고, 불일치 시 `FILE_CHANGED`로 저장과 백업 생성을 중단하도록 Rust 테스트를 추가했고 `cargo test`에서 통과함
+- 저장 인코딩 경고 소스 보강: `SAV-004` 전까지 UTF-8이 아닌 입력·BOM·디코딩 손실 입력을 저장할 때 2-way/3-way 화면에서 UTF-8 재저장 경고를 표시하도록 추가함
+- 2-way 외부 변경 감지 소스 보강: `stat_text_file_version` Rust command 계약, TS bridge, size/mtime polling, `다시 읽기`/`현재 내용 유지`/`다시 확인` 배너를 추가함. command 컴파일은 통과했고 실제 파일 변경 runtime smoke는 아직 필요함
+- 백업 충돌 방지 소스 보강: 기존 `.bak`을 덮어쓰지 않고 `.bak.1`, `.bak.2` 순서로 빈 백업 경로를 선택하도록 Rust 테스트를 추가했고 `cargo test`에서 통과함
+- 대용량 텍스트 전략 소스 보강: `PERF-003`을 ADR-008로 확정하고, `read_text_file`이 64 MiB 초과 파일을 읽기 전에 `TOO_LARGE`로 거절하는 Rust 테스트를 추가했고 `cargo test`에서 통과함
+- REL-001 아이콘 asset 생성: `src-tauri/app-icon.svg` source에서 Tauri CLI `icon` 명령으로 desktop PNG/ICO/ICNS와 platform icon set을 생성하고, `tauri.conf.json` `bundle.icon`에 desktop icon 목록을 명시함. `sips`로 `icon.png` 512x512, `32x32.png` 32x32, `128x128.png` 128x128, `128x128@2x.png` 256x256 확인, `src-tauri/icons/icon.png` 시각 확인 완료
+- CLI open 소스 보강: `startup_args` Rust command와 frontend startup parser를 추가하고, 앱 부팅 시 CLI 인자가 있으면 저장된 active session보다 우선해 2-way/folder/3-way/mergetool 세션을 여는 경로를 연결함. command 컴파일은 통과했고 실제 packaged binary 인자 전달 smoke는 아직 필요함
+- native reveal 소스 보강: broad opener/shell plugin 없이 `reveal_path` Rust command, frontend bridge, 폴더 상세 패널 Finder/Explorer 버튼을 추가함. macOS `open -R`, Windows `explorer.exe /select`, Linux `xdg-open` 폴더 fallback command builder 테스트는 `cargo test`에서 통과했고 실제 OS 파일 관리자 smoke는 아직 필요함
+- 폴더 expand/collapse 소스 보강: flat scan 결과 위에서 directory row의 relative path prefix를 기준으로 descendants를 숨기는 UI 상태와 demo directory row를 추가함
+- SEC-003 직접 JS dependency policy 소스 보강: 직접 npm dependency/devDependency의 lockfile 고정과 설치된 package metadata license allowlist를 네트워크 없는 Vitest 회귀 테스트로 추가함. 전체 transitive SBOM/NOTICE와 npm/Rust advisory triage는 공개 릴리스 전 별도 도구 검토가 필요함
+- SEC-004 악성 입력 소스 보강: marker flood, 제어문자 diff report, malformed/non-file drop URI에 대한 네트워크 없는 순수 core 회귀 테스트를 추가함
+- FOL-005 portable path conflict 소스 보강: 폴더 scan 결과에서 case-only/Unicode normalization-only 상대 경로 충돌을 감지하고 폴더 화면에 포터블 경로 경고를 표시하도록 추가함. 실제 OS별 파일시스템 fixture와 Rust scan 동작 검증은 Rust/Tauri 환경에서 추가 확인 필요
+- FOL-011 copy/sync dry-run 소스 보강: 폴더 scan 결과에서 좌→우/우→좌 복사·폴더 생성·덮어쓰기·차단 계획을 생성하고, 실제 파일 변경 없이 UI에 요약만 표시하도록 추가함. `..`/절대 경로/drive path/빈 segment는 root escape 위험으로 차단한다. 실제 적용 기능은 별도 확인/저장 안전성 검증 뒤에만 추가한다
+- UX-002 beforeunload guard 소스 보강: App의 browser close 이벤트 처리를 순수 guard 함수로 분리하고 dirty compare/merge 상태의 닫기 방지 회귀 테스트를 추가함
+- MRG-011 merge parser benchmark 소스 보강: 30-conflict benchmark fixture와 반복 conflict parser benchmark helper/test를 추가함. 실제 Rust `diffy` merge latency baseline은 Rust/Tauri 환경에서 별도로 측정해야 함
+- 네트워크/AI 정책 소스 보강: Phase 1 런타임 source와 dependency manifest에서 network API, telemetry/updater dependency, AI SDK/API key 경로를 차단하는 회귀 테스트를 추가함
+- privacy/logging policy 소스 보강: Phase 1 런타임 source와 dependency manifest에서 ad hoc logging/crash-reporting dependency를 차단하는 회귀 테스트 추가
+- TXT-001/FND-002 오류 UX 소스 보강: raw OS/stack-shaped debug 문자열이 UI toast에 그대로 노출되지 않도록 `errorMessage` fallback을 추가하고, 안정 error code별 행동 가능한 기본 안내를 추가함
+- 브라우저 폴더 확인: 폴더 데모 table 렌더링, `aria-rowcount`, 선택 row, ArrowDown 이동, footer 선택 상태, 평상시 scan progress 미표시, 콘솔 error 0개 확인
+- 브라우저 폴더 옵션 확인: 폴더 데모에서 비교 방식을 `전체 해시`로 변경하고 hidden/gitignore/symlink 옵션을 켰을 때 옵션 상태와 목록이 유지되며 콘솔 error 0개 확인
+- 브라우저 폴더 상세 패널 확인: Space로 선택 항목 세부 정보 패널 열기, 양쪽 일반 파일의 `2-way 비교` 활성화, 형식 충돌 항목의 비교 버튼 비활성화와 안내 문구 확인
+- 브라우저 폴더 경로 복사 확인: 상세 패널의 왼쪽/오른쪽 경로 복사 버튼과 경로 표시 확인. 인앱 브라우저 권한 정책으로 실제 클립보드 쓰기는 거절되어, 실패 시 아래 경로를 선택해 복사하라는 안내가 표시되는지 확인
+- 브라우저 스크린샷: `/private/tmp/forktail-unsaved-modal.png`, `/private/tmp/forktail-unresolved-save-modal.png`, `/private/tmp/forktail-running-3way.png`, `/private/tmp/forktail-2way-edit-mode.png`, `/private/tmp/forktail-2way-report-export.png`, `/private/tmp/forktail-folder-options.png`, `/private/tmp/forktail-2way-hunk-copy.png`, `/private/tmp/forktail-2way-bidirectional-hunk-copy.png`, `/private/tmp/forktail-merge-draft-recovery.png`, `/private/tmp/forktail-active-session-restore.png`, `/private/tmp/forktail-lazy-monaco-2way.png`
+
+## 관찰된 경고
+
+- Monaco editor 본체와 TypeScript/CSS/HTML worker asset은 여전히 크지만 lazy chunk와 별도 worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.
+- 남은 최적화는 `PERF-002` 후속으로 언어/worker on-demand loading과 worker 크기 정책을 더 줄이는 작업이다.
+- `npm ci`의 audit 요약은 low 1건, moderate 1건을 보고했다. 자동 수정은 적용하지 않았고 `SEC-003`에서 영향과 대안을 검토한다.
+- 로컬 npm 캐시 권한 문제를 피하기 위해 작업공간 내부 `.npm-cache`를 사용했다. 이 디렉터리는 `.gitignore`에 포함한다.
+- 브라우저 자동화에서 Meta/Ctrl+S는 브라우저 자체 저장 단축키와 충돌할 수 있어 직접 검증하지 않았다. 앱 코드의 저장 단축키 경로는 TypeScript build 범위에서 검증했다.
+- `npm run tauri dev -- --no-watch --no-dev-server-wait`는 sandbox 안에서 처음 실행했을 때 Vite dev server의 `::1:1420` listen이 `EPERM`으로 막혔다. 로컬 포트 바인딩과 데스크톱 앱 실행을 위해 권한 상승으로 재실행했고, Vite dev server와 `target/debug/forktail` 실행까지 확인했다.
+- DMG bundling은 `REL-003` 후속으로 남겼다. 이전 `targets: all` 설정에서는 release binary와 macOS `.app` 생성 뒤 DMG 단계에서 `bundle_dmg.sh` 실패가 관찰되어, Phase 1 기본 bundle target을 `app`으로 제한했다.
+
+## 이 실행 환경에서 미검증
+
+다음 검증은 아직 남아 있다.
+
+- DMG 생성은 `REL-003` 후속이다. 현재 기본 `npm run tauri build`는 macOS `.app` bundle까지만 만든다.
+- `FOL-004` hidden/gitignore/symlink/compare mode 옵션의 실제 Rust traversal 반영은 command 컴파일과 TS 옵션 계약까지 확인했다. 실제 폴더 fixture를 Tauri runtime에서 열어보는 OS smoke는 아직 필요하다.
+- GitHub Actions hosted runner에서 `.github/workflows/ci.yml`을 실제로 실행하지는 않았다. Rust/Linux dependency 설치와 CI cache 동작은 첫 PR에서 확인해야 한다.
+- FND-005 Native menu는 Rust source와 프런트엔드 event bridge, 컴파일까지 확인했다. 실제 OS menu 항목 클릭이 `forktail-menu-command` 이벤트를 보내고 현재 화면 command로 동작하는지는 수동 smoke가 필요하다.
+- `SEC-001` release CSP와 dev CSP를 설정하고 TS config 테스트를 추가했지만, 실제 packaged release WebView에서 Monaco local worker와 IPC가 release CSP 아래 정상 동작하는지는 `npm run tauri build` 뒤 확인해야 한다.
+- `SEC-002` capability 최소화는 config/dependency 단위 테스트와 dev compile로 확인했지만, 실제 generated permission schema와 OS별 권한 적용은 릴리스 build 환경에서 확인해야 한다.
+- `TXT-005` 2-way 외부 변경 감지용 `stat_text_file_version` command는 컴파일됐다. 실제 외부 editor로 파일을 변경한 뒤 banner 동작을 보는 smoke는 아직 필요하다.
+- `REL-001` 이름·bundle id·copyright·icon asset은 source/test와 macOS `.app` `Info.plist`로 확인했다. DMG metadata는 `REL-003`에서 확인한다.
+- `TXT-010` diff report 실제 파일 저장은 Tauri file dialog와 `write_text_file_atomic` runtime이 필요해 브라우저에서 버튼/오류 경로와 순수 report 생성까지만 확인했다.
+- `TXT-007` 양방향 hunk copy는 브라우저에서 좌/우 편집 대상 전환, `왼쪽→오른쪽`/`오른쪽→왼쪽` 적용, 마지막 적용 undo, dirty/save 상태까지 확인했다. 실제 Tauri file dialog를 통한 좌/우 Save/Save As 파일 쓰기는 Rust/Tauri runtime에서 추가 smoke가 필요하다.
+- `TXT-008` Drag & Drop은 브라우저 자동화가 OS 파일 경로를 담은 실제 file-drop 이벤트를 만들 수 없어 순수 경로 추출/개수 검증과 화면 회귀까지만 확인했다. 실제 Tauri WebView에서 파일 2개 drop 및 한쪽 pane 1파일 drop으로 `read_text_file` command가 호출되는지는 `npm run tauri dev`에서 수동/자동 smoke가 필요하다.
+- `TXT-009`/`MRG-009` CLI open은 parser와 Tauri command wiring만 확인했다. 실제 `forktail left right`, `forktail --merge ...`, Git mergetool `%O %A %B %P` 인자 전달과 exit code 계약은 packaged binary와 Tauri runtime에서 smoke가 필요하다.
+- `UX-006` native reveal은 source/contract test로만 확인했다. 실제 Finder/Explorer/file manager가 선택 항목 또는 폴더를 여는지는 `npm run tauri dev` 가능한 OS별 환경에서 smoke가 필요하다.
+- `MRG-010` opt-in draft recovery는 브라우저 localStorage와 새 탭 재진입으로 확인했다. 실제 데스크톱 앱 crash 후 WebView storage 유지, 큰 draft 한도 안내, OS별 storage persistence는 `npm run tauri dev` 환경에서 추가 smoke가 필요하다.
+- 마지막 화면 자동 복원은 브라우저 데모 세션 reload와 active session 저장소 단위 테스트로 확인했다. 실제 사용자 파일 경로의 자동 재열기와 폴더 rescan은 Tauri runtime에서 `read_text_file`/`scan_directories`를 통한 추가 smoke가 필요하다.
+- Linux Tauri용 WebKitGTK 4.1 개발 패키지는 macOS 로컬 실행에서는 해당 없음. Linux CI/스모크에서 별도 확인한다.
+
+따라서 현재 macOS 개발 환경에서는 frontend/Rust/Tauri dev compile까지 확인됐다. 남은 항목은 릴리스 build, 세 OS 패키징, 실제 파일 dialog/native menu/reveal/CLI/저장 smoke다.
+
+## 첫 로컬 검증 순서
+
+```bash
+npm ci
+npm run doctor
+npm run check
+npm run tauri dev
+
+cd src-tauri
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
+
+세 운영체제 결과는 `FND-001` 이슈 또는 PR 본문에 각각 기록한다.

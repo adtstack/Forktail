@@ -1,0 +1,9 @@
+forktail includes or links to third-party open-source software.
+
+Key dependencies:
+- Tauri: MIT OR Apache-2.0
+- Monaco Editor: MIT
+- diffy: MIT OR Apache-2.0
+
+Before a public release, generate and ship a complete dependency notice using
+cargo-about (Rust) and a JavaScript license checker. See docs/09_RELEASE_SECURITY.md.

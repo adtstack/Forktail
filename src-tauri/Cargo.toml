@@ -1,0 +1,29 @@
+[package]
+name = "forktail"
+version = "0.1.0"
+description = "Local-first text, folder, and three-way comparison tool"
+authors = ["forktail contributors"]
+license = "MIT"
+repository = ""
+edition = "2024"
+rust-version = "1.85"
+
+[lib]
+name = "forktail_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+blake3 = "1"
+chardetng = "0.1"
+diffy = { version = "0.5", features = ["std"] }
+encoding_rs = "0.8"
+ignore = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
+tauri-plugin-dialog = "2"
+tempfile = "3"
+thiserror = "2"

@@ -1,0 +1,42 @@
+name: Implementation task
+about: One issue-sized feature or improvement
+labels: [implementation]
+body:
+  - type: input
+    id: issue-id
+    attributes:
+      label: Backlog ID
+      placeholder: MRG-003
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem or engineering risk does this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - [ ] ...
+        - [ ] ...
+    validations:
+      required: true
+  - type: textarea
+    id: edge-cases
+    attributes:
+      label: Edge and failure cases
+      placeholder: Encoding, EOL, permissions, cancellation, Windows/macOS/Linux...
+  - type: textarea
+    id: tests
+    attributes:
+      label: Required tests
+    validations:
+      required: true
+  - type: textarea
+    id: out-of-scope
+    attributes:
+      label: Explicitly out of scope
