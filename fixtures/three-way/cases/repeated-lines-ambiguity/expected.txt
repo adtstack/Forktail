@@ -1,0 +1,11 @@
+item
+same
+<<<<<<< ours
+OURS
+||||||| original
+item
+=======
+THEIRS
+>>>>>>> theirs
+same
+tail

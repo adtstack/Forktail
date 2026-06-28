@@ -543,6 +543,15 @@ describe("folderVirtualRange", () => {
     });
   });
 
+  it("limits the rendered row window for 100k results", () => {
+    const range = folderVirtualRange(100_000, 850_000, 680, 34, 8);
+
+    expect(range.end - range.start).toBeLessThanOrEqual(36);
+    expect(range.totalHeight).toBe(3_400_000);
+    expect(range.beforeHeight).toBeGreaterThan(0);
+    expect(range.afterHeight).toBeGreaterThan(0);
+  });
+
   it("keeps small lists fully rendered", () => {
     expect(folderVirtualRange(5, 0, 340, 34, 8)).toEqual({
       start: 0,

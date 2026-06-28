@@ -5,6 +5,7 @@ import {
   compareSaveStateAfterSideWrite,
   compareSaveStateAfterWrite,
   fileDocumentWithText,
+  preservedSaveEncodingForDocument,
   saveEncodingWarningForDocument,
   writePreconditionFromDocument,
 } from "./compareSave";
@@ -129,6 +130,50 @@ describe("compareSaveStateAfterWrite", () => {
       message: "저장 완료",
     });
   });
+
+  it("keeps a supported original save encoding after write", () => {
+    const session = {
+      ...compareSession(),
+      right: {
+        ...compareSession().right,
+        encoding: "UTF-16LE BOM",
+      },
+    };
+
+    expect(
+      compareSaveStateAfterWrite(session, "new right\n", {
+        path: "/repo/right.txt",
+        backupPath: null,
+        size: 22,
+        modifiedMs: 6000,
+      }).session.right,
+    ).toMatchObject({
+      text: "new right\n",
+      encoding: "UTF-16LE BOM",
+      size: 22,
+      modifiedMs: 6000,
+      decodeHadErrors: false,
+    });
+  });
+
+  it("records UTF-8 metadata when an unsupported source encoding is converted", () => {
+    const session = {
+      ...compareSession(),
+      right: {
+        ...compareSession().right,
+        encoding: "windows-1252",
+      },
+    };
+
+    expect(
+      compareSaveStateAfterWrite(session, "café\n", {
+        path: "/repo/right.txt",
+        backupPath: null,
+        size: 6,
+        modifiedMs: 7000,
+      }).session.right.encoding,
+    ).toBe("UTF-8");
+  });
 });
 
 describe("fileDocumentWithText", () => {
@@ -147,12 +192,33 @@ describe("saveEncodingWarningForDocument", () => {
     expect(saveEncodingWarningForDocument(document("/repo/right.txt", "right\n"))).toBeNull();
   });
 
-  it("warns when the current save path would rewrite a non-UTF-8 document as UTF-8", () => {
+  it("does not warn when the current save path can preserve a supported BOM encoding", () => {
     expect(
       saveEncodingWarningForDocument({
         ...document("/repo/legacy.txt", "hello\n"),
         encoding: "UTF-16LE BOM",
       }),
+    ).toBeNull();
+  });
+
+  it("warns when the current save path would rewrite an unsupported encoding as UTF-8", () => {
+    expect(
+      saveEncodingWarningForDocument({
+        ...document("/repo/legacy.txt", "hello\n"),
+        encoding: "windows-1252",
+      }),
+    ).toContain("UTF-8로 기록");
+  });
+
+  it("warns when a UTF-8 output save cannot preserve a source BOM encoding", () => {
+    expect(
+      saveEncodingWarningForDocument(
+        {
+          ...document("/repo/bom.txt", "hello\n"),
+          encoding: "UTF-8 BOM",
+        },
+        "utf8",
+      ),
     ).toContain("UTF-8로 기록");
   });
 
@@ -173,7 +239,7 @@ describe("compareSaveEncodingWarnings", () => {
       ...session,
       left: {
         ...session.left,
-        encoding: "UTF-8 BOM",
+        encoding: "windows-1252",
       },
       right: {
         ...session.right,
@@ -185,6 +251,14 @@ describe("compareSaveEncodingWarnings", () => {
       { side: "left", label: "왼쪽" },
       { side: "right", label: "오른쪽" },
     ]);
+  });
+});
+
+describe("preservedSaveEncodingForDocument", () => {
+  it("normalizes supported save encodings and falls back to UTF-8 for unsupported encodings", () => {
+    expect(preservedSaveEncodingForDocument({ encoding: "utf-8 bom" })).toBe("UTF-8 BOM");
+    expect(preservedSaveEncodingForDocument({ encoding: "UTF-16BE BOM" })).toBe("UTF-16BE BOM");
+    expect(preservedSaveEncodingForDocument({ encoding: "windows-1252" })).toBe("UTF-8");
   });
 });
 

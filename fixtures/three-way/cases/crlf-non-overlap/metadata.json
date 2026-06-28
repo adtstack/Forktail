@@ -1,0 +1,9 @@
+{
+  "id": "crlf-non-overlap",
+  "categories": [
+    "crlf",
+    "non-overlapping-modify"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

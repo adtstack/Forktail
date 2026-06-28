@@ -1,0 +1,9 @@
+{
+  "id": "both-same-delete",
+  "categories": [
+    "delete",
+    "delete-vs-untouched"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

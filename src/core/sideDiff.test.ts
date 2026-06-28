@@ -45,4 +45,11 @@ describe("buildSideDiff", () => {
       { kind: "equal", text: "이름\n" },
     ]);
   });
+
+  it("marks deleted text as removed and renders an empty changed side", () => {
+    expect(buildSideDiff("remove me\n", "")).toEqual({
+      base: [{ kind: "removed", text: "remove me\n" }],
+      changed: [],
+    });
+  });
 });

@@ -44,7 +44,7 @@ Electron fallback은 실제 WebView 호환성 문제가 제품을 막는다는 �
 ### Consequences
 
 - 초기 기능 구현이 빠르다.
-- bundle과 TypeScript worker가 크다.
+- editor 본체와 기본 worker는 lazy chunk로 유지하고, 언어 tokenizer와 language service worker는 감지된 언어가 필요할 때 동적으로 로드해야 한다.
 - 세 pane 3-way UI는 직접 조합해야 한다.
 - bundle split/lazy language load가 필요하다.
 

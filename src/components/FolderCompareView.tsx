@@ -400,7 +400,7 @@ export function FolderCompareView({
             <strong>{scanProgress.active ? "스캔 중" : "스캔 취소됨"}</strong>
             <span>{scanProgress.message}</span>
             <small>
-              {scanProgress.leftRoot} ↔ {scanProgress.rightRoot}
+              작업 #{scanProgress.jobId} · {scanProgress.leftRoot} ↔ {scanProgress.rightRoot}
             </small>
           </div>
           {scanProgress.active && (

@@ -162,6 +162,7 @@ describe("FolderCompareView", () => {
 
   it("renders cancellable scan progress with the scanned roots", () => {
     const markup = renderFolderView({
+      jobId: 1,
       active: true,
       leftRoot: "/left/root",
       rightRoot: "/right/root",
@@ -169,6 +170,7 @@ describe("FolderCompareView", () => {
     });
 
     expect(markup).toContain("스캔 중");
+    expect(markup).toContain("작업 #1");
     expect(markup).toContain("<button type=\"button\">스캔 취소</button>");
     expect(markup).toContain("/left/root");
     expect(markup).toContain("/right/root");
@@ -176,6 +178,7 @@ describe("FolderCompareView", () => {
 
   it("keeps cancelled scan guidance without offering another cancel action", () => {
     const markup = renderFolderView({
+      jobId: 1,
       active: false,
       leftRoot: "/left/root",
       rightRoot: "/right/root",

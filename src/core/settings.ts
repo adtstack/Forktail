@@ -11,6 +11,10 @@ import {
   type TextDiffOptions,
   type WhitespaceCompareMode,
 } from "./diffOptions";
+import {
+  SAVE_LINE_ENDING_MODES,
+  type SaveLineEndingMode,
+} from "./lineEndings";
 import type { FolderCompareMode, FolderScanOptions } from "./models";
 
 const COMPARE_VIEW_SETTINGS_KEY = "forktail.compare-view.v1";
@@ -35,6 +39,7 @@ export interface AppearanceSettings {
 export interface CompareViewSettings {
   diffOptions: TextDiffOptions;
   renderWhitespace: "selection" | "all";
+  saveLineEnding: SaveLineEndingMode;
   sideBySide: boolean;
   wordWrap: "off" | "on";
   wrapAround: boolean;
@@ -48,6 +53,7 @@ export interface FolderViewSettings {
 export interface MergeSettings {
   autoAdvanceConflict: boolean;
   recoveryDraftsEnabled: boolean;
+  saveLineEnding: SaveLineEndingMode;
 }
 
 export type RecentSession = RecentCompareSession | RecentFolderSession | RecentMergeSession;
@@ -103,6 +109,7 @@ export const DEFAULT_FOLDER_SCAN_OPTIONS: FolderScanOptions = {
 export const DEFAULT_COMPARE_VIEW_SETTINGS: CompareViewSettings = {
   diffOptions: DEFAULT_TEXT_DIFF_OPTIONS,
   renderWhitespace: "selection",
+  saveLineEnding: "original",
   sideBySide: true,
   wordWrap: "off",
   wrapAround: true,
@@ -111,6 +118,7 @@ export const DEFAULT_COMPARE_VIEW_SETTINGS: CompareViewSettings = {
 export const DEFAULT_MERGE_SETTINGS: MergeSettings = {
   autoAdvanceConflict: true,
   recoveryDraftsEnabled: false,
+  saveLineEnding: "original",
 };
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
@@ -308,6 +316,9 @@ export function sanitizeCompareViewSettings(value: unknown): CompareViewSettings
   return {
     diffOptions: sanitizeTextDiffOptions(value.diffOptions),
     renderWhitespace: value.renderWhitespace === "all" ? "all" : "selection",
+    saveLineEnding: SAVE_LINE_ENDING_MODES.includes(value.saveLineEnding as SaveLineEndingMode)
+      ? (value.saveLineEnding as SaveLineEndingMode)
+      : DEFAULT_COMPARE_VIEW_SETTINGS.saveLineEnding,
     sideBySide: typeof value.sideBySide === "boolean"
       ? value.sideBySide
       : DEFAULT_COMPARE_VIEW_SETTINGS.sideBySide,
@@ -328,6 +339,9 @@ export function sanitizeMergeSettings(value: unknown): MergeSettings {
     recoveryDraftsEnabled: typeof value.recoveryDraftsEnabled === "boolean"
       ? value.recoveryDraftsEnabled
       : DEFAULT_MERGE_SETTINGS.recoveryDraftsEnabled,
+    saveLineEnding: SAVE_LINE_ENDING_MODES.includes(value.saveLineEnding as SaveLineEndingMode)
+      ? (value.saveLineEnding as SaveLineEndingMode)
+      : DEFAULT_MERGE_SETTINGS.saveLineEnding,
   };
 }
 

@@ -13,8 +13,11 @@ pub fn run() {
         .on_menu_event(menu::handle_menu_event)
         .invoke_handler(tauri::generate_handler![
             files::read_text_file,
+            files::list_file_backups,
+            files::restore_text_file_backup,
             files::stat_text_file_version,
             files::write_text_file_atomic,
+            folders::cancel_folder_scan,
             folders::scan_directories,
             merge::merge_texts,
             startup::startup_args,

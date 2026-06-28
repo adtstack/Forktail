@@ -23,6 +23,15 @@ pub struct FileVersion {
     pub modified_ms: Option<u64>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileBackup {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub modified_ms: Option<u64>,
+}
+
 #[derive(Debug, Clone, Copy, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LineEnding {

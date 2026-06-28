@@ -42,6 +42,13 @@ export interface FileVersion {
   modifiedMs: number | null;
 }
 
+export interface FileBackup {
+  path: string;
+  name: string;
+  size: number;
+  modifiedMs: number | null;
+}
+
 export type FolderCompareMode = "metadata" | "quickHash" | "fullHash";
 export type FolderEntryStatus =
   | "same"
@@ -93,6 +100,7 @@ export interface FolderScanResult {
 }
 
 export interface FolderScanProgress {
+  jobId: number;
   active: boolean;
   leftRoot: string;
   rightRoot: string;

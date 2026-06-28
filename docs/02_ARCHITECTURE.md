@@ -132,7 +132,14 @@ interface MergeResult {
 2. BOM이 없고 NUL이 탐지되면 binary로 분류한다.
 3. 나머지는 detector 결과로 디코딩한다.
 4. replacement가 발생하면 `decodeHadErrors`를 표시한다.
-5. 저장 인코딩 보존은 별도 이슈 `SAV-004`에서 구현한다. 현재 스타터는 UTF-8로 쓰며, UTF-8이 아닌 입력·BOM·디코딩 손실이 있는 입력은 2-way/3-way 저장 화면에서 경고한다.
+5. 2-way 단일 파일 저장은 원본 메타데이터 기준으로 UTF-8, UTF-8 BOM, UTF-16LE BOM, UTF-16BE BOM을 보존한다. 병합 결과·diff 리포트와 legacy 추정 인코딩은 UTF-8로 기록하며 저장 화면에서 경고한다.
+
+### 저장 줄끝 정책
+
+1. 기본 `original` 저장은 원본이 LF/CRLF/CR 중 하나로 일관되면 해당 줄끝으로 저장 직전에 정규화한다.
+2. 원본이 `mixed` 또는 `none`이면 `original` 저장은 현재 편집 텍스트의 줄끝을 그대로 보존한다.
+3. 사용자가 `system`, `LF`, `CRLF`를 선택하면 저장 직전에 모든 줄끝을 선택한 정책으로 변환한다.
+4. 3-way 병합 결과의 `original` 기준은 OURS 파일의 줄끝 메타데이터다.
 
 ## 6. 폴더 비교 알고리즘
 
@@ -174,6 +181,12 @@ finish event -> stats
 
 UI는 batch를 누적하고 가상화한다.
 
+현재 구현은 `scan_directories(..., jobId)`와 `cancel_folder_scan(jobId)`로 job id 기반 취소와 stale result 무시를 제공한다. Rust 스캐너와 hash 루프는 취소 registry를 주기적으로 확인하고 `CANCELLED` 오류로 중단한다. 대량 batch event와 progressive row append는 `FOL-007` 가상화와 함께 확장한다.
+
+해시 비교는 같은 상대 경로의 좌/우 파일을 파일 쌍 단위로 병렬 계산한다. 동시 worker는 파일 쌍당 2개로 제한하며, 각 worker도 같은 job id cancellation check를 공유한다.
+
+해시 결과는 `path + size + modified_ms + hash_mode` 키로 프로세스 내 cache에 저장한다. `QuickHash`와 `FullHash`는 서로 다른 cache key를 사용하므로 비교 옵션 변경 시 잘못 재사용하지 않는다. cache가 4096개를 넘으면 전체를 비워 unbounded memory 증가를 피한다.
+
 ## 7. 3-way merge 흐름
 
 ```text
@@ -189,6 +202,17 @@ base/ours/theirs read
 ```
 
 전체 결과 재파싱은 일반 파일 크기에서 단순하고 정확하다. 성능 문제가 측정되기 전 incremental parser를 만들지 않는다.
+
+### Git mergetool 계약
+
+`forktail --mergetool %O %A %B %P`는 Git의 base/current/other/merged 순서를 앱의 Base/Ours/Theirs/Output으로 매핑한다.
+
+- `%O` → BASE
+- `%A` → OURS
+- `%B` → THEIRS
+- `%P` → output path
+
+Phase 1 GUI는 프로세스 종료 시점과 사용자의 저장 여부를 안정적인 exit code로 전달하지 않는다. Git 설정은 `trustExitCode = false`를 사용하며, Git이 output path의 내용 변경 여부를 기준으로 후속 확인을 수행하게 한다. 저장 자체는 일반 safe save 경로와 같은 precondition/backup/atomic replace 정책을 따른다.
 
 ## 8. 저장 내구성
 
@@ -206,7 +230,11 @@ external modification check
   → fsync parent directory where supported
 ```
 
-현재 스타터는 핵심 흐름을 포함하지만 플랫폼별 완전한 atomic replace와 parent directory sync는 `SAV-003`에서 검증·보강한다.
+### 백업 retention과 복원
+
+저장 대상이 이미 존재하고 `createBackup`이 켜져 있으면 같은 폴더에 `<파일명>.bak.<epoch_ms>` 형식의 백업을 만든다. 같은 millisecond 충돌은 뒤에 숫자 suffix를 붙이며, 기존 legacy `.bak`/`.bak.N` 파일도 목록에는 포함한다. 저장이 성공하면 같은 대상의 백업은 최신 10개만 유지한다.
+
+복원은 `restore_text_file_backup(path, backupPath, precondition)` command를 사용한다. `backupPath`는 같은 폴더의 해당 대상 백업 이름이어야 하며, 복원도 임시 파일 쓰기/flush/fsync/atomic replace 경로를 사용한다. 복원 전 현재 대상 파일도 새 백업으로 남겨서 복원을 되돌릴 수 있게 한다.
 
 ## 9. 보안 경계
 

@@ -1,0 +1,9 @@
+{
+  "id": "both-append-different",
+  "categories": [
+    "insert-same-position-different-text",
+    "insert"
+  ],
+  "clean": false,
+  "conflictCount": 1
+}

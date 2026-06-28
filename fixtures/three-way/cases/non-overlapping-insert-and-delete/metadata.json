@@ -1,0 +1,10 @@
+{
+  "id": "non-overlapping-insert-and-delete",
+  "categories": [
+    "non-overlapping-modify",
+    "insert",
+    "delete"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

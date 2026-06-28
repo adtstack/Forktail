@@ -1,0 +1,8 @@
+{
+  "id": "whitespace-only-conflict",
+  "categories": [
+    "different-overlapping-modify"
+  ],
+  "clean": false,
+  "conflictCount": 1
+}

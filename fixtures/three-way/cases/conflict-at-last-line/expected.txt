@@ -1,0 +1,8 @@
+head
+<<<<<<< ours
+ours last
+||||||| original
+last
+=======
+theirs last
+>>>>>>> theirs

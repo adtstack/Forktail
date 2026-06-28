@@ -1,0 +1,36 @@
+{
+  "issue": "MRG-011",
+  "benchmark": "merge parser",
+  "command": "node scripts/merge-parser-benchmark.mjs",
+  "measuredAt": "2026-06-27",
+  "node": "v24.15.0",
+  "cases": [
+    {
+      "id": "parser-30x3",
+      "conflicts": 30,
+      "linesPerSide": 3,
+      "bytes": 9207,
+      "iterations": 100,
+      "totalMs": 12.347,
+      "averageMs": 0.123
+    },
+    {
+      "id": "parser-100x5",
+      "conflicts": 100,
+      "linesPerSide": 5,
+      "bytes": 45600,
+      "iterations": 50,
+      "totalMs": 17.627,
+      "averageMs": 0.353
+    },
+    {
+      "id": "parser-300x5",
+      "conflicts": 300,
+      "linesPerSide": 5,
+      "bytes": 140400,
+      "iterations": 20,
+      "totalMs": 14.311,
+      "averageMs": 0.716
+    }
+  ]
+}

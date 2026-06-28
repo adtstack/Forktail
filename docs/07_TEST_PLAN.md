@@ -96,6 +96,8 @@ OS 통합, installer, file dialog, native menu, code signing, 외부 editor와 f
 - 잘못된 byte sequence
 - mixed line endings
 - no final newline
+- 저장 EOL original/system/LF/CRLF 변환
+- mixed 입력의 original 저장 보존 정책
 
 각 fixture는 다음을 기록한다.
 
@@ -137,6 +139,8 @@ left/                    right/
 - sparse file
 - copy/sync dry-run: 실제 파일 변경 없이 복사·덮어쓰기·차단 계획만 표시
 - copy/sync dry-run root escape: `..`, 절대 경로, drive path, 빈 segment 차단
+- scan job id 전달, cancel command, 늦게 도착한 결과 무시
+- hash loop 중 cancel 시 `CANCELLED` 오류와 UI 취소 안내
 
 비교 모드별 expected:
 
@@ -208,6 +212,13 @@ fixtures/three-way/<case>/
 - 성공하지 않은 결과를 완료로 보고하지 않는다.
 - temp/backup 잔여 파일 정책이 문서와 일치한다.
 - 재시도 가능하다.
+
+추가 백업 정책 테스트:
+
+- timestamp 백업 이름이 기존 백업을 덮어쓰지 않는다.
+- 같은 대상의 백업 목록은 최신순이며 관련 없는 파일을 포함하지 않는다.
+- 저장 후 retention count를 초과한 오래된 백업이 제거된다.
+- 백업 복원은 현재 target을 다시 백업하고 unrelated backup path를 거절한다.
 
 ## 8. 속성/퍼즈 테스트 후보
 

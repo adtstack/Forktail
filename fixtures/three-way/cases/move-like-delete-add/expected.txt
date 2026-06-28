@@ -1,0 +1,10 @@
+a
+<<<<<<< ours
+||||||| original
+move-me
+=======
+MOVE-ME
+>>>>>>> theirs
+b
+c
+move-me

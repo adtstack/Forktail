@@ -85,6 +85,7 @@ describe("compare view settings", () => {
     const settings: CompareViewSettings = {
       diffOptions: { whitespace: "all", ignoreCase: true, ignoreLineEndings: true },
       renderWhitespace: "all",
+      saveLineEnding: "crlf",
       sideBySide: false,
       wordWrap: "on",
       wrapAround: false,
@@ -103,6 +104,7 @@ describe("compare view settings", () => {
       sanitizeCompareViewSettings({
         diffOptions: { whitespace: "unknown", ignoreCase: "yes" },
         renderWhitespace: "boundary",
+        saveLineEnding: "native",
         sideBySide: "no",
         wordWrap: "on",
         wrapAround: false,
@@ -110,6 +112,7 @@ describe("compare view settings", () => {
     ).toEqual({
       diffOptions: DEFAULT_COMPARE_VIEW_SETTINGS.diffOptions,
       renderWhitespace: "selection",
+      saveLineEnding: "original",
       sideBySide: true,
       wordWrap: "on",
       wrapAround: false,
@@ -207,12 +210,20 @@ describe("merge settings", () => {
 
   it("persists and sanitizes merge settings", () => {
     const storage = new MemoryStorage();
-    const settings: MergeSettings = { autoAdvanceConflict: false, recoveryDraftsEnabled: true };
+    const settings: MergeSettings = {
+      autoAdvanceConflict: false,
+      recoveryDraftsEnabled: true,
+      saveLineEnding: "lf",
+    };
 
     saveMergeSettings(settings, storage);
 
     expect(loadMergeSettings(storage)).toEqual(settings);
-    expect(sanitizeMergeSettings({ autoAdvanceConflict: "yes", recoveryDraftsEnabled: true }))
+    expect(sanitizeMergeSettings({
+      autoAdvanceConflict: "yes",
+      recoveryDraftsEnabled: true,
+      saveLineEnding: "native",
+    }))
       .toEqual({
         ...DEFAULT_MERGE_SETTINGS,
         recoveryDraftsEnabled: true,

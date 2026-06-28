@@ -1,4 +1,4 @@
-use crate::domain::models::{FileDocument, FileVersion, LineEnding, WriteResult};
+use crate::domain::models::{FileBackup, FileDocument, FileVersion, LineEnding, WriteResult};
 use crate::error::{AppErrorCode, CommandError, CommandResult};
 use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
@@ -10,6 +10,7 @@ use tempfile::NamedTempFile;
 
 const MAX_TEXT_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const BINARY_PROBE_BYTES: usize = 16 * 1024;
+const BACKUP_RETENTION_LIMIT: usize = 10;
 
 #[tauri::command]
 pub fn read_text_file(path: String) -> CommandResult<FileDocument> {
@@ -103,12 +104,99 @@ pub fn stat_text_file_version(path: String) -> CommandResult<FileVersion> {
 }
 
 #[tauri::command]
+pub fn list_file_backups(path: String) -> CommandResult<Vec<FileBackup>> {
+    let target = PathBuf::from(&path);
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    if !parent.exists() {
+        return Err(CommandError::new(
+            AppErrorCode::PathConflict,
+            "백업을 찾을 상위 폴더가 존재하지 않습니다.",
+        ));
+    }
+
+    backup_entries(&target)
+}
+
+#[tauri::command]
+pub fn restore_text_file_backup(
+    path: String,
+    backup_path: String,
+    expected_size: Option<u64>,
+    expected_modified_ms: Option<u64>,
+) -> CommandResult<WriteResult> {
+    let target = PathBuf::from(&path);
+    let backup = PathBuf::from(&backup_path);
+    if !is_backup_for_target(&target, &backup) {
+        return Err(CommandError::new(
+            AppErrorCode::PathConflict,
+            "선택한 백업이 이 파일의 백업으로 확인되지 않았습니다.",
+        ));
+    }
+
+    let bytes = fs::read(&backup).map_err(|error| {
+        CommandError::io(
+            AppErrorCode::PathConflict,
+            "백업 파일을 읽지 못했습니다",
+            error,
+        )
+    })?;
+    write_bytes_file_atomic_inner(
+        path,
+        &bytes,
+        true,
+        expected_size,
+        expected_modified_ms,
+        |_| Ok(()),
+    )
+}
+
+#[tauri::command]
 pub fn write_text_file_atomic(
     path: String,
     text: String,
     create_backup: bool,
     expected_size: Option<u64>,
     expected_modified_ms: Option<u64>,
+    encoding: Option<String>,
+) -> CommandResult<WriteResult> {
+    write_text_file_atomic_inner(
+        path,
+        text,
+        create_backup,
+        expected_size,
+        expected_modified_ms,
+        encoding,
+        |_| Ok(()),
+    )
+}
+
+fn write_text_file_atomic_inner(
+    path: String,
+    text: String,
+    create_backup: bool,
+    expected_size: Option<u64>,
+    expected_modified_ms: Option<u64>,
+    encoding: Option<String>,
+    before_step: impl FnMut(SaveStep) -> CommandResult<()>,
+) -> CommandResult<WriteResult> {
+    let encoded_text = encode_text_for_save(&text, encoding.as_deref());
+    write_bytes_file_atomic_inner(
+        path,
+        &encoded_text,
+        create_backup,
+        expected_size,
+        expected_modified_ms,
+        before_step,
+    )
+}
+
+fn write_bytes_file_atomic_inner(
+    path: String,
+    bytes: &[u8],
+    create_backup: bool,
+    expected_size: Option<u64>,
+    expected_modified_ms: Option<u64>,
+    mut before_step: impl FnMut(SaveStep) -> CommandResult<()>,
 ) -> CommandResult<WriteResult> {
     let target = PathBuf::from(&path);
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
@@ -121,20 +209,7 @@ pub fn write_text_file_atomic(
 
     check_write_precondition(&target, expected_size, expected_modified_ms)?;
 
-    let backup_path = if create_backup && target.exists() {
-        let backup = next_backup_path(&target)?;
-        fs::copy(&target, &backup).map_err(|error| {
-            CommandError::io(
-                AppErrorCode::WriteFailed,
-                "백업 파일을 만들지 못했습니다",
-                error,
-            )
-        })?;
-        Some(backup)
-    } else {
-        None
-    };
-
+    before_step(SaveStep::TempCreate)?;
     let mut temporary = NamedTempFile::new_in(parent).map_err(|error| {
         CommandError::io(
             AppErrorCode::WriteFailed,
@@ -144,6 +219,7 @@ pub fn write_text_file_atomic(
     })?;
 
     if let Ok(metadata) = fs::metadata(&target) {
+        before_step(SaveStep::PermissionCopy)?;
         temporary
             .as_file()
             .set_permissions(metadata.permissions())
@@ -156,13 +232,15 @@ pub fn write_text_file_atomic(
             })?;
     }
 
-    temporary.write_all(text.as_bytes()).map_err(|error| {
+    before_step(SaveStep::Write)?;
+    temporary.write_all(bytes).map_err(|error| {
         CommandError::io(
             AppErrorCode::WriteFailed,
             "임시 파일에 쓰지 못했습니다",
             error,
         )
     })?;
+    before_step(SaveStep::Flush)?;
     temporary.flush().map_err(|error| {
         CommandError::io(
             AppErrorCode::WriteFailed,
@@ -170,6 +248,7 @@ pub fn write_text_file_atomic(
             error,
         )
     })?;
+    before_step(SaveStep::FileSync)?;
     temporary.as_file().sync_all().map_err(|error| {
         CommandError::io(
             AppErrorCode::WriteFailed,
@@ -178,6 +257,23 @@ pub fn write_text_file_atomic(
         )
     })?;
 
+    let backup_path = if create_backup && target.exists() {
+        let backup = next_backup_path(&target)?;
+        before_step(SaveStep::BackupCopy)?;
+        fs::copy(&target, &backup).map_err(|error| {
+            CommandError::io(
+                AppErrorCode::WriteFailed,
+                "백업 파일을 만들지 못했습니다",
+                error,
+            )
+        })?;
+        let _ = prune_old_backups(&target);
+        Some(backup)
+    } else {
+        None
+    };
+
+    before_step(SaveStep::Replace)?;
     temporary.persist(&target).map_err(|error| {
         CommandError::io(
             AppErrorCode::WriteFailed,
@@ -185,6 +281,8 @@ pub fn write_text_file_atomic(
             error.error,
         )
     })?;
+    before_step(SaveStep::ParentSync)?;
+    let _ = sync_parent_directory(parent);
 
     let written_metadata = fs::metadata(&target).map_err(|error| {
         CommandError::io(
@@ -197,10 +295,65 @@ pub fn write_text_file_atomic(
     Ok(WriteResult {
         path: target.to_string_lossy().into_owned(),
         backup_path: backup_path.map(|value| value.to_string_lossy().into_owned()),
-        bytes_written: text.len(),
+        bytes_written: bytes.len(),
         size: written_metadata.len(),
         modified_ms: modified_ms(&written_metadata),
     })
+}
+
+fn encode_text_for_save(text: &str, encoding: Option<&str>) -> Vec<u8> {
+    match encoding
+        .unwrap_or("UTF-8")
+        .trim()
+        .to_ascii_uppercase()
+        .as_str()
+    {
+        "UTF-8 BOM" => {
+            let mut bytes = Vec::with_capacity(3 + text.len());
+            bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
+            bytes.extend_from_slice(text.as_bytes());
+            bytes
+        }
+        "UTF-16LE BOM" => {
+            let mut bytes = Vec::with_capacity(2 + text.len() * 2);
+            bytes.extend_from_slice(&[0xFF, 0xFE]);
+            for unit in text.encode_utf16() {
+                bytes.extend_from_slice(&unit.to_le_bytes());
+            }
+            bytes
+        }
+        "UTF-16BE BOM" => {
+            let mut bytes = Vec::with_capacity(2 + text.len() * 2);
+            bytes.extend_from_slice(&[0xFE, 0xFF]);
+            for unit in text.encode_utf16() {
+                bytes.extend_from_slice(&unit.to_be_bytes());
+            }
+            bytes
+        }
+        _ => text.as_bytes().to_vec(),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SaveStep {
+    TempCreate,
+    PermissionCopy,
+    Write,
+    Flush,
+    FileSync,
+    BackupCopy,
+    Replace,
+    ParentSync,
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> std::io::Result<()> {
+    fs::File::open(parent)?.sync_all()
+}
+
+#[cfg(not(unix))]
+fn sync_parent_directory(_parent: &Path) -> std::io::Result<()> {
+    Ok(())
 }
 
 fn check_write_precondition(
@@ -247,13 +400,18 @@ fn file_changed_error() -> CommandError {
 }
 
 fn next_backup_path(target: &Path) -> CommandResult<PathBuf> {
-    let base = PathBuf::from(format!("{}.bak", target.to_string_lossy()));
-    if !base.exists() {
-        return Ok(base);
-    }
+    let timestamp = current_timestamp_ms();
+    let base = PathBuf::from(format!("{}.bak.{timestamp}", target.to_string_lossy()));
 
-    for index in 1..10_000 {
-        let candidate = PathBuf::from(format!("{}.bak.{index}", target.to_string_lossy()));
+    for index in 0..10_000 {
+        let candidate = if index == 0 {
+            base.clone()
+        } else {
+            PathBuf::from(format!(
+                "{}.bak.{timestamp}.{index}",
+                target.to_string_lossy()
+            ))
+        };
         if !candidate.exists() {
             return Ok(candidate);
         }
@@ -263,6 +421,86 @@ fn next_backup_path(target: &Path) -> CommandResult<PathBuf> {
         AppErrorCode::WriteFailed,
         "사용 가능한 백업 파일 이름을 찾지 못했습니다. 오래된 백업을 정리한 뒤 다시 저장하세요.",
     ))
+}
+
+fn backup_entries(target: &Path) -> CommandResult<Vec<FileBackup>> {
+    let parent = target.parent().unwrap_or_else(|| Path::new("."));
+    let mut backups = fs::read_dir(parent)
+        .map_err(|error| {
+            CommandError::io(
+                AppErrorCode::PathConflict,
+                "백업 목록을 읽지 못했습니다",
+                error,
+            )
+        })?
+        .filter_map(|entry| backup_entry_from_dir_entry(target, entry.ok()?))
+        .collect::<Vec<_>>();
+
+    backups.sort_by(|left, right| {
+        backup_sort_key(&right.path)
+            .cmp(&backup_sort_key(&left.path))
+            .then_with(|| right.modified_ms.cmp(&left.modified_ms))
+            .then_with(|| right.name.cmp(&left.name))
+    });
+    Ok(backups)
+}
+
+fn backup_entry_from_dir_entry(target: &Path, entry: fs::DirEntry) -> Option<FileBackup> {
+    let path = entry.path();
+    if !is_backup_for_target(target, &path) {
+        return None;
+    }
+    let metadata = entry.metadata().ok()?;
+    if !metadata.is_file() {
+        return None;
+    }
+
+    Some(FileBackup {
+        path: path.to_string_lossy().into_owned(),
+        name: path.file_name()?.to_string_lossy().into_owned(),
+        size: metadata.len(),
+        modified_ms: modified_ms(&metadata),
+    })
+}
+
+fn prune_old_backups(target: &Path) -> CommandResult<()> {
+    let backups = backup_entries(target)?;
+    for backup in backups.into_iter().skip(BACKUP_RETENTION_LIMIT) {
+        let _ = fs::remove_file(backup.path);
+    }
+    Ok(())
+}
+
+fn is_backup_for_target(target: &Path, backup: &Path) -> bool {
+    if target.parent().unwrap_or_else(|| Path::new("."))
+        != backup.parent().unwrap_or_else(|| Path::new("."))
+    {
+        return false;
+    }
+
+    let Some(target_name) = target.file_name().map(|name| name.to_string_lossy()) else {
+        return false;
+    };
+    let Some(backup_name) = backup.file_name().map(|name| name.to_string_lossy()) else {
+        return false;
+    };
+    let backup_prefix = format!("{target_name}.bak");
+    backup_name == backup_prefix || backup_name.starts_with(&format!("{backup_prefix}."))
+}
+
+fn backup_sort_key(path: &str) -> u128 {
+    path.rsplit(".bak.")
+        .next()
+        .and_then(|suffix| suffix.split('.').next())
+        .and_then(|value| value.parse::<u128>().ok())
+        .unwrap_or(0)
+}
+
+fn current_timestamp_ms() -> u128 {
+    UNIX_EPOCH
+        .elapsed()
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
 }
 
 fn decode_text(bytes: &[u8], bom: Option<(&'static Encoding, usize)>) -> (String, String, bool) {
@@ -349,6 +587,75 @@ mod tests {
     }
 
     #[test]
+    fn maps_missing_file_to_not_found_code() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let missing = directory.path().join("missing.txt");
+
+        let error = read_text_file(missing.to_string_lossy().into_owned())
+            .expect_err("missing file should be rejected");
+
+        assert_eq!(error.code, AppErrorCode::NotFound);
+    }
+
+    #[test]
+    fn reads_empty_text_files_without_treating_them_as_binary() {
+        let file = tempfile::NamedTempFile::new().expect("temp file");
+
+        let document = read_text_file(file.path().to_string_lossy().into_owned())
+            .expect("empty file should open");
+
+        assert_eq!(document.text, "");
+        assert!(matches!(document.line_ending, LineEnding::None));
+        assert!(!document.had_final_newline);
+        assert!(!document.is_binary);
+        assert_eq!(document.size, 0);
+    }
+
+    #[test]
+    fn preserves_utf_bom_encoding_metadata_when_reading_text() {
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        file.write_all(&[0xEF, 0xBB, 0xBF, b'a', b'\n'])
+            .expect("write utf8 bom text");
+
+        let document = read_text_file(file.path().to_string_lossy().into_owned())
+            .expect("utf8 bom text should open");
+
+        assert_eq!(document.text, "a\n");
+        assert_eq!(document.encoding, "UTF-8 BOM");
+        assert!(document.had_final_newline);
+        assert!(matches!(document.line_ending, LineEnding::Lf));
+    }
+
+    #[test]
+    fn decodes_utf16le_bom_text_without_flagging_nul_bytes_as_binary() {
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        file.write_all(&[0xFF, 0xFE, b'a', 0x00, b'\n', 0x00])
+            .expect("write utf16le bom text");
+
+        let document = read_text_file(file.path().to_string_lossy().into_owned())
+            .expect("utf16le bom text should open");
+
+        assert_eq!(document.text, "a\n");
+        assert_eq!(document.encoding, "UTF-16LE BOM");
+        assert!(!document.decode_had_errors);
+        assert!(document.had_final_newline);
+    }
+
+    #[test]
+    fn reports_missing_final_newline_as_document_metadata() {
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        file.write_all(b"last line")
+            .expect("write text without final newline");
+
+        let document =
+            read_text_file(file.path().to_string_lossy().into_owned()).expect("text should open");
+
+        assert_eq!(document.text, "last line");
+        assert!(!document.had_final_newline);
+        assert!(matches!(document.line_ending, LineEnding::None));
+    }
+
+    #[test]
     fn rejects_binary_files_with_stable_code() {
         let mut file = tempfile::NamedTempFile::new().expect("temp file");
         file.write_all(b"text\0binary")
@@ -391,6 +698,7 @@ mod tests {
             false,
             Some(original_metadata.len()),
             modified_ms(&original_metadata),
+            None,
         )
         .expect("write succeeds");
 
@@ -398,6 +706,81 @@ mod tests {
         assert_eq!(result.size, 3);
         assert_eq!(result.bytes_written, 3);
         assert!(result.modified_ms.is_some());
+    }
+
+    #[test]
+    fn writes_new_file_without_backup_and_syncs_parent_directory() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("new-file.txt");
+        let mut parent_sync_attempted = false;
+
+        let result = write_text_file_atomic_inner(
+            target.to_string_lossy().into_owned(),
+            "new file\n".to_string(),
+            true,
+            None,
+            None,
+            None,
+            |step| {
+                if step == SaveStep::ParentSync {
+                    parent_sync_attempted = true;
+                }
+                Ok(())
+            },
+        )
+        .expect("write succeeds");
+
+        assert_eq!(
+            fs::read_to_string(&target).expect("read new file"),
+            "new file\n"
+        );
+        assert_eq!(result.backup_path, None);
+        assert_eq!(result.size, 9);
+        assert!(parent_sync_attempted);
+    }
+
+    #[test]
+    fn pre_replace_save_faults_preserve_existing_target() {
+        for fault_step in [
+            SaveStep::TempCreate,
+            SaveStep::PermissionCopy,
+            SaveStep::Write,
+            SaveStep::Flush,
+            SaveStep::FileSync,
+            SaveStep::BackupCopy,
+            SaveStep::Replace,
+        ] {
+            let directory = tempfile::tempdir().expect("temp dir");
+            let target = directory.path().join("target.txt");
+            fs::write(&target, "original").expect("write original");
+
+            let error = write_text_file_atomic_inner(
+                target.to_string_lossy().into_owned(),
+                "replacement".to_string(),
+                true,
+                None,
+                None,
+                None,
+                |step| {
+                    if step == fault_step {
+                        Err(CommandError::new(
+                            AppErrorCode::WriteFailed,
+                            format!("injected save fault at {step:?}"),
+                        ))
+                    } else {
+                        Ok(())
+                    }
+                },
+            )
+            .expect_err("injected save fault should fail");
+
+            assert_eq!(error.code, AppErrorCode::WriteFailed);
+            assert_eq!(
+                fs::read_to_string(&target).expect("read preserved target"),
+                "original",
+                "target changed after injected fault at {fault_step:?}"
+            );
+        }
     }
 
     #[test]
@@ -414,6 +797,7 @@ mod tests {
             true,
             Some(original_metadata.len()),
             modified_ms(&original_metadata),
+            None,
         )
         .expect_err("changed file should be rejected");
 
@@ -426,16 +810,11 @@ mod tests {
     }
 
     #[test]
-    fn creates_numbered_backup_without_overwriting_existing_backups() {
+    fn creates_timestamped_backup_without_overwriting_existing_backups() {
         let directory = tempfile::tempdir().expect("temp dir");
         let target = directory.path().join("merged.txt");
-        let first_backup = PathBuf::from(format!("{}.bak", target.to_string_lossy()));
-        let second_backup = PathBuf::from(format!("{}.bak.1", target.to_string_lossy()));
-        let expected_backup = PathBuf::from(format!("{}.bak.2", target.to_string_lossy()));
 
         fs::write(&target, "old").expect("write original");
-        fs::write(&first_backup, "previous backup").expect("write first backup");
-        fs::write(&second_backup, "second backup").expect("write second backup");
 
         let result = write_text_file_atomic(
             target.to_string_lossy().into_owned(),
@@ -443,25 +822,212 @@ mod tests {
             true,
             None,
             None,
+            None,
+        )
+        .expect("write succeeds");
+
+        let backup_path = PathBuf::from(result.backup_path.expect("backup path"));
+        let backup_name = backup_path
+            .file_name()
+            .expect("backup file name")
+            .to_string_lossy();
+        assert!(backup_name.starts_with("merged.txt.bak."));
+        assert_eq!(
+            fs::read_to_string(&backup_path).expect("read backup"),
+            "old"
+        );
+        assert_eq!(fs::read_to_string(&target).expect("read written"), "new");
+    }
+
+    #[test]
+    fn lists_backups_newest_first_and_ignores_unrelated_files() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("merged.txt");
+        fs::write(&target, "current").expect("write target");
+        fs::write(directory.path().join("merged.txt.bak.1000"), "old").expect("write backup");
+        fs::write(directory.path().join("merged.txt.bak.3000"), "new").expect("write backup");
+        fs::write(directory.path().join("other.txt.bak.9999"), "other").expect("write other");
+
+        let backups =
+            list_file_backups(target.to_string_lossy().into_owned()).expect("list backups");
+
+        assert_eq!(backups.len(), 2);
+        assert_eq!(backups[0].name, "merged.txt.bak.3000");
+        assert_eq!(backups[1].name, "merged.txt.bak.1000");
+    }
+
+    #[test]
+    fn prunes_old_backups_after_save() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("merged.txt");
+        fs::write(&target, "current").expect("write target");
+        for index in 0..BACKUP_RETENTION_LIMIT {
+            fs::write(
+                directory
+                    .path()
+                    .join(format!("merged.txt.bak.{}", 1000 + index)),
+                format!("old {index}"),
+            )
+            .expect("write backup");
+        }
+
+        write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "new".to_string(),
+            true,
+            None,
+            None,
+            None,
+        )
+        .expect("write succeeds");
+
+        let backups =
+            list_file_backups(target.to_string_lossy().into_owned()).expect("list backups");
+        assert_eq!(backups.len(), BACKUP_RETENTION_LIMIT);
+        assert!(
+            backups
+                .iter()
+                .all(|backup| backup.name != "merged.txt.bak.1000")
+        );
+    }
+
+    #[test]
+    fn restores_backup_through_atomic_save_and_backs_up_current_target() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("merged.txt");
+        let backup = directory.path().join("merged.txt.bak.1000");
+        fs::write(&target, "current").expect("write target");
+        let target_metadata = fs::metadata(&target).expect("target metadata");
+        fs::write(&backup, "restored").expect("write backup");
+
+        let result = restore_text_file_backup(
+            target.to_string_lossy().into_owned(),
+            backup.to_string_lossy().into_owned(),
+            Some(target_metadata.len()),
+            modified_ms(&target_metadata),
+        )
+        .expect("restore succeeds");
+
+        assert_eq!(
+            fs::read_to_string(&target).expect("read restored target"),
+            "restored"
+        );
+        let current_backup = result.backup_path.expect("backup current target");
+        assert_eq!(
+            fs::read_to_string(current_backup).expect("read current backup"),
+            "current"
+        );
+    }
+
+    #[test]
+    fn rejects_restore_from_unrelated_backup_path() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("merged.txt");
+        let unrelated = directory.path().join("other.txt.bak.1000");
+        fs::write(&target, "current").expect("write target");
+        fs::write(&unrelated, "other").expect("write unrelated");
+
+        let error = restore_text_file_backup(
+            target.to_string_lossy().into_owned(),
+            unrelated.to_string_lossy().into_owned(),
+            None,
+            None,
+        )
+        .expect_err("unrelated backup should be rejected");
+
+        assert_eq!(error.code, AppErrorCode::PathConflict);
+        assert_eq!(fs::read_to_string(&target).expect("read target"), "current");
+    }
+
+    #[test]
+    fn writes_utf8_bom_when_requested() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("utf8-bom.txt");
+
+        let result = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "hello\n".to_string(),
+            false,
+            None,
+            None,
+            Some("UTF-8 BOM".to_string()),
         )
         .expect("write succeeds");
 
         assert_eq!(
-            result.backup_path,
-            Some(expected_backup.to_string_lossy().into_owned())
+            fs::read(&target).expect("read written bytes"),
+            [0xEF, 0xBB, 0xBF, b'h', b'e', b'l', b'l', b'o', b'\n']
         );
+        assert_eq!(result.bytes_written, 9);
+        assert_eq!(result.size, 9);
+    }
+
+    #[test]
+    fn writes_utf16le_bom_when_requested() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("utf16le.txt");
+
+        let result = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "A한\n".to_string(),
+            false,
+            None,
+            None,
+            Some("UTF-16LE BOM".to_string()),
+        )
+        .expect("write succeeds");
+
         assert_eq!(
-            fs::read_to_string(&first_backup).expect("read first backup"),
-            "previous backup"
+            fs::read(&target).expect("read written bytes"),
+            [0xFF, 0xFE, 0x41, 0x00, 0x5C, 0xD5, 0x0A, 0x00]
         );
+        assert_eq!(result.bytes_written, 8);
+        assert_eq!(result.size, 8);
+    }
+
+    #[test]
+    fn writes_utf16be_bom_when_requested() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("utf16be.txt");
+
+        let result = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "A한\n".to_string(),
+            false,
+            None,
+            None,
+            Some("UTF-16BE BOM".to_string()),
+        )
+        .expect("write succeeds");
+
         assert_eq!(
-            fs::read_to_string(&second_backup).expect("read second backup"),
-            "second backup"
+            fs::read(&target).expect("read written bytes"),
+            [0xFE, 0xFF, 0x00, 0x41, 0xD5, 0x5C, 0x00, 0x0A]
         );
+        assert_eq!(result.bytes_written, 8);
+        assert_eq!(result.size, 8);
+    }
+
+    #[test]
+    fn falls_back_to_plain_utf8_for_unsupported_save_encoding() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("legacy.txt");
+
+        let result = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "café\n".to_string(),
+            false,
+            None,
+            None,
+            Some("windows-1252".to_string()),
+        )
+        .expect("write succeeds");
+
         assert_eq!(
-            fs::read_to_string(&expected_backup).expect("read expected backup"),
-            "old"
+            fs::read(&target).expect("read written bytes"),
+            "café\n".as_bytes()
         );
-        assert_eq!(fs::read_to_string(&target).expect("read written"), "new");
+        assert_eq!(result.bytes_written, 6);
+        assert_eq!(result.size, 6);
     }
 }

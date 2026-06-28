@@ -1,0 +1,6 @@
+<<<<<<< ours
+ours new
+||||||| original
+=======
+theirs new
+>>>>>>> theirs

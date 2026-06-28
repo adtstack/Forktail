@@ -1,0 +1,7 @@
+<<<<<<< ours
+café
+||||||| original
+cafe
+=======
+café
+>>>>>>> theirs

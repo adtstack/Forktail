@@ -1,4 +1,4 @@
-import "../monaco";
+import { loadMonacoLanguage } from "../monaco";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { editor } from "monaco-editor";
@@ -12,6 +12,7 @@ import {
 import { languageFromPath } from "../core/language";
 import { parseConflictBlocks, resolveConflict, type ConflictResolution } from "../core/conflicts";
 import { mergeSaveEncodingWarning } from "../core/mergeSave";
+import type { SaveLineEndingMode } from "../core/lineEndings";
 import { buildSideDiff, type SideDiffSegment } from "../core/sideDiff";
 import { loadMergeSettings, saveMergeSettings } from "../core/settings";
 import type { MergeRecoveryDraft } from "../core/mergeRecovery";
@@ -38,8 +39,9 @@ interface MergeViewProps {
   onRecoveryDraftsEnabledChange: (enabled: boolean) => void;
   onRestoreRecoveryDraft: () => void;
   onDiscardRecoveryDraft: () => void;
-  onSave: () => void;
-  onSaveAs: () => void;
+  onSave: (lineEndingMode: SaveLineEndingMode) => void;
+  onSaveAs: (lineEndingMode: SaveLineEndingMode) => void;
+  onShowBackups: () => void;
 }
 
 interface PathCopyState {
@@ -60,6 +62,7 @@ export function MergeView({
   onDiscardRecoveryDraft,
   onSave,
   onSaveAs,
+  onShowBackups,
 }: MergeViewProps) {
   const [activeIndex, setActiveIndex] = useState(0);
   const [resultHistory, setResultHistory] = useState(() => createTextHistory(session.result));
@@ -70,7 +73,11 @@ export function MergeView({
   const resultEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
   const activeDecorationIds = useRef<string[]>([]);
   const lastSyncedResult = useRef(session.result);
-  const language = languageFromPath(session.ours.path || session.theirs.path || session.base.path);
+  const language = useMemo(
+    () => languageFromPath(session.ours.path || session.theirs.path || session.base.path),
+    [session.base.path, session.ours.path, session.theirs.path],
+  );
+  const [editorLanguage, setEditorLanguage] = useState(language);
   const saveEncodingWarning = useMemo(() => mergeSaveEncodingWarning(session), [session]);
 
   useEffect(() => {
@@ -87,6 +94,19 @@ export function MergeView({
       setActiveIndex(conflicts.length - 1);
     }
   }, [activeIndex, conflicts.length]);
+
+  useEffect(() => {
+    let active = true;
+    setEditorLanguage(language === "plaintext" ? language : "plaintext");
+
+    void loadMonacoLanguage(language).then(() => {
+      if (active) setEditorLanguage(language);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [language]);
 
   const activeConflict = conflicts[activeIndex] ?? null;
   const sideDiffs = useMemo(() => {
@@ -166,11 +186,11 @@ export function MergeView({
 
   const saveResult = useCallback(() => {
     if (session.outputPath) {
-      onSave();
+      onSave(mergeSettings.saveLineEnding);
     } else {
-      onSaveAs();
+      onSaveAs(mergeSettings.saveLineEnding);
     }
-  }, [onSave, onSaveAs, session.outputPath]);
+  }, [mergeSettings.saveLineEnding, onSave, onSaveAs, session.outputPath]);
 
   const previousConflict = useCallback(() => {
     if (conflicts.length === 0) return;
@@ -192,7 +212,7 @@ export function MergeView({
       return;
     }
     if (commandId === "saveAs") {
-      onSaveAs();
+      onSaveAs(mergeSettings.saveLineEnding);
       return;
     }
     if (commandId === "save") {
@@ -224,6 +244,7 @@ export function MergeView({
     }
   }, [
     applyResolution,
+    mergeSettings.saveLineEnding,
     nextConflict,
     onSaveAs,
     previousConflict,
@@ -403,6 +424,24 @@ export function MergeView({
           />
           draft 복구
         </label>
+        <label className="toolbar-field">
+          <span>저장 EOL</span>
+          <select
+            className="toolbar-select"
+            value={mergeSettings.saveLineEnding}
+            onChange={(event) =>
+              setMergeSettings((current) => ({
+                ...current,
+                saveLineEnding: event.target.value as SaveLineEndingMode,
+              }))
+            }
+          >
+            <option value="original">원본</option>
+            <option value="system">시스템</option>
+            <option value="lf">LF</option>
+            <option value="crlf">CRLF</option>
+          </select>
+        </label>
         <div className="toolbar-spacer" />
         <button
           onClick={saveResult}
@@ -413,11 +452,17 @@ export function MergeView({
         </button>
         <button
           className="primary-button"
-          onClick={onSaveAs}
+          onClick={() => onSaveAs(mergeSettings.saveLineEnding)}
           disabled={busy}
           aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
         >
           다른 이름으로 저장
+        </button>
+        <button
+          onClick={onShowBackups}
+          disabled={busy || !session.outputPath}
+        >
+          백업 복원
         </button>
       </header>
 
@@ -480,21 +525,21 @@ export function MergeView({
           label="BASE 원본"
           path={session.base.path}
           value={session.base.text}
-          language={language}
+          language={editorLanguage}
           editorTheme={editorTheme}
         />
         <SourceEditor
           label="OURS 원본"
           path={session.ours.path}
           value={session.ours.text}
-          language={language}
+          language={editorLanguage}
           editorTheme={editorTheme}
         />
         <SourceEditor
           label="THEIRS 원본"
           path={session.theirs.path}
           value={session.theirs.text}
-          language={language}
+          language={editorLanguage}
           editorTheme={editorTheme}
         />
         <div
@@ -538,7 +583,7 @@ export function MergeView({
           </div>
           <Editor
             height="100%"
-            language={language}
+            language={editorLanguage}
             value={resultText}
             theme={editorTheme}
             onMount={mountResult}

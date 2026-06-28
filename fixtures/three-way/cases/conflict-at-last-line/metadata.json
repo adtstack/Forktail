@@ -1,0 +1,9 @@
+{
+  "id": "conflict-at-last-line",
+  "categories": [
+    "conflict-at-last-line",
+    "different-overlapping-modify"
+  ],
+  "clean": false,
+  "conflictCount": 1
+}

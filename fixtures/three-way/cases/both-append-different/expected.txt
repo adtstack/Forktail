@@ -1,0 +1,7 @@
+base
+<<<<<<< ours
+ours append
+||||||| original
+=======
+theirs append
+>>>>>>> theirs

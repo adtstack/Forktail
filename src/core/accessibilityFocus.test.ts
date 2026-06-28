@@ -32,6 +32,36 @@ describe("accessibility focus styles", () => {
 
     expect(styles).not.toMatch(/outline\s*:\s*none/i);
   });
+
+  it("keeps the active 2-way diff hunk visible with line and gutter styles", () => {
+    const activeDiffLineBlock = cssBlock(".active-diff-line");
+    const activeDiffGlyphBlock = cssBlock(".active-diff-glyph");
+
+    expect(activeDiffLineBlock).toContain("background: var(--active-diff-bg);");
+    expect(activeDiffGlyphBlock).toContain("background: var(--active-diff-glyph);");
+    expect(activeDiffGlyphBlock).toContain("width: 3px !important;");
+
+    for (const selector of [":root", '.app-shell[data-theme="light"]'] as const) {
+      const tokens = cssVariables(selector);
+      expect(tokens["--active-diff-bg"], `${selector} --active-diff-bg`).toBeTruthy();
+      expect(tokens["--active-diff-glyph"], `${selector} --active-diff-glyph`).toBeTruthy();
+    }
+  });
+
+  it("keeps the active merge conflict visible with line and gutter styles", () => {
+    const activeConflictLineBlock = cssBlock(".active-conflict-line");
+    const activeConflictGlyphBlock = cssBlock(".active-conflict-glyph");
+
+    expect(activeConflictLineBlock).toContain("background: var(--active-conflict-bg);");
+    expect(activeConflictGlyphBlock).toContain("background: var(--active-conflict-glyph);");
+    expect(activeConflictGlyphBlock).toContain("width: 3px !important;");
+
+    for (const selector of [":root", '.app-shell[data-theme="light"]'] as const) {
+      const tokens = cssVariables(selector);
+      expect(tokens["--active-conflict-bg"], `${selector} --active-conflict-bg`).toBeTruthy();
+      expect(tokens["--active-conflict-glyph"], `${selector} --active-conflict-glyph`).toBeTruthy();
+    }
+  });
 });
 
 function cssVariables(selector: string): Record<string, string> {

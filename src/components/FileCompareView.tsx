@@ -1,4 +1,4 @@
-import "../monaco";
+import { loadMonacoLanguage } from "../monaco";
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import type { editor } from "monaco-editor";
@@ -10,6 +10,7 @@ import {
   type AppCommandId,
 } from "../core/commands";
 import {
+  activeDiffHunkDecorationRanges,
   diffNavigationState,
   nextDiffIndex,
   type DiffDirection,
@@ -35,6 +36,7 @@ import {
 } from "../core/hunkCopy";
 import { compareSaveEncodingWarnings, type CompareSide } from "../core/compareSave";
 import type { CompareFileChangeNotice } from "../core/fileVersion";
+import type { SaveLineEndingMode } from "../core/lineEndings";
 import type { CompareSession } from "../core/models";
 import { languageFromPath } from "../core/language";
 import { pathCopyFailureMessage, pathCopySuccessMessage, writeClipboardText } from "../core/pathCopy";
@@ -55,8 +57,10 @@ interface FileCompareViewProps {
   onDropFileOnSide: (side: CompareDropSide, path: string) => void;
   onDropRejected: (message: string) => void;
   onExportReport: (options: TextDiffOptions) => void;
-  onSaveSide: (side: CompareSide) => void;
-  onSaveSideAs: (side: CompareSide) => void;
+  onOverwriteChangedFile: (side: CompareSide, lineEndingMode: SaveLineEndingMode) => void;
+  onSaveSide: (side: CompareSide, lineEndingMode: SaveLineEndingMode) => void;
+  onSaveSideAs: (side: CompareSide, lineEndingMode: SaveLineEndingMode) => void;
+  onShowBackups: (side: CompareSide) => void;
   onSwap: () => void;
 }
 
@@ -86,8 +90,10 @@ export function FileCompareView({
   onDropFileOnSide,
   onDropRejected,
   onExportReport,
+  onOverwriteChangedFile,
   onSaveSide,
   onSaveSideAs,
+  onShowBackups,
   onSwap,
 }: FileCompareViewProps) {
   const [viewSettings, setViewSettings] = useState(() => loadCompareViewSettings());
@@ -99,6 +105,8 @@ export function FileCompareView({
   const [dropSide, setDropSide] = useState<CompareDropSide | null>(null);
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
   const lineChangesRef = useRef<editor.ILineChange[]>([]);
+  const originalActiveDecorationIds = useRef<string[]>([]);
+  const modifiedActiveDecorationIds = useRef<string[]>([]);
   const diffSubscriptionRef = useRef<{ dispose: () => void } | null>(null);
   const originalSubscriptionRef = useRef<{ dispose: () => void } | null>(null);
   const modifiedSubscriptionRef = useRef<{ dispose: () => void } | null>(null);
@@ -108,6 +116,7 @@ export function FileCompareView({
     () => languageFromPath(session.right.path || session.left.path),
     [session.left.path, session.right.path],
   );
+  const [editorLanguage, setEditorLanguage] = useState(language);
   const preparedDiffTexts = useMemo(
     () => prepareDiffTexts(session.left.text, session.right.text, viewSettings.diffOptions),
     [session.left.text, session.right.text, viewSettings.diffOptions],
@@ -128,6 +137,7 @@ export function FileCompareView({
   );
   const newlineDifferenceLabel = finalNewlineDifferenceLabel(newlineDifference);
   const saveEncodingWarnings = useMemo(() => compareSaveEncodingWarnings(session), [session]);
+  const activeChangedSide = activeChangedCompareSide(fileChangeNotice, editableSide);
   const canApplyLeftToRight = !busy && !binary && editableSide === "right" && navigation.canMove;
   const canApplyRightToLeft = !busy && !binary && editableSide === "left" && navigation.canMove;
   const canUndoHunkCopy =
@@ -137,12 +147,40 @@ export function FileCompareView({
     hunkCopyUndo?.side === editableSide &&
     hunkCopyUndo.after === session[editableSide].text;
 
+  const updateActiveHunkDecorations = useCallback((
+    index: number,
+    instance = diffEditorRef.current,
+  ) => {
+    if (!instance) return;
+
+    const ranges = activeDiffHunkDecorationRanges(lineChangesRef.current[index]);
+    const originalEditor = instance.getOriginalEditor();
+    const modifiedEditor = instance.getModifiedEditor();
+
+    originalActiveDecorationIds.current = originalEditor.deltaDecorations(
+      originalActiveDecorationIds.current,
+      ranges.original
+        ? [activeDiffDecoration(ranges.original.startLineNumber, ranges.original.endLineNumber)]
+        : [],
+    );
+    modifiedActiveDecorationIds.current = modifiedEditor.deltaDecorations(
+      modifiedActiveDecorationIds.current,
+      ranges.modified
+        ? [activeDiffDecoration(ranges.modified.startLineNumber, ranges.modified.endLineNumber)]
+        : [],
+    );
+  }, []);
+
   const refreshDiffHunks = useCallback((instance = diffEditorRef.current) => {
     const changes = instance?.getLineChanges() ?? [];
     lineChangesRef.current = changes;
     setHunkCount(changes.length);
-    setActiveHunk((current) => (changes.length === 0 ? 0 : Math.min(current, changes.length - 1)));
-  }, []);
+    setActiveHunk((current) => {
+      const next = changes.length === 0 ? 0 : Math.min(current, changes.length - 1);
+      updateActiveHunkDecorations(next, instance);
+      return next;
+    });
+  }, [updateActiveHunkDecorations]);
 
   const revealHunk = useCallback((index: number) => {
     const instance = diffEditorRef.current;
@@ -157,8 +195,9 @@ export function FileCompareView({
     modifiedEditor.revealLineInCenter(modifiedLine);
     modifiedEditor.setPosition({ lineNumber: modifiedLine, column: 1 });
     modifiedEditor.focus();
+    updateActiveHunkDecorations(index, instance);
     setActiveHunk(index);
-  }, []);
+  }, [updateActiveHunkDecorations]);
 
   const navigateDiff = useCallback(
     (direction: DiffDirection) => {
@@ -226,11 +265,13 @@ export function FileCompareView({
       return;
     }
     if (commandId === "saveAs") {
-      if (editableSide !== "none") onSaveSideAs(editableSide);
+      if (editableSide !== "none") onSaveSideAs(editableSide, viewSettings.saveLineEnding);
       return;
     }
     if (commandId === "save") {
-      if (editableSide !== "none" && dirtySides[editableSide]) onSaveSide(editableSide);
+      if (editableSide !== "none" && dirtySides[editableSide]) {
+        onSaveSide(editableSide, viewSettings.saveLineEnding);
+      }
       return;
     }
     if (commandId === "previousDiff") {
@@ -248,6 +289,7 @@ export function FileCompareView({
     onSaveSide,
     onSaveSideAs,
     onSwap,
+    viewSettings.saveLineEnding,
   ]);
 
   const handleSideDragOver = (side: CompareDropSide, event: DragEvent<HTMLElement>) => {
@@ -303,6 +345,19 @@ export function FileCompareView({
   useEffect(() => {
     onTextChangeRef.current = onTextChange;
   }, [onTextChange]);
+
+  useEffect(() => {
+    let active = true;
+    setEditorLanguage(language === "plaintext" ? language : "plaintext");
+
+    void loadMonacoLanguage(language).then(() => {
+      if (active) setEditorLanguage(language);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [language]);
 
   useEffect(() => {
     setActiveHunk(0);
@@ -375,6 +430,15 @@ export function FileCompareView({
   }, [handleCommand]);
 
   useEffect(() => () => {
+    const instance = diffEditorRef.current;
+    if (instance) {
+      originalActiveDecorationIds.current = instance
+        .getOriginalEditor()
+        .deltaDecorations(originalActiveDecorationIds.current, []);
+      modifiedActiveDecorationIds.current = instance
+        .getModifiedEditor()
+        .deltaDecorations(modifiedActiveDecorationIds.current, []);
+    }
     diffSubscriptionRef.current?.dispose();
     originalSubscriptionRef.current?.dispose();
     modifiedSubscriptionRef.current?.dispose();
@@ -478,7 +542,7 @@ export function FileCompareView({
         </span>
         <button
           onClick={() => {
-            if (editableSide !== "none") onSaveSide(editableSide);
+            if (editableSide !== "none") onSaveSide(editableSide, viewSettings.saveLineEnding);
           }}
           disabled={busy || binary || editableSide === "none" || !activeDirty}
           aria-keyshortcuts={commandAriaKeyshortcuts("save")}
@@ -487,12 +551,20 @@ export function FileCompareView({
         </button>
         <button
           onClick={() => {
-            if (editableSide !== "none") onSaveSideAs(editableSide);
+            if (editableSide !== "none") onSaveSideAs(editableSide, viewSettings.saveLineEnding);
           }}
           disabled={busy || binary || editableSide === "none"}
           aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
         >
           다른 이름으로 저장
+        </button>
+        <button
+          onClick={() => {
+            if (editableSide !== "none") onShowBackups(editableSide);
+          }}
+          disabled={busy || binary || editableSide === "none"}
+        >
+          백업 복원
         </button>
         <button
           onClick={() => onExportReport(viewSettings.diffOptions)}
@@ -514,6 +586,24 @@ export function FileCompareView({
             }
           />
           나란히
+        </label>
+        <label className="toolbar-field">
+          <span>저장 EOL</span>
+          <select
+            className="toolbar-select"
+            value={viewSettings.saveLineEnding}
+            onChange={(event) =>
+              setViewSettings((current) => ({
+                ...current,
+                saveLineEnding: event.target.value as SaveLineEndingMode,
+              }))
+            }
+          >
+            <option value="original">원본</option>
+            <option value="system">시스템</option>
+            <option value="lf">LF</option>
+            <option value="crlf">CRLF</option>
+          </select>
         </label>
         <label className="toolbar-field">
           <span>공백</span>
@@ -648,6 +738,24 @@ export function FileCompareView({
             <button type="button" onClick={onReloadChangedFiles}>
               다시 읽기
             </button>
+            {activeChangedSide && (
+              <>
+                <button
+                  type="button"
+                  onClick={() =>
+                    onOverwriteChangedFile(activeChangedSide, viewSettings.saveLineEnding)
+                  }
+                >
+                  변경 무시하고 저장
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onSaveSideAs(activeChangedSide, viewSettings.saveLineEnding)}
+                >
+                  복사본 저장
+                </button>
+              </>
+            )}
             <button type="button" onClick={onKeepCurrentFiles}>
               현재 내용 유지
             </button>
@@ -684,7 +792,7 @@ export function FileCompareView({
         >
           <DiffEditor
             height="100%"
-            language={language}
+            language={editorLanguage}
             original={displayedDiffTexts.left}
             modified={displayedDiffTexts.right}
             originalModelPath={modelPath("original", session.left.path, modelRevision, editableSide)}
@@ -779,6 +887,17 @@ export function FileHeading({
   );
 }
 
+export function activeChangedCompareSide(
+  fileChangeNotice: CompareFileChangeNotice | null,
+  editableSide: CompareSide | "none",
+): CompareSide | null {
+  if (!fileChangeNotice || editableSide === "none") return null;
+  const activeSideChanged = editableSide === "left"
+    ? fileChangeNotice.leftChanged
+    : fileChangeNotice.rightChanged;
+  return activeSideChanged ? editableSide : null;
+}
+
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -793,4 +912,23 @@ function modelPath(
 ): string {
   const mode = editableSide === "none" ? "view" : `edit-${editableSide}`;
   return `forktail://${side}/${revision}/${mode}/${encodeURIComponent(path)}`;
+}
+
+function activeDiffDecoration(
+  startLineNumber: number,
+  endLineNumber: number,
+): editor.IModelDeltaDecoration {
+  return {
+    range: {
+      startLineNumber,
+      startColumn: 1,
+      endLineNumber,
+      endColumn: 1,
+    },
+    options: {
+      isWholeLine: true,
+      className: "active-diff-line",
+      linesDecorationsClassName: "active-diff-glyph",
+    },
+  };
 }

@@ -1,0 +1,9 @@
+{
+  "id": "ours-only-full-rewrite",
+  "categories": [
+    "delete-vs-untouched",
+    "insert"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

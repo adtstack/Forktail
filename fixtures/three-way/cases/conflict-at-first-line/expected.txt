@@ -1,0 +1,8 @@
+<<<<<<< ours
+ours start
+||||||| original
+start
+=======
+theirs start
+>>>>>>> theirs
+tail

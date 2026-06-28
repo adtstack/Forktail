@@ -1,0 +1,9 @@
+title
+<<<<<<< ours
+status: ours
+||||||| original
+status: old
+=======
+status: theirs
+>>>>>>> theirs
+end

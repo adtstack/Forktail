@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { parseConflictBlocks } from "./conflicts";
 import {
@@ -49,5 +50,42 @@ describe("merge parser benchmark fixture", () => {
         now: () => 0,
       }),
     ).toThrow("Expected 3 conflicts, got 2");
+  });
+
+  it("keeps a stored latency baseline aligned with generated fixture sizes", () => {
+    const baseline = JSON.parse(
+      readFileSync(
+        new URL("../../docs/benchmarks/merge-parser-baseline.json", import.meta.url),
+        "utf8",
+      ),
+    ) as {
+      issue: string;
+      cases: Array<{
+        id: string;
+        conflicts: number;
+        linesPerSide: number;
+        bytes: number;
+        iterations: number;
+        averageMs: number;
+      }>;
+    };
+
+    expect(baseline.issue).toBe("MRG-011");
+    expect(baseline.cases.map((entry) => entry.id)).toEqual([
+      "parser-30x3",
+      "parser-100x5",
+      "parser-300x5",
+    ]);
+
+    for (const entry of baseline.cases) {
+      const text = buildMergeBenchmarkText({
+        conflicts: entry.conflicts,
+        linesPerSide: entry.linesPerSide,
+      });
+      expect(new TextEncoder().encode(text).byteLength).toBe(entry.bytes);
+      expect(parseConflictBlocks(text)).toHaveLength(entry.conflicts);
+      expect(entry.iterations).toBeGreaterThan(0);
+      expect(entry.averageMs).toBeGreaterThan(0);
+    }
   });
 });

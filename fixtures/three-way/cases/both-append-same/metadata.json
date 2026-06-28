@@ -1,0 +1,9 @@
+{
+  "id": "both-append-same",
+  "categories": [
+    "insert-same-position-same-text",
+    "insert"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

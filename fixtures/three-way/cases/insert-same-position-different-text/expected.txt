@@ -1,0 +1,8 @@
+before
+<<<<<<< ours
+ours insert
+||||||| original
+=======
+theirs insert
+>>>>>>> theirs
+after

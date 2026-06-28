@@ -4,7 +4,9 @@ import type { MergeSession } from "../core/models";
 import { demoMergeSession } from "../core/samples";
 import { MergeView } from "./MergeView";
 
-vi.mock("../monaco", () => ({}));
+vi.mock("../monaco", () => ({
+  loadMonacoLanguage: () => Promise.resolve(),
+}));
 vi.mock("@monaco-editor/react", () => ({
   default: ({ value }: { value?: string }) => <div role="textbox">{value}</div>,
 }));
@@ -24,6 +26,7 @@ function renderMergeView(dirty: boolean, session: MergeSession = demoMergeSessio
       onDiscardRecoveryDraft={() => {}}
       onSave={() => {}}
       onSaveAs={() => {}}
+      onShowBackups={() => {}}
     />,
   );
 }
@@ -41,6 +44,53 @@ describe("MergeView accessibility", () => {
     expect(markup).toContain("aria-label=\"병합 결과 편집기, 저장 경로 미정\"");
     expect(markup).toContain("aria-keyshortcuts=\"Alt+1\"");
     expect(markup).toContain("aria-keyshortcuts=\"Control+S Meta+S\"");
+  });
+
+  it("renders conflict navigation, resolution, side diff, history, and recovery controls", () => {
+    const markup = renderMergeView(true);
+
+    for (const label of [
+      "↑ 이전 충돌",
+      "↓ 다음 충돌",
+      "1 / 2 충돌",
+      "실행 취소",
+      "다시 실행",
+      "해결 후 다음",
+      "draft 복구",
+      "저장 EOL",
+      "원본",
+      "시스템",
+      "OURS 채택",
+      "THEIRS 채택",
+      "BASE 복원",
+      "둘 다 유지",
+      "BASE → OURS",
+      "BASE → THEIRS",
+      "다른 이름으로 저장",
+      "백업 복원",
+    ]) {
+      expect(markup).toContain(label);
+    }
+    expect(markup).toContain("aria-keyshortcuts=\"F8\"");
+    expect(markup).toContain("aria-keyshortcuts=\"Shift+F8\"");
+    expect(markup).toContain("aria-keyshortcuts=\"Alt+1\"");
+    expect(markup).toContain("aria-keyshortcuts=\"Alt+2\"");
+    expect(markup).toContain("aria-keyshortcuts=\"Alt+3\"");
+    expect(markup).toContain("aria-keyshortcuts=\"Alt+4\"");
+  });
+
+  it("reports clean merge state without resolution controls when no conflicts remain", () => {
+    const session = {
+      ...demoMergeSession(),
+      result: "clean result\n",
+      outputPath: "/repo/result.txt",
+    };
+    const markup = renderMergeView(false, session);
+
+    expect(markup).toContain("✓ 충돌 없음");
+    expect(markup).toContain("자동 병합 또는 수동 해결 완료");
+    expect(markup).toContain("aria-label=\"병합 결과 편집기, 저장 경로 /repo/result.txt\"");
+    expect(markup).not.toContain("OURS 채택");
   });
 });
 

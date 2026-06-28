@@ -1,0 +1,8 @@
+{
+  "id": "no-final-newline-one-side",
+  "categories": [
+    "no-final-newline"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

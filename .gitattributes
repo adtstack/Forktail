@@ -1,0 +1,2 @@
+# Preserve fixture bytes where line endings are part of the test case.
+fixtures/three-way/cases/crlf-non-overlap/*.txt -text

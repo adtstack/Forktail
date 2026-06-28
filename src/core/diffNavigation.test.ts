@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { diffNavigationState, isSwapSidesShortcut, nextDiffIndex } from "./diffNavigation";
+import {
+  activeDiffHunkDecorationRanges,
+  diffNavigationState,
+  isSwapSidesShortcut,
+  nextDiffIndex,
+} from "./diffNavigation";
 
 describe("nextDiffIndex", () => {
   it("moves to the next or previous hunk", () => {
@@ -36,6 +41,55 @@ describe("diffNavigationState", () => {
       currentIndex: 0,
       total: 0,
       canMove: false,
+    });
+  });
+});
+
+describe("activeDiffHunkDecorationRanges", () => {
+  it("maps a changed hunk to original and modified whole-line ranges", () => {
+    expect(
+      activeDiffHunkDecorationRanges({
+        originalStartLineNumber: 10,
+        originalEndLineNumber: 12,
+        modifiedStartLineNumber: 10,
+        modifiedEndLineNumber: 13,
+      }),
+    ).toEqual({
+      original: { startLineNumber: 10, endLineNumber: 12 },
+      modified: { startLineNumber: 10, endLineNumber: 13 },
+    });
+  });
+
+  it("anchors insertion and deletion sides that Monaco reports as empty ranges", () => {
+    expect(
+      activeDiffHunkDecorationRanges({
+        originalStartLineNumber: 4,
+        originalEndLineNumber: 3,
+        modifiedStartLineNumber: 4,
+        modifiedEndLineNumber: 5,
+      }),
+    ).toMatchObject({
+      original: { startLineNumber: 4, endLineNumber: 4 },
+      modified: { startLineNumber: 4, endLineNumber: 5 },
+    });
+
+    expect(
+      activeDiffHunkDecorationRanges({
+        originalStartLineNumber: 8,
+        originalEndLineNumber: 9,
+        modifiedStartLineNumber: 8,
+        modifiedEndLineNumber: 7,
+      }),
+    ).toMatchObject({
+      original: { startLineNumber: 8, endLineNumber: 9 },
+      modified: { startLineNumber: 8, endLineNumber: 8 },
+    });
+  });
+
+  it("returns empty decoration targets when no hunk is active", () => {
+    expect(activeDiffHunkDecorationRanges(null)).toEqual({
+      original: null,
+      modified: null,
     });
   });
 });

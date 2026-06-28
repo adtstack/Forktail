@@ -1,0 +1,3 @@
+literal <<<<<<< ours
+value ours
+literal >>>>>>> theirs

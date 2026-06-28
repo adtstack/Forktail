@@ -1,0 +1,9 @@
+{
+  "id": "empty-ours-delete-vs-untouched",
+  "categories": [
+    "empty-ours",
+    "delete-vs-untouched"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

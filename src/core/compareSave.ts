@@ -23,6 +23,8 @@ export interface CompareSaveEncodingWarning {
   message: string;
 }
 
+export type SaveEncodingMode = "preserve" | "utf8";
+
 export function compareSavePreconditionForPath(
   session: CompareSession,
   outputPath: string,
@@ -87,20 +89,29 @@ export function fileDocumentWithText(document: FileDocument, text: string): File
 
 export function saveEncodingWarningForDocument(
   document: Pick<FileDocument, "encoding" | "decodeHadErrors">,
+  mode: SaveEncodingMode = "preserve",
 ): string | null {
+  const preservedEncoding = preservedSaveEncodingForDocument(document);
   const isPlainUtf8 = document.encoding.trim().toUpperCase() === "UTF-8";
+  const willWriteUtf8 = mode === "utf8" || preservedEncoding === "UTF-8";
 
-  if (document.decodeHadErrors && !isPlainUtf8) {
+  if (document.decodeHadErrors && willWriteUtf8 && !isPlainUtf8) {
     return `디코딩 손실이 있고 현재 저장은 UTF-8로 기록됩니다. 원본 인코딩(${document.encoding})과 일부 문자가 보존되지 않을 수 있습니다.`;
   }
   if (document.decodeHadErrors) {
     return "디코딩 손실이 있는 파일입니다. 저장하면 손실된 문자가 그대로 기록될 수 있습니다.";
   }
-  if (!isPlainUtf8) {
+  if (willWriteUtf8 && !isPlainUtf8) {
     return `현재 저장은 UTF-8로 기록됩니다. 원본 인코딩(${document.encoding})과 BOM은 보존되지 않을 수 있습니다.`;
   }
 
   return null;
+}
+
+export function preservedSaveEncodingForDocument(
+  document: Pick<FileDocument, "encoding">,
+): string {
+  return canonicalPreservableEncoding(document.encoding) ?? "UTF-8";
 }
 
 export function compareSaveEncodingWarnings(
@@ -135,7 +146,7 @@ function fileDocumentAfterTextWrite(
     ...fileDocumentWithText(document, text),
     path: written.path,
     name: fileNameFromPath(written.path),
-    encoding: "UTF-8",
+    encoding: preservedSaveEncodingForDocument(document),
     size: written.size,
     modifiedMs: written.modifiedMs,
     decodeHadErrors: false,
@@ -189,4 +200,19 @@ function detectLineEnding(text: string): LineEnding {
 
 function utf8ByteLength(text: string): number {
   return new TextEncoder().encode(text).byteLength;
+}
+
+function canonicalPreservableEncoding(encoding: string): string | null {
+  switch (encoding.trim().toUpperCase()) {
+    case "UTF-8":
+      return "UTF-8";
+    case "UTF-8 BOM":
+      return "UTF-8 BOM";
+    case "UTF-16LE BOM":
+      return "UTF-16LE BOM";
+    case "UTF-16BE BOM":
+      return "UTF-16BE BOM";
+    default:
+      return null;
+  }
 }

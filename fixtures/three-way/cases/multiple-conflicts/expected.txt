@@ -1,0 +1,17 @@
+<<<<<<< ours
+ONE
+||||||| original
+one
+=======
+uno
+>>>>>>> theirs
+two
+<<<<<<< ours
+THREE
+||||||| original
+three
+=======
+tres
+>>>>>>> theirs
+four
+five

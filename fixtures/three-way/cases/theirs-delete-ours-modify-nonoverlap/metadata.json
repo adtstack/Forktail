@@ -1,0 +1,9 @@
+{
+  "id": "theirs-delete-ours-modify-nonoverlap",
+  "categories": [
+    "non-overlapping-modify",
+    "delete"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

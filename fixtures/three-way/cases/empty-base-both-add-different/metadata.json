@@ -1,0 +1,9 @@
+{
+  "id": "empty-base-both-add-different",
+  "categories": [
+    "empty-base",
+    "insert-same-position-different-text"
+  ],
+  "clean": false,
+  "conflictCount": 1
+}

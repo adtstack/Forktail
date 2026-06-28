@@ -56,7 +56,9 @@ function mergeSession(
   paths: string[],
   source: Extract<StartupSessionSource, "merge" | "mergetool">,
 ): StartupSessionParseResult {
-  if (paths.length !== 3 && paths.length !== 4) return invalidStartupArgs();
+  if (source === "mergetool" ? paths.length !== 4 : paths.length !== 3 && paths.length !== 4) {
+    return invalidStartupArgs();
+  }
   return {
     status: "valid",
     source,

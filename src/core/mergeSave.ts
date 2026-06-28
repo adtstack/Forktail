@@ -38,7 +38,7 @@ export function mergeSaveStateAfterWrite(
 export function mergeSaveEncodingWarning(session: MergeSession): string | null {
   const documents = [session.base, session.ours, session.theirs];
   const hasDecodeLoss = documents.some((document) => document.decodeHadErrors);
-  const hasEncodingRisk = documents.some((document) => saveEncodingWarningForDocument(document) != null);
+  const hasEncodingRisk = documents.some((document) => saveEncodingWarningForDocument(document, "utf8") != null);
 
   if (hasDecodeLoss) {
     return "원본 중 디코딩 손실이 있는 파일이 있습니다. 병합 결과 저장은 UTF-8로 기록되며 손실된 문자가 그대로 저장될 수 있습니다.";

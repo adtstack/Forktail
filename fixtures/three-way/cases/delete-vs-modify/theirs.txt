@@ -1,0 +1,3 @@
+keep
+changed middle
+tail

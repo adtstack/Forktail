@@ -1,0 +1,9 @@
+{
+  "id": "multiple-conflicts",
+  "categories": [
+    "multiple-conflicts",
+    "different-overlapping-modify"
+  ],
+  "clean": false,
+  "conflictCount": 2
+}

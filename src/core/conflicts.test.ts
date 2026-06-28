@@ -27,6 +27,25 @@ describe("parseConflictBlocks", () => {
     expect(conflicts[0].endLine).toBe(8);
   });
 
+  it("parses CR-only conflict sections", () => {
+    const text = "before\r<<<<<<< ours\rours\r||||||| original\rbase\r=======\rtheirs\r>>>>>>> theirs\rafter\r";
+    const conflicts = parseConflictBlocks(text);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].ours).toBe("ours\r");
+    expect(conflicts[0].base).toBe("base\r");
+    expect(conflicts[0].theirs).toBe("theirs\r");
+    expect(conflicts[0].endLine).toBe(8);
+  });
+
+  it("parses conflict sections with mixed line endings", () => {
+    const text = "<<<<<<< ours\rours\r\n||||||| original\nbase\r=======\r\ntheirs\n>>>>>>> theirs";
+    const conflicts = parseConflictBlocks(text);
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].ours).toBe("ours\r\n");
+    expect(conflicts[0].base).toBe("base\r");
+    expect(conflicts[0].theirs).toBe("theirs\n");
+  });
+
   it("parses a conflict without a final newline", () => {
     const text = "<<<<<<< ours\nours\n||||||| original\nbase\n=======\ntheirs\n>>>>>>> theirs";
     const conflicts = parseConflictBlocks(text);
@@ -95,6 +114,16 @@ describe("parseConflictBlocks", () => {
 });
 
 describe("resolveConflict", () => {
+  it.each([
+    ["ours", "before\nours\nafter\n"],
+    ["base", "before\nbase\nafter\n"],
+    ["theirs", "before\ntheirs\nafter\n"],
+    ["both", "before\nours\ntheirs\nafter\n"],
+  ] as const)("replaces a block with the %s resolution", (resolution, expected) => {
+    const conflict = parseConflictBlocks(conflictText)[0];
+    expect(resolveConflict(conflictText, conflict, resolution)).toBe(expected);
+  });
+
   it("replaces the selected block without touching surrounding text", () => {
     const conflict = parseConflictBlocks(conflictText)[0];
     expect(resolveConflict(conflictText, conflict, "theirs")).toBe("before\ntheirs\nafter\n");

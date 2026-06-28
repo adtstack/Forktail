@@ -4,19 +4,39 @@ use crate::domain::models::{
 };
 use crate::error::{AppErrorCode, CommandError, CommandResult};
 use ignore::WalkBuilder;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::{Mutex, OnceLock};
+use std::thread;
 use std::time::{Instant, UNIX_EPOCH};
 
 const QUICK_HASH_CHUNK: usize = 64 * 1024;
+const HASH_PAIR_WORKERS: usize = 2;
+const HASH_CACHE_LIMIT: usize = 4_096;
+static CANCELLED_SCAN_IDS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
+static HASH_CACHE: OnceLock<Mutex<HashMap<HashCacheKey, String>>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
 struct EntryRecord {
     path: PathBuf,
     meta: FsEntryMeta,
     error_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+enum HashMode {
+    Quick,
+    Full,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct HashCacheKey {
+    path: String,
+    size: u64,
+    modified_ms: Option<u64>,
+    mode: HashMode,
 }
 
 impl EntryRecord {
@@ -47,13 +67,40 @@ pub fn scan_directories(
     left_root: String,
     right_root: String,
     options: FolderScanOptions,
+    job_id: Option<u64>,
+) -> CommandResult<FolderScanResult> {
+    let result = scan_directories_inner(left_root, right_root, options, job_id);
+    if let Some(id) = job_id {
+        cancelled_scan_ids()
+            .lock()
+            .expect("scan cancel lock")
+            .remove(&id);
+    }
+    result
+}
+
+#[tauri::command]
+pub fn cancel_folder_scan(job_id: u64) -> CommandResult<()> {
+    cancelled_scan_ids()
+        .lock()
+        .expect("scan cancel lock")
+        .insert(job_id);
+    Ok(())
+}
+
+fn scan_directories_inner(
+    left_root: String,
+    right_root: String,
+    options: FolderScanOptions,
+    job_id: Option<u64>,
 ) -> CommandResult<FolderScanResult> {
     let started = Instant::now();
     let left_path = validate_root(&left_root, "왼쪽")?;
     let right_path = validate_root(&right_root, "오른쪽")?;
+    check_scan_cancelled(job_id)?;
 
-    let left_entries = collect_entries(&left_path, &options);
-    let right_entries = collect_entries(&right_path, &options);
+    let left_entries = collect_entries(&left_path, &options, job_id)?;
+    let right_entries = collect_entries(&right_path, &options, job_id)?;
     let all_paths: BTreeSet<String> = left_entries
         .keys()
         .chain(right_entries.keys())
@@ -64,9 +111,10 @@ pub fn scan_directories(
     let mut stats = FolderScanStats::default();
 
     for relative_path in all_paths {
+        check_scan_cancelled(job_id)?;
         let left = left_entries.get(&relative_path);
         let right = right_entries.get(&relative_path);
-        let entry = compare_entry(relative_path, left, right, options.compare_mode);
+        let entry = compare_entry(relative_path, left, right, options.compare_mode, job_id);
         update_stats(&mut stats, &entry.status);
         entries.push(entry);
     }
@@ -98,7 +146,11 @@ fn validate_root(value: &str, side: &str) -> CommandResult<PathBuf> {
     Ok(path)
 }
 
-fn collect_entries(root: &Path, options: &FolderScanOptions) -> HashMap<String, EntryRecord> {
+fn collect_entries(
+    root: &Path,
+    options: &FolderScanOptions,
+    job_id: Option<u64>,
+) -> CommandResult<HashMap<String, EntryRecord>> {
     let mut builder = WalkBuilder::new(root);
     builder
         .standard_filters(false)
@@ -112,6 +164,7 @@ fn collect_entries(root: &Path, options: &FolderScanOptions) -> HashMap<String, 
 
     let mut result = HashMap::new();
     for entry_result in builder.build() {
+        check_scan_cancelled(job_id)?;
         let entry = match entry_result {
             Ok(entry) => entry,
             Err(error) => {
@@ -160,7 +213,7 @@ fn collect_entries(root: &Path, options: &FolderScanOptions) -> HashMap<String, 
             ),
         );
     }
-    result
+    Ok(result)
 }
 
 fn compare_entry(
@@ -168,6 +221,7 @@ fn compare_entry(
     left: Option<&EntryRecord>,
     right: Option<&EntryRecord>,
     compare_mode: FolderCompareMode,
+    job_id: Option<u64>,
 ) -> FolderEntry {
     let left_path = left.map(|entry| entry.path.to_string_lossy().into_owned());
     let right_path = right.map(|entry| entry.path.to_string_lossy().into_owned());
@@ -193,6 +247,7 @@ fn compare_entry(
                         left_record,
                         right_record,
                         compare_mode,
+                        job_id,
                         left_meta.as_mut().expect("left metadata exists"),
                         right_meta.as_mut().expect("right metadata exists"),
                     ) {
@@ -269,9 +324,11 @@ fn compare_files(
     left: &EntryRecord,
     right: &EntryRecord,
     compare_mode: FolderCompareMode,
+    job_id: Option<u64>,
     left_meta: &mut FsEntryMeta,
     right_meta: &mut FsEntryMeta,
 ) -> CommandResult<bool> {
+    check_scan_cancelled(job_id)?;
     if left.meta.size != right.meta.size {
         return Ok(false);
     }
@@ -279,15 +336,15 @@ fn compare_files(
     match compare_mode {
         FolderCompareMode::Metadata => Ok(left.meta.modified_ms == right.meta.modified_ms),
         FolderCompareMode::QuickHash => {
-            let left_hash = quick_hash(&left.path)?;
-            let right_hash = quick_hash(&right.path)?;
+            let (left_hash, right_hash) =
+                hash_pair_in_parallel(left, right, FolderCompareMode::QuickHash, job_id)?;
             left_meta.hash = Some(left_hash.clone());
             right_meta.hash = Some(right_hash.clone());
             Ok(left_hash == right_hash)
         }
         FolderCompareMode::FullHash => {
-            let left_hash = full_hash(&left.path)?;
-            let right_hash = full_hash(&right.path)?;
+            let (left_hash, right_hash) =
+                hash_pair_in_parallel(left, right, FolderCompareMode::FullHash, job_id)?;
             left_meta.hash = Some(left_hash.clone());
             right_meta.hash = Some(right_hash.clone());
             Ok(left_hash == right_hash)
@@ -295,7 +352,85 @@ fn compare_files(
     }
 }
 
-fn quick_hash(path: &Path) -> CommandResult<String> {
+fn hash_pair_in_parallel(
+    left_record: &EntryRecord,
+    right_record: &EntryRecord,
+    compare_mode: FolderCompareMode,
+    job_id: Option<u64>,
+) -> CommandResult<(String, String)> {
+    check_scan_cancelled(job_id)?;
+    thread::scope(|scope| {
+        let left = scope.spawn(|| cached_hash_file(left_record, compare_mode, job_id));
+        let right = scope.spawn(|| cached_hash_file(right_record, compare_mode, job_id));
+        let left_hash = left.join().map_err(|_| hash_worker_error())??;
+        let right_hash = right.join().map_err(|_| hash_worker_error())??;
+        Ok((left_hash, right_hash))
+    })
+}
+
+fn cached_hash_file(
+    record: &EntryRecord,
+    compare_mode: FolderCompareMode,
+    job_id: Option<u64>,
+) -> CommandResult<String> {
+    let mode = match compare_mode {
+        FolderCompareMode::QuickHash => HashMode::Quick,
+        FolderCompareMode::FullHash => HashMode::Full,
+        FolderCompareMode::Metadata => {
+            return Err(CommandError::new(
+                AppErrorCode::ScanFailed,
+                "메타데이터 비교에는 해시 cache를 사용하지 않습니다.",
+            ));
+        }
+    };
+    let key = HashCacheKey {
+        path: record.path.to_string_lossy().into_owned(),
+        size: record.meta.size,
+        modified_ms: record.meta.modified_ms,
+        mode,
+    };
+    if let Some(cached) = hash_cache()
+        .lock()
+        .expect("hash cache lock")
+        .get(&key)
+        .cloned()
+    {
+        return Ok(cached);
+    }
+
+    let hash = hash_file_for_mode(&record.path, compare_mode, job_id)?;
+    let mut cache = hash_cache().lock().expect("hash cache lock");
+    if cache.len() >= HASH_CACHE_LIMIT {
+        cache.clear();
+    }
+    cache.insert(key, hash.clone());
+    Ok(hash)
+}
+
+fn hash_file_for_mode(
+    path: &Path,
+    compare_mode: FolderCompareMode,
+    job_id: Option<u64>,
+) -> CommandResult<String> {
+    match compare_mode {
+        FolderCompareMode::QuickHash => quick_hash(path, job_id),
+        FolderCompareMode::FullHash => full_hash(path, job_id),
+        FolderCompareMode::Metadata => Err(CommandError::new(
+            AppErrorCode::ScanFailed,
+            "메타데이터 비교에는 해시 worker를 사용하지 않습니다.",
+        )),
+    }
+}
+
+fn hash_worker_error() -> CommandError {
+    CommandError::new(
+        AppErrorCode::ScanFailed,
+        format!("해시 worker {HASH_PAIR_WORKERS}개 중 하나가 중단됐습니다. 다시 스캔하세요."),
+    )
+}
+
+fn quick_hash(path: &Path, job_id: Option<u64>) -> CommandResult<String> {
+    check_scan_cancelled(job_id)?;
     let mut file = fs::File::open(path).map_err(|error| {
         CommandError::io(
             AppErrorCode::ScanFailed,
@@ -329,6 +464,7 @@ fn quick_hash(path: &Path) -> CommandResult<String> {
     hasher.update(&buffer);
 
     if length > QUICK_HASH_CHUNK as u64 {
+        check_scan_cancelled(job_id)?;
         file.seek(SeekFrom::Start(length - QUICK_HASH_CHUNK as u64))
             .map_err(|error| {
                 CommandError::io(
@@ -351,7 +487,8 @@ fn quick_hash(path: &Path) -> CommandResult<String> {
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-fn full_hash(path: &Path) -> CommandResult<String> {
+fn full_hash(path: &Path, job_id: Option<u64>) -> CommandResult<String> {
+    check_scan_cancelled(job_id)?;
     let mut file = fs::File::open(path).map_err(|error| {
         CommandError::io(
             AppErrorCode::ScanFailed,
@@ -363,6 +500,7 @@ fn full_hash(path: &Path) -> CommandResult<String> {
     let mut buffer = [0u8; 128 * 1024];
 
     loop {
+        check_scan_cancelled(job_id)?;
         let read = file.read(&mut buffer).map_err(|error| {
             CommandError::io(
                 AppErrorCode::ScanFailed,
@@ -377,6 +515,31 @@ fn full_hash(path: &Path) -> CommandResult<String> {
     }
 
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn check_scan_cancelled(job_id: Option<u64>) -> CommandResult<()> {
+    let Some(id) = job_id else {
+        return Ok(());
+    };
+    if cancelled_scan_ids()
+        .lock()
+        .expect("scan cancel lock")
+        .contains(&id)
+    {
+        return Err(CommandError::new(
+            AppErrorCode::Cancelled,
+            "폴더 스캔을 취소했습니다.",
+        ));
+    }
+    Ok(())
+}
+
+fn cancelled_scan_ids() -> &'static Mutex<HashSet<u64>> {
+    CANCELLED_SCAN_IDS.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn hash_cache() -> &'static Mutex<HashMap<HashCacheKey, String>> {
+    HASH_CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn modified_ms(metadata: &fs::Metadata) -> Option<u64> {
@@ -426,6 +589,7 @@ mod tests {
             Some(&left),
             Some(&right),
             FolderCompareMode::Metadata,
+            None,
         );
 
         assert!(matches!(&entry.status, FolderEntryStatus::Error));
@@ -495,6 +659,7 @@ mod tests {
             Some(&left),
             Some(&right),
             FolderCompareMode::QuickHash,
+            None,
         );
 
         assert!(matches!(&entry.status, FolderEntryStatus::Error));
@@ -508,9 +673,50 @@ mod tests {
         left.write_all(b"alpha").expect("write");
         right.write_all(b"bravo").expect("write");
         assert_ne!(
-            quick_hash(left.path()).expect("hash"),
-            quick_hash(right.path()).expect("hash")
+            quick_hash(left.path(), None).expect("hash"),
+            quick_hash(right.path(), None).expect("hash")
         );
+    }
+
+    #[test]
+    fn quick_hash_compare_populates_both_parallel_hash_results() {
+        let mut left_file = tempfile::NamedTempFile::new().expect("temp file");
+        let mut right_file = tempfile::NamedTempFile::new().expect("temp file");
+        left_file.write_all(b"alpha").expect("write left");
+        right_file.write_all(b"alpha").expect("write right");
+        let left = EntryRecord::ok(left_file.path().to_path_buf(), file_meta(5));
+        let right = EntryRecord::ok(right_file.path().to_path_buf(), file_meta(5));
+
+        let entry = compare_entry(
+            "alpha.txt".to_string(),
+            Some(&left),
+            Some(&right),
+            FolderCompareMode::QuickHash,
+            None,
+        );
+
+        assert!(matches!(&entry.status, FolderEntryStatus::Same));
+        assert!(entry.left.expect("left meta").hash.is_some());
+        assert!(entry.right.expect("right meta").hash.is_some());
+    }
+
+    #[test]
+    fn hash_cache_reuses_size_mtime_keys_and_separates_modes() {
+        hash_cache().lock().expect("hash cache lock").clear();
+        let mut file = tempfile::NamedTempFile::new().expect("temp file");
+        file.write_all(b"alpha").expect("write");
+        let record = EntryRecord::ok(file.path().to_path_buf(), file_meta(5));
+
+        let first_quick =
+            cached_hash_file(&record, FolderCompareMode::QuickHash, None).expect("quick hash");
+        fs::write(file.path(), b"bravo").expect("rewrite same length");
+        let second_quick = cached_hash_file(&record, FolderCompareMode::QuickHash, None)
+            .expect("cached quick hash");
+        let full_hash =
+            cached_hash_file(&record, FolderCompareMode::FullHash, None).expect("full hash");
+
+        assert_eq!(first_quick, second_quick);
+        assert_ne!(second_quick, full_hash);
     }
 
     #[test]
@@ -518,8 +724,31 @@ mod tests {
         let mut file = tempfile::NamedTempFile::new().expect("temp file");
         file.write_all(b"same content").expect("write");
         assert_eq!(
-            full_hash(file.path()).expect("hash"),
-            full_hash(file.path()).expect("hash")
+            full_hash(file.path(), None).expect("hash"),
+            full_hash(file.path(), None).expect("hash")
         );
+    }
+
+    #[test]
+    fn cancelled_scan_returns_stable_cancelled_error() {
+        let left = tempfile::tempdir().expect("left dir");
+        let right = tempfile::tempdir().expect("right dir");
+        let job_id = 42;
+        cancel_folder_scan(job_id).expect("cancel scan");
+
+        let error = scan_directories(
+            left.path().to_string_lossy().into_owned(),
+            right.path().to_string_lossy().into_owned(),
+            FolderScanOptions {
+                compare_mode: FolderCompareMode::Metadata,
+                include_hidden: false,
+                respect_gitignore: false,
+                follow_symlinks: false,
+            },
+            Some(job_id),
+        )
+        .expect_err("cancelled scan should fail");
+
+        assert_eq!(error.code, AppErrorCode::Cancelled);
     }
 }

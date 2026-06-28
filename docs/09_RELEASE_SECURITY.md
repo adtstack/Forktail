@@ -62,6 +62,7 @@ path + size + modified time + optional quick/full hash
 - target과 같은 디렉터리 또는 사용자 지정 backup dir
 - 충돌하지 않는 timestamp/sequence 이름
 - retention count
+- restore는 같은 target의 backup만 허용하며 현재 target을 다시 backup
 - backup 생성 실패 시 기본은 저장 중단
 
 ## 4. 경로와 symlink
@@ -100,12 +101,14 @@ CI 후보:
 - npm audit는 advisory triage와 함께 사용
 - license allowlist
 - 직접 JavaScript dependency/devDependency license allowlist는 `src/core/dependencyPolicy.test.ts`에서 로컬 `package-lock.json`의 버전 고정과 설치된 package metadata의 license를 대조한다.
+- 직접 Rust dependency/build-dependency license allowlist는 `src/core/rustDependencyPolicy.test.ts`에서 `Cargo.toml`과 `Cargo.lock`의 직접 dependency 목록, crates.io source, 잠긴 semver version을 대조한다.
+- CI는 `npm audit --audit-level=high`를 실행해 high/critical JavaScript advisory를 gate한다. low/moderate advisory는 영향 범위와 업그레이드 비용을 별도 triage한다.
 - SBOM (CycloneDX/SPDX)
 - lockfile commit
 
 Tauri core/build/CLI는 같은 major/minor 계열을 유지하고 lockfile로 재현성을 확보한다.
 
-현재 테스트 범위는 직접 npm 의존성의 MIT/Apache 계열 라이선스와 lockfile 재현성 확인이다. Rust 의존성과 transitive 전체 의존성 고지, SBOM, advisory triage는 공개 릴리스 전에 별도 도구로 생성·검토해야 하며 이 테스트가 이를 대체하지 않는다.
+현재 테스트 범위는 직접 npm/Rust 의존성의 라이선스와 lockfile 재현성 확인이다. transitive 전체 의존성 고지, Rust advisory audit, SBOM, low/moderate advisory triage는 공개 릴리스 전에 별도 도구로 생성·검토해야 하며 이 테스트가 이를 대체하지 않는다.
 
 ## 7. 배포
 

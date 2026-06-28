@@ -18,8 +18,16 @@ function tokenizeLines(text: string): LineToken[] {
   let lineNumber = 1;
 
   while (offset < text.length) {
-    const newline = text.indexOf("\n", offset);
-    const endOffset = newline === -1 ? text.length : newline + 1;
+    let cursor = offset;
+    while (cursor < text.length && text[cursor] !== "\n" && text[cursor] !== "\r") {
+      cursor += 1;
+    }
+
+    const endOffset = cursor >= text.length
+      ? text.length
+      : text[cursor] === "\r" && text[cursor + 1] === "\n"
+        ? cursor + 2
+        : cursor + 1;
     tokens.push({
       content: text.slice(offset, endOffset),
       startOffset: offset,
@@ -35,7 +43,7 @@ function tokenizeLines(text: string): LineToken[] {
 }
 
 function markerValue(line: string): string {
-  return line.replace(/\r?\n$/, "");
+  return line.replace(/\r\n$|\r$|\n$/, "");
 }
 
 export function parseConflictBlocks(text: string): ConflictBlock[] {

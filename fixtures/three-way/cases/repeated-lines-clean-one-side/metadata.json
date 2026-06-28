@@ -1,0 +1,8 @@
+{
+  "id": "repeated-lines-clean-one-side",
+  "categories": [
+    "repeated-lines-ambiguity"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

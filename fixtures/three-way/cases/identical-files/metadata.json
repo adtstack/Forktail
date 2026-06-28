@@ -1,0 +1,8 @@
+{
+  "id": "identical-files",
+  "categories": [
+    "same-overlapping-modify"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

@@ -2,13 +2,16 @@ import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react"
 import { FolderCompareView } from "./components/FolderCompareView";
 import { StartPage } from "./components/StartPage";
 import {
+  cancelFolderScan as cancelFolderScanJob,
   chooseDirectory,
   chooseSavePath,
   chooseTextFile,
   isTauriRuntime,
+  listFileBackups,
   mergeTexts,
   readTextFile,
   revealPath,
+  restoreTextFileBackup,
   scanDirectories,
   statTextFileVersion,
   startupArgs,
@@ -28,6 +31,7 @@ import {
   compareSavePreconditionForPath,
   compareSaveStateAfterSideWrite,
   fileDocumentWithText,
+  preservedSaveEncodingForDocument,
   writePreconditionFromDocument,
 } from "./core/compareSave";
 import { hasUnresolvedConflicts } from "./core/conflicts";
@@ -89,9 +93,14 @@ import type {
   FolderScanOptions,
   FolderScanProgress,
   FolderScanResult,
+  FileBackup,
   MergeSession,
 } from "./core/models";
 import type { TextDiffOptions } from "./core/diffOptions";
+import {
+  textForSaveLineEnding,
+  type SaveLineEndingMode,
+} from "./core/lineEndings";
 
 const FileCompareView = lazy(() =>
   import("./components/FileCompareView").then((module) => ({
@@ -103,6 +112,21 @@ const MergeView = lazy(() =>
     default: module.MergeView,
   })),
 );
+
+type BackupDialogState =
+  | {
+      kind: "compare";
+      side: CompareSide;
+      targetPath: string;
+      title: string;
+      backups: FileBackup[];
+    }
+  | {
+      kind: "merge";
+      targetPath: string;
+      title: string;
+      backups: FileBackup[];
+    };
 
 export default function App() {
   const [mode, setMode] = useState<AppMode>("home");
@@ -136,6 +160,7 @@ export default function App() {
     session: RecentSession;
     message: string;
   } | null>(null);
+  const [backupDialog, setBackupDialog] = useState<BackupDialogState | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadAppearanceSettings().theme);
   const [systemTheme, setSystemTheme] = useState<"dark" | "light">(() => preferredSystemTheme());
   const pendingLeaveAction = useRef<(() => void) | null>(null);
@@ -343,6 +368,7 @@ export default function App() {
     setMessage(null);
     setRecentSessionFailure(null);
     setFolderScanProgress({
+      jobId: scanId,
       active: true,
       leftRoot,
       rightRoot,
@@ -351,7 +377,7 @@ export default function App() {
 
     void (async () => {
       try {
-        const result = await scanDirectories(leftRoot, rightRoot, options);
+        const result = await scanDirectories(leftRoot, rightRoot, options, scanId);
         if (activeFolderScanId.current !== scanId) return;
         setFolderOptions(options);
         saveFolderScanOptions(options);
@@ -377,6 +403,7 @@ export default function App() {
     const scanId = activeFolderScanId.current;
     activeFolderScanId.current = scanId + 1;
     releasedFolderScanIds.current.add(scanId);
+    void cancelFolderScanJob(scanId).catch(() => {});
     endBusy();
     setError(null);
     setMessage("폴더 스캔을 취소했습니다.");
@@ -840,7 +867,12 @@ export default function App() {
     });
   }));
 
-  const saveCompareNow = useCallback((side: CompareSide, forceSaveAs: boolean) => run(async () => {
+  const saveCompareNow = useCallback((
+    side: CompareSide,
+    forceSaveAs: boolean,
+    forceOverwrite = false,
+    lineEndingMode: SaveLineEndingMode = "original",
+  ) => run(async () => {
     if (!compareSession) return;
     const target = compareSession[side];
     const sideLabel = side === "left" ? "왼쪽" : "오른쪽";
@@ -856,11 +888,20 @@ export default function App() {
       compareOutputVersion[side],
       side,
     );
-    const written = await writeTextFileAtomic(outputPath, target.text, true, precondition);
-    const saved = compareSaveStateAfterSideWrite(compareSession, side, target.text, written);
+    const saveText = textForSaveLineEnding(target.text, target.lineEnding, lineEndingMode);
+    const written = await writeTextFileAtomic(
+      outputPath,
+      saveText,
+      true,
+      forceOverwrite ? null : precondition,
+      preservedSaveEncodingForDocument(target),
+    );
+    const saved = compareSaveStateAfterSideWrite(compareSession, side, saveText, written);
     setCompareSession(saved.session);
     setSavedCompareText((current) => ({ ...current, [side]: saved.savedSnapshot }));
     setCompareOutputVersion((current) => ({ ...current, [side]: saved.outputVersion }));
+    setCompareFileChangeNotice(null);
+    setSuppressedCompareFileChangeKey(null);
     rememberRecentSession({
       kind: "compare",
       leftPath: saved.session.left.path,
@@ -877,11 +918,28 @@ export default function App() {
     );
     if (!outputPath) return;
     const report = buildDiffReport({ session: compareSession, options, generatedAt: new Date() });
-    const written = await writeTextFileAtomic(outputPath, report, true, null);
+    const written = await writeTextFileAtomic(outputPath, report, true, null, "UTF-8");
     setMessage(`리포트 저장 완료: ${written.path}`);
   }), [compareSession, run]);
 
-  const saveMergeNow = useCallback((forceSaveAs: boolean) => run(async () => {
+  const showCompareBackups = useCallback((side: CompareSide) => run(async () => {
+    if (!compareSession) return;
+    const target = compareSession[side];
+    const sideLabel = side === "left" ? "왼쪽" : "오른쪽";
+    const backups = await listFileBackups(target.path);
+    setBackupDialog({
+      kind: "compare",
+      side,
+      targetPath: target.path,
+      title: `${sideLabel} 파일 백업`,
+      backups,
+    });
+  }), [compareSession, run]);
+
+  const saveMergeNow = useCallback((
+    forceSaveAs: boolean,
+    lineEndingMode: SaveLineEndingMode = "original",
+  ) => run(async () => {
     if (!mergeSession) return;
     let outputPath = forceSaveAs ? null : mergeSession.outputPath;
     if (!outputPath) {
@@ -892,11 +950,24 @@ export default function App() {
     }
     if (!outputPath) return;
     const precondition = mergeSavePreconditionForPath(mergeSession, outputPath, mergeOutputVersion);
-    const written = await writeTextFileAtomic(outputPath, mergeSession.result, true, precondition);
-    const saved = mergeSaveStateAfterWrite(mergeSession.result, written);
+    const saveText = textForSaveLineEnding(
+      mergeSession.result,
+      mergeSession.ours.lineEnding,
+      lineEndingMode,
+    );
+    const written = await writeTextFileAtomic(
+      outputPath,
+      saveText,
+      true,
+      precondition,
+      "UTF-8",
+    );
+    const saved = mergeSaveStateAfterWrite(saveText, written);
     clearMergeRecoveryDraft(mergeSession);
     setMergeRecoveryDraft(null);
-    setMergeSession((current) => current ? { ...current, outputPath: saved.outputPath } : current);
+    setMergeSession((current) =>
+      current ? { ...current, result: saved.savedSnapshot, outputPath: saved.outputPath } : current,
+    );
     setSavedMergeResult(saved.savedSnapshot);
     setMergeOutputVersion(saved.outputVersion);
     rememberRecentSession({
@@ -909,14 +980,74 @@ export default function App() {
     setMessage(saved.message);
   }), [mergeOutputVersion, mergeSession, rememberRecentSession, run]);
 
-  const saveMerge = useCallback((forceSaveAs: boolean) => {
+  const showMergeBackups = useCallback(() => run(async () => {
+    if (!mergeSession?.outputPath) return;
+    const backups = await listFileBackups(mergeSession.outputPath);
+    setBackupDialog({
+      kind: "merge",
+      targetPath: mergeSession.outputPath,
+      title: "병합 결과 백업",
+      backups,
+    });
+  }), [mergeSession, run]);
+
+  const restoreBackup = useCallback((backup: FileBackup) => run(async () => {
+    if (!backupDialog) return;
+    const precondition = backupDialog.kind === "compare" && compareSession
+      ? compareSavePreconditionForPath(
+          compareSession,
+          backupDialog.targetPath,
+          compareOutputVersion[backupDialog.side],
+          backupDialog.side,
+        )
+      : backupDialog.kind === "merge" && mergeSession
+        ? mergeSavePreconditionForPath(mergeSession, backupDialog.targetPath, mergeOutputVersion)
+        : null;
+
+    const written = await restoreTextFileBackup(backupDialog.targetPath, backup.path, precondition);
+    const restored = await readTextFile(written.path);
+
+    if (backupDialog.kind === "compare") {
+      setCompareSession((current) => current ? {
+        ...current,
+        [backupDialog.side]: restored,
+      } : current);
+      setSavedCompareText((current) => ({
+        ...current,
+        [backupDialog.side]: restored.text,
+      }));
+      setCompareOutputVersion((current) => ({
+        ...current,
+        [backupDialog.side]: writePreconditionFromDocument(restored),
+      }));
+      setCompareModelRevision((current) => current + 1);
+    } else {
+      setMergeSession((current) => current ? {
+        ...current,
+        result: restored.text,
+        outputPath: restored.path,
+      } : current);
+      setSavedMergeResult(restored.text);
+      setMergeOutputVersion(writePreconditionFromDocument(restored));
+      if (mergeSession) clearMergeRecoveryDraft(mergeSession);
+      setMergeRecoveryDraft(null);
+    }
+
+    setBackupDialog(null);
+    setMessage(`백업 복원 완료: ${restored.path}`);
+  }), [backupDialog, compareOutputVersion, compareSession, mergeOutputVersion, mergeSession, run]);
+
+  const saveMerge = useCallback((
+    forceSaveAs: boolean,
+    lineEndingMode: SaveLineEndingMode = "original",
+  ) => {
     if (!mergeSession) return;
     if (!hasUnresolvedConflicts(mergeSession.result)) {
-      saveMergeNow(forceSaveAs);
+      saveMergeNow(forceSaveAs, lineEndingMode);
       return;
     }
 
-    pendingSaveAction.current = () => saveMergeNow(forceSaveAs);
+    pendingSaveAction.current = () => saveMergeNow(forceSaveAs, lineEndingMode);
     setShowUnresolvedSaveDialog(true);
   }, [mergeSession, saveMergeNow]);
 
@@ -1031,6 +1162,41 @@ export default function App() {
           </section>
         </div>
       )}
+      {backupDialog && (
+        <div className="modal-backdrop">
+          <section
+            className="confirm-dialog backup-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="backup-dialog-title"
+          >
+            <h2 id="backup-dialog-title">{backupDialog.title}</h2>
+            <p>{backupDialog.targetPath}</p>
+            {backupDialog.backups.length === 0 ? (
+              <p>복원할 백업이 없습니다.</p>
+            ) : (
+              <ul className="backup-list">
+                {backupDialog.backups.map((backup) => (
+                  <li key={backup.path}>
+                    <div>
+                      <strong>{backup.name}</strong>
+                      <span>
+                        {formatBytes(backup.size)} · {formatBackupTime(backup.modifiedMs)}
+                      </span>
+                    </div>
+                    <button type="button" onClick={() => restoreBackup(backup)}>
+                      복원
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="dialog-actions">
+              <button type="button" onClick={() => setBackupDialog(null)}>닫기</button>
+            </div>
+          </section>
+        </div>
+      )}
 
       <Suspense
         fallback={
@@ -1098,9 +1264,17 @@ export default function App() {
             onTextChange={updateCompareSideText}
             onDropFileOnSide={replaceDroppedCompareSide}
             onDropRejected={rejectDroppedFiles}
-            onSaveSide={(side) => saveCompareNow(side, false)}
-            onSaveSideAs={(side) => saveCompareNow(side, true)}
+            onSaveSide={(side, lineEndingMode) =>
+              saveCompareNow(side, false, false, lineEndingMode)
+            }
+            onSaveSideAs={(side, lineEndingMode) =>
+              saveCompareNow(side, true, false, lineEndingMode)
+            }
+            onOverwriteChangedFile={(side, lineEndingMode) =>
+              saveCompareNow(side, false, true, lineEndingMode)
+            }
             onExportReport={exportCompareReport}
+            onShowBackups={showCompareBackups}
             onSwap={() =>
               setCleanCompareSession({ left: compareSession.right, right: compareSession.left })
             }
@@ -1142,8 +1316,9 @@ export default function App() {
               setMergeRecoveryDraft(null);
               setMessage("병합 결과 draft를 삭제했습니다.");
             }}
-            onSave={() => saveMerge(false)}
-            onSaveAs={() => saveMerge(true)}
+            onSave={(lineEndingMode) => saveMerge(false, lineEndingMode)}
+            onSaveAs={(lineEndingMode) => saveMerge(true, lineEndingMode)}
+            onShowBackups={showMergeBackups}
           />
         )}
       </Suspense>
@@ -1154,4 +1329,15 @@ export default function App() {
 function preferredSystemTheme(): "dark" | "light" {
   if (typeof window === "undefined" || !window.matchMedia) return "dark";
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function formatBackupTime(modifiedMs: number | null): string {
+  if (modifiedMs == null) return "수정 시간 알 수 없음";
+  return new Date(modifiedMs).toLocaleString();
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }

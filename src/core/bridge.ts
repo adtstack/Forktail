@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   FileDocument,
+  FileBackup,
   FileVersion,
   FolderScanOptions,
   FolderScanResult,
@@ -67,17 +68,43 @@ export async function statTextFileVersion(path: string): Promise<FileVersion> {
   return invoke<FileVersion>("stat_text_file_version", { path });
 }
 
+export async function listFileBackups(path: string): Promise<FileBackup[]> {
+  requireTauri();
+  return invoke<FileBackup[]>("list_file_backups", { path });
+}
+
+export async function restoreTextFileBackup(
+  path: string,
+  backupPath: string,
+  precondition: WritePrecondition | null = null,
+): Promise<WriteResult> {
+  requireTauri();
+  return invoke<WriteResult>("restore_text_file_backup", {
+    path,
+    backupPath,
+    expectedSize: precondition?.expectedSize ?? null,
+    expectedModifiedMs: precondition?.expectedModifiedMs ?? null,
+  });
+}
+
 export async function scanDirectories(
   leftRoot: string,
   rightRoot: string,
   options: FolderScanOptions,
+  jobId: number | null = null,
 ): Promise<FolderScanResult> {
   requireTauri();
   return invoke<FolderScanResult>("scan_directories", {
     leftRoot,
     rightRoot,
     options,
+    jobId,
   });
+}
+
+export async function cancelFolderScan(jobId: number): Promise<void> {
+  requireTauri();
+  return invoke<void>("cancel_folder_scan", { jobId });
 }
 
 export async function mergeTexts(base: string, ours: string, theirs: string): Promise<MergeResult> {
@@ -100,6 +127,7 @@ export async function writeTextFileAtomic(
   text: string,
   createBackup = true,
   precondition: WritePrecondition | null = null,
+  encoding: string | null = null,
 ): Promise<WriteResult> {
   requireTauri();
   return invoke<WriteResult>("write_text_file_atomic", {
@@ -108,5 +136,6 @@ export async function writeTextFileAtomic(
     createBackup,
     expectedSize: precondition?.expectedSize ?? null,
     expectedModifiedMs: precondition?.expectedModifiedMs ?? null,
+    encoding,
   });
 }

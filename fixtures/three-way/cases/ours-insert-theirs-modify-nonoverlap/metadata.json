@@ -1,0 +1,9 @@
+{
+  "id": "ours-insert-theirs-modify-nonoverlap",
+  "categories": [
+    "non-overlapping-modify",
+    "insert"
+  ],
+  "clean": true,
+  "conflictCount": 0
+}

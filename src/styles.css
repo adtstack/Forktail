@@ -105,6 +105,8 @@
   --side-diff-added-bg: #27452fcc;
   --side-diff-added-text: #c7ffd8;
   --side-diff-empty-bg: #2b3039;
+  --active-diff-bg: #243b5f66;
+  --active-diff-glyph: #7aa2ff;
   --active-conflict-bg: #5f471f66;
   --active-conflict-glyph: #f4c96b;
 }
@@ -247,6 +249,8 @@ input, select {
   --side-diff-added-bg: #d9f2e2;
   --side-diff-added-text: #235c41;
   --side-diff-empty-bg: #eef2f7;
+  --active-diff-bg: #cfe0ff99;
+  --active-diff-glyph: #315fc9;
   --active-conflict-bg: #ffe2a966;
   --active-conflict-glyph: #c8841f;
 }
@@ -321,6 +325,41 @@ input, select {
   justify-content: flex-end;
   gap: 8px;
   margin-top: 18px;
+}
+.backup-dialog {
+  width: min(680px, 100%);
+}
+.backup-list {
+  display: grid;
+  gap: 8px;
+  max-height: min(420px, 60vh);
+  margin: 16px 0 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+.backup-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: var(--panel-bg);
+}
+.backup-list strong,
+.backup-list span {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.backup-list span {
+  margin-top: 4px;
+  color: var(--muted-text);
+  font-size: 12px;
 }
 .danger-button {
   background: var(--danger-bg);
@@ -987,6 +1026,8 @@ input, select {
 .side-diff-removed { background: var(--side-diff-removed-bg); color: var(--side-diff-removed-text); text-decoration: line-through; }
 .side-diff-added { background: var(--side-diff-added-bg); color: var(--side-diff-added-text); }
 .side-diff-empty { background: var(--side-diff-empty-bg); color: var(--muted); }
+.active-diff-line { background: var(--active-diff-bg); }
+.active-diff-glyph { background: var(--active-diff-glyph); width: 3px !important; margin-left: 3px; }
 .active-conflict-line { background: var(--active-conflict-bg); }
 .active-conflict-glyph { background: var(--active-conflict-glyph); width: 3px !important; margin-left: 3px; }
 

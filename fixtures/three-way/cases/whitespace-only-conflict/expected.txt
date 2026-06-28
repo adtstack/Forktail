@@ -1,0 +1,7 @@
+<<<<<<< ours
+key = value
+||||||| original
+key=value
+=======
+key=value 
+>>>>>>> theirs

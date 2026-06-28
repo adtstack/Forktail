@@ -15,6 +15,7 @@ describe("CI branch gate policy", () => {
   it("keeps frontend and Rust gates explicit and bounded", () => {
     expectInOrder(ciWorkflow, [
       "npm ci",
+      "npm audit --audit-level=high",
       "npm run typecheck",
       "npm test",
       "npm run build",

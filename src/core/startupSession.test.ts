@@ -91,6 +91,7 @@ describe("startup CLI session parser", () => {
       ["--compare", "/left"],
       ["--folders", "/left"],
       ["--merge", "/base", "/ours"],
+      ["--mergetool", "/base", "/ours", "/theirs"],
       ["--mergetool", "/base", "/ours", "/theirs", "/out", "/extra"],
     ]) {
       const result = parseStartupSessionArgs(args);

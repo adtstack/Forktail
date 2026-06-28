@@ -1,0 +1,10 @@
+{
+  "id": "move-like-delete-add",
+  "categories": [
+    "move-like-delete-add",
+    "delete",
+    "insert"
+  ],
+  "clean": false,
+  "conflictCount": 1
+}
