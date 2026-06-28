@@ -101,6 +101,18 @@ npm run tauri build
 open src-tauri/target/release/bundle/macos/forktail.app
 ```
 
+### GitHub 릴리스 빌드
+
+릴리스 workflow는 `vX.Y.Z` 태그 또는 수동 실행으로만 동작한다. 실행 전에 `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`의 버전이 태그와 일치해야 한다.
+
+```bash
+npm run release:validate -- v0.1.0
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions는 frontend/Rust 검증을 먼저 실행한 뒤 macOS `.app`, Windows NSIS, Linux AppImage bundle을 플랫폼별 `.tar.gz` artifact로 묶고 `checksums.txt`와 함께 unsigned draft prerelease에 첨부한다. 코드 서명, notarization, SBOM/NOTICE, 세 OS clean smoke가 끝나기 전에는 stable release로 승격하지 않는다.
+
 ## 검증 명령
 
 ```bash

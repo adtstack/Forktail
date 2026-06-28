@@ -1,0 +1,217 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to package"
+        required: true
+        type: string
+      prerelease:
+        description: "Mark the draft release as a prerelease"
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate release inputs
+    runs-on: ubuntu-22.04
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+    steps:
+      - name: Resolve release inputs
+        id: release
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ inputs.tag }}
+          INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$INPUT_TAG"
+            prerelease="$INPUT_PRERELEASE"
+          else
+            tag="$REF_NAME"
+            prerelease="true"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate release tag and versions
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: npm run release:validate
+
+      - name: Audit JavaScript dependencies
+        run: npm audit --audit-level=high
+
+      - name: Run frontend gates
+        run: npm run typecheck
+
+      - run: npm test
+
+      - run: npm run build
+
+      - name: Install Rust checks
+        run: rustup component add rustfmt clippy
+
+      - name: Run Rust gates
+        working-directory: src-tauri
+        run: |
+          cargo fmt --check
+          cargo clippy --all-targets -- -D warnings
+          cargo test
+
+  build:
+    name: Build ${{ matrix.platform }} bundle
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            os: macos-14
+            bundle: app
+            output: macos
+            artifact: forktail-macos-app
+          - platform: Windows
+            os: windows-2022
+            bundle: nsis
+            output: nsis
+            artifact: forktail-windows-nsis
+          - platform: Linux
+            os: ubuntu-22.04
+            bundle: appimage
+            output: appimage
+            artifact: forktail-linux-appimage
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ needs.validate.outputs.tag }}
+
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Linux bundle dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            curl \
+            wget \
+            file \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate release tag and versions
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: npm run release:validate
+
+      - name: Build Tauri bundle
+        run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+
+      - name: Package bundle artifact
+        shell: bash
+        env:
+          ARTIFACT: ${{ matrix.artifact }}
+          BUNDLE_OUTPUT: ${{ matrix.output }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifact
+          tar -czf "release-artifact/${ARTIFACT}-${RELEASE_TAG}.tar.gz" \
+            -C "src-tauri/target/release/bundle/${BUNDLE_OUTPUT}" .
+
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ matrix.artifact }}
+          path: release-artifact/*.tar.gz
+          if-no-files-found: error
+          retention-days: 14
+
+  draft-release:
+    name: Create draft release
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          path: release-artifacts
+
+      - name: Generate checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          find release-artifacts -type f -print0 \
+            | sort -z \
+            | xargs -0 shasum -a 256 \
+            > release-artifacts/checksums.txt
+
+      - name: Create unsigned draft GitHub release
+        shell: bash
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+        run: |
+          set -euo pipefail
+          cat > release-notes.md <<'NOTES'
+          Unsigned draft artifacts for forktail.
+
+          Security status:
+          - No updater is included.
+          - Artifacts are not code signed or notarized.
+          - Treat this as a prerelease until the three-platform smoke, signing, rollback, SBOM, and NOTICE checks are complete.
+          NOTES
+
+          mapfile -d '' assets < <(find release-artifacts -type f -print0 | sort -z)
+          flags=(--draft --title "forktail ${RELEASE_TAG}" --notes-file release-notes.md)
+          if [ "$PRERELEASE" = "true" ]; then
+            flags+=(--prerelease)
+          fi
+
+          gh release create "$RELEASE_TAG" "${assets[@]}" "${flags[@]}"
