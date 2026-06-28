@@ -305,65 +305,73 @@ export function FolderCompareView({
 
   return (
     <main className="workspace">
-      <header className="toolbar">
-        <button onClick={onBack}>← 홈</button>
-        <button onClick={onNewScan} disabled={busy}>새 폴더</button>
-        <button onClick={() => onRescan(options)} disabled={busy}>다시 스캔</button>
-        <div className="toolbar-divider" />
-        <label>
-          비교 방식&nbsp;
-          <select
-            value={options.compareMode}
-            onChange={(event) => updateMode(event.target.value as FolderCompareMode)}
-            disabled={busy}
-          >
-            <option value="metadata">메타데이터</option>
-            <option value="quickHash">빠른 해시</option>
-            <option value="fullHash">전체 해시</option>
-          </select>
-        </label>
-        <label className="toolbar-check">
-          <input
-            type="checkbox"
-            checked={options.includeHidden}
-            onChange={(event) => updateScanOption("includeHidden", event.target.checked)}
-            disabled={busy}
-          />
-          숨김 포함
-        </label>
-        <label className="toolbar-check">
-          <input
-            type="checkbox"
-            checked={options.respectGitignore}
-            onChange={(event) => updateScanOption("respectGitignore", event.target.checked)}
-            disabled={busy}
-          />
-          .gitignore
-        </label>
-        <label className="toolbar-check">
-          <input
-            type="checkbox"
-            checked={options.followSymlinks}
-            onChange={(event) => updateScanOption("followSymlinks", event.target.checked)}
-            disabled={busy}
-          />
-          symlink 추적
-        </label>
+      <header className="toolbar command-toolbar folder-command-toolbar">
+        <div className="command-group">
+          <button className="command-button" onClick={onBack}>← 홈</button>
+          <button className="command-button" onClick={onNewScan} disabled={busy}>새 폴더</button>
+          <button className="command-button primary-button" onClick={() => onRescan(options)} disabled={busy}>
+            다시 스캔
+          </button>
+        </div>
+        <div className="command-group" aria-label="스캔 옵션">
+          <label className="toolbar-field">
+            <span>비교 방식</span>
+            <select
+              className="toolbar-select wide"
+              value={options.compareMode}
+              onChange={(event) => updateMode(event.target.value as FolderCompareMode)}
+              disabled={busy}
+            >
+              <option value="metadata">메타데이터</option>
+              <option value="quickHash">빠른 해시</option>
+              <option value="fullHash">전체 해시</option>
+            </select>
+          </label>
+          <label className="toolbar-check">
+            <input
+              type="checkbox"
+              checked={options.includeHidden}
+              onChange={(event) => updateScanOption("includeHidden", event.target.checked)}
+              disabled={busy}
+            />
+            숨김 포함
+          </label>
+          <label className="toolbar-check">
+            <input
+              type="checkbox"
+              checked={options.respectGitignore}
+              onChange={(event) => updateScanOption("respectGitignore", event.target.checked)}
+              disabled={busy}
+            />
+            .gitignore
+          </label>
+          <label className="toolbar-check">
+            <input
+              type="checkbox"
+              checked={options.followSymlinks}
+              onChange={(event) => updateScanOption("followSymlinks", event.target.checked)}
+              disabled={busy}
+            />
+            symlink 추적
+          </label>
+        </div>
         <div className="toolbar-spacer" />
-        <input
-          ref={searchInputRef}
-          className="search-input"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key !== "Escape") return;
-            event.preventDefault();
-            setQuery("");
-          }}
-          placeholder="경로 필터"
-          aria-label="경로 필터"
-          aria-keyshortcuts={commandAriaKeyshortcuts("searchPath")}
-        />
+        <div className="command-group search-group">
+          <input
+            ref={searchInputRef}
+            className="search-input"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              setQuery("");
+            }}
+            placeholder="경로 필터"
+            aria-label="경로 필터"
+            aria-keyshortcuts={commandAriaKeyshortcuts("searchPath")}
+          />
+        </div>
       </header>
 
       <section className="folder-roots">

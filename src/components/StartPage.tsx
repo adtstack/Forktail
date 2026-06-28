@@ -81,120 +81,143 @@ export function StartPage({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <section className="hero-card">
-        <div className="eyebrow">LOCAL-FIRST · NO AI · PHASE 1</div>
-        <h1>forktail</h1>
-        <p>
-          텍스트 파일 비교, 폴더 비교, 3-way 병합에만 집중하는 무료 데스크톱 도구의 시작점입니다.
-        </p>
-      </section>
-
-      <section className="action-grid" aria-label="비교 시작">
-        <button
-          className="action-card"
-          onClick={onOpenCompare}
-          disabled={busy}
-          aria-keyshortcuts={commandAriaKeyshortcuts("openCompare")}
-        >
-          <span className="action-icon">2</span>
-          <strong>파일 2-way 비교</strong>
-          <small>두 파일을 나란히 열고 줄·단어 차이를 확인합니다.</small>
-        </button>
-        <button
-          className="action-card"
-          onClick={onOpenFolders}
-          disabled={busy}
-          aria-keyshortcuts={commandAriaKeyshortcuts("openFolders")}
-        >
-          <span className="action-icon">⇄</span>
-          <strong>폴더 비교</strong>
-          <small>재귀 스캔 후 동일·변경·한쪽 전용 파일을 분류합니다.</small>
-        </button>
-        <button
-          className="action-card primary"
-          onClick={onOpenMerge}
-          disabled={busy}
-          aria-keyshortcuts={commandAriaKeyshortcuts("openMerge")}
-        >
-          <span className="action-icon">3</span>
-          <strong>3-way 병합</strong>
-          <small>Base / Ours / Theirs를 자동 병합하고 충돌만 수동 해결합니다.</small>
-        </button>
-      </section>
-
-      <section className="demo-row">
-        <span>브라우저 미리보기:</span>
-        <button className="link-button" onClick={onDemoCompare}>2-way 데모</button>
-        <button className="link-button" onClick={onDemoFolders}>폴더 데모</button>
-        <button className="link-button" onClick={onDemoMerge}>3-way 데모</button>
-      </section>
-
-      <section className="theme-row" aria-label="테마">
-        <span>테마:</span>
-        <div className="segmented-control" role="group" aria-label="테마 선택">
-          {THEME_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              aria-pressed={themeMode === option.value}
-              onClick={() => onThemeModeChange(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </section>
-
-      {recentSessions.length > 0 && (
-        <section className="recent-panel" aria-label="최근 세션">
-          <div className="recent-heading">
-            <strong>최근 세션</strong>
-            <button className="link-button" onClick={onClearRecentSessions} disabled={busy}>
-              지우기
-            </button>
+      <section className="start-workbench">
+        <header className="start-header">
+          <div>
+            <span className="eyebrow">LOCAL-FIRST COMPARE</span>
+            <h1>forktail</h1>
+            <p>파일과 폴더 차이를 빠르게 검토하고, 충돌은 명시적으로 해결합니다.</p>
           </div>
-          {recentSessionFailure && failedRecentSessionStillVisible && (
-            <div className="recent-warning" role="status">
-              <span>{recentSessionFailure.message}</span>
-              <button
-                type="button"
-                className="link-button"
-                onClick={() => onRemoveRecentSession(recentSessionFailure.session.id)}
-                disabled={busy}
-              >
-                이 항목 제거
-              </button>
-            </div>
-          )}
-          <div className="recent-list">
-            {recentSessions.map((session) => (
-              <button
-                key={session.id}
-                className="recent-row"
-                onClick={() => onOpenRecentSession(session)}
-                disabled={busy}
-              >
-                <span className="recent-kind">{recentKindLabel(session)}</span>
-                <span className="recent-paths">{recentPathLabel(session)}</span>
-                <time dateTime={new Date(session.updatedAt).toISOString()}>
-                  {formatRecentTime(session.updatedAt)}
-                </time>
-              </button>
-            ))}
+          <div className="start-assurance" aria-label="작업 경계">
+            <span>오프라인</span>
+            <span>텍스트 전용</span>
+            <span>백업 저장</span>
           </div>
+        </header>
+
+        <section className="action-grid" aria-label="비교 시작">
+          <button
+            className="action-card primary"
+            onClick={onOpenCompare}
+            disabled={busy}
+            aria-keyshortcuts={commandAriaKeyshortcuts("openCompare")}
+          >
+            <span className="action-icon">2</span>
+            <span className="action-copy">
+              <strong>파일 2-way 비교</strong>
+              <small>F7로 변경 블록을 순회합니다.</small>
+            </span>
+          </button>
+          <button
+            className="action-card"
+            onClick={onOpenFolders}
+            disabled={busy}
+            aria-keyshortcuts={commandAriaKeyshortcuts("openFolders")}
+          >
+            <span className="action-icon">⇄</span>
+            <span className="action-copy">
+              <strong>폴더 비교</strong>
+              <small>상태 필터와 해시 모드로 좁힙니다.</small>
+            </span>
+          </button>
+          <button
+            className="action-card"
+            onClick={onOpenMerge}
+            disabled={busy}
+            aria-keyshortcuts={commandAriaKeyshortcuts("openMerge")}
+          >
+            <span className="action-icon">3</span>
+            <span className="action-copy">
+              <strong>3-way 병합</strong>
+              <small>충돌만 선택하고 결과를 저장합니다.</small>
+            </span>
+          </button>
         </section>
-      )}
 
-      <section className="scope-card">
-        <strong>1차 개발 범위</strong>
-        <div className="scope-pills">
-          <span>텍스트 Diff</span>
-          <span>폴더 스캔</span>
-          <span>3-way Merge</span>
-          <span>원자적 저장·백업</span>
-          <span>Windows / macOS / Linux</span>
+        <div className="start-drop-hint" role="status">
+          파일 두 개를 이 화면에 놓으면 바로 2-way 비교로 엽니다.
         </div>
-        <p>압축 파일·원격 파일 시스템·AI 병합은 범위 밖입니다. 먼저 매일 믿고 쓸 수 있는 기본기를 완성합니다.</p>
+
+        <section className="start-lower-grid">
+          <section className="recent-panel" aria-label="최근 세션">
+            <div className="recent-heading">
+              <strong>최근 세션</strong>
+              {recentSessions.length > 0 && (
+                <button className="link-button" onClick={onClearRecentSessions} disabled={busy}>
+                  지우기
+                </button>
+              )}
+            </div>
+            {recentSessionFailure && failedRecentSessionStillVisible && (
+              <div className="recent-warning" role="status">
+                <span>{recentSessionFailure.message}</span>
+                <button
+                  type="button"
+                  className="link-button"
+                  onClick={() => onRemoveRecentSession(recentSessionFailure.session.id)}
+                  disabled={busy}
+                >
+                  이 항목 제거
+                </button>
+              </div>
+            )}
+            {recentSessions.length > 0 ? (
+              <div className="recent-list">
+                {recentSessions.map((session) => (
+                  <button
+                    key={session.id}
+                    className="recent-row"
+                    onClick={() => onOpenRecentSession(session)}
+                    disabled={busy}
+                  >
+                    <span className="recent-kind">{recentKindLabel(session)}</span>
+                    <span className="recent-paths">{recentPathLabel(session)}</span>
+                    <time dateTime={new Date(session.updatedAt).toISOString()}>
+                      {formatRecentTime(session.updatedAt)}
+                    </time>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <p className="recent-empty">최근 세션이 없습니다.</p>
+            )}
+          </section>
+
+          <aside className="start-side-panel">
+            <section className="demo-row" aria-label="샘플 세션">
+              <span>샘플</span>
+              <button className="link-button" onClick={onDemoCompare}>2-way 데모</button>
+              <button className="link-button" onClick={onDemoFolders}>폴더 데모</button>
+              <button className="link-button" onClick={onDemoMerge}>3-way 데모</button>
+            </section>
+
+            <section className="theme-row" aria-label="테마">
+              <span>테마</span>
+              <div className="segmented-control" role="group" aria-label="테마 선택">
+                {THEME_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={themeMode === option.value}
+                    onClick={() => onThemeModeChange(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="scope-card" aria-label="1차 개발 범위">
+              <strong>Phase 1</strong>
+              <div className="scope-pills">
+                <span>텍스트 Diff</span>
+                <span>폴더 스캔</span>
+                <span>3-way Merge</span>
+                <span>원자적 저장</span>
+              </div>
+            </section>
+          </aside>
+        </section>
       </section>
     </main>
   );

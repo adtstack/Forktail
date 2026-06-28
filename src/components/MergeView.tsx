@@ -346,124 +346,138 @@ export function MergeView({
 
   return (
     <main className="workspace merge-workspace">
-      <header className="toolbar">
-        <button onClick={onBack}>← 홈</button>
-        <div className="toolbar-divider" />
-        <button
-          onClick={previousConflict}
-          disabled={!activeConflict}
-          aria-keyshortcuts={commandAriaKeyshortcuts("previousConflict")}
-        >
-          ↑ 이전 충돌
-        </button>
-        <button
-          onClick={nextConflict}
-          disabled={!activeConflict}
-          aria-keyshortcuts={commandAriaKeyshortcuts("nextConflict")}
-        >
-          ↓ 다음 충돌
-        </button>
-        <span
-          className={conflicts.length ? "conflict-count" : "clean-count"}
-          role="status"
-          aria-live="polite"
-          aria-label={
-            conflicts.length
-              ? `현재 충돌 ${activeIndex + 1}, 전체 충돌 ${conflicts.length}`
-              : "충돌 없음"
-          }
-        >
-          {conflicts.length ? `${activeIndex + 1} / ${conflicts.length} 충돌` : "✓ 충돌 없음"}
-        </span>
-        <span
-          className={dirty ? "dirty-count" : "clean-count"}
-          role="status"
-          aria-live="polite"
-          aria-label={dirty ? "병합 결과 저장 안 됨" : "병합 결과 저장됨"}
-        >
-          {dirty ? "저장 안 됨" : "저장됨"}
-        </span>
-        <div className="toolbar-divider" />
-        <button
-          onClick={undoResult}
-          disabled={!canUndoTextHistory(resultHistory)}
-          aria-keyshortcuts={commandAriaKeyshortcuts("undo")}
-        >
-          실행 취소
-        </button>
-        <button
-          onClick={redoResult}
-          disabled={!canRedoTextHistory(resultHistory)}
-          aria-keyshortcuts={commandAriaKeyshortcuts("redo")}
-        >
-          다시 실행
-        </button>
-        <label className="toolbar-check">
-          <input
-            type="checkbox"
-            checked={mergeSettings.autoAdvanceConflict}
-            onChange={(event) =>
-              setMergeSettings((current) => ({
-                ...current,
-                autoAdvanceConflict: event.target.checked,
-              }))
-            }
-          />
-          해결 후 다음
-        </label>
-        <label className="toolbar-check">
-          <input
-            type="checkbox"
-            checked={mergeSettings.recoveryDraftsEnabled}
-            onChange={(event) =>
-              setMergeSettings((current) => ({
-                ...current,
-                recoveryDraftsEnabled: event.target.checked,
-              }))
-            }
-          />
-          draft 복구
-        </label>
-        <label className="toolbar-field">
-          <span>저장 EOL</span>
-          <select
-            className="toolbar-select"
-            value={mergeSettings.saveLineEnding}
-            onChange={(event) =>
-              setMergeSettings((current) => ({
-                ...current,
-                saveLineEnding: event.target.value as SaveLineEndingMode,
-              }))
+      <header className="toolbar command-toolbar merge-command-toolbar">
+        <div className="command-group">
+          <button className="command-button" onClick={onBack}>← 홈</button>
+        </div>
+        <div className="command-group command-group-primary" aria-label="충돌 탐색">
+          <button
+            className="command-button"
+            onClick={previousConflict}
+            disabled={!activeConflict}
+            aria-keyshortcuts={commandAriaKeyshortcuts("previousConflict")}
+          >
+            ↑ 이전 충돌
+          </button>
+          <span
+            className={conflicts.length ? "conflict-count" : "clean-count"}
+            role="status"
+            aria-live="polite"
+            aria-label={
+              conflicts.length
+                ? `현재 충돌 ${activeIndex + 1}, 전체 충돌 ${conflicts.length}`
+                : "충돌 없음"
             }
           >
-            <option value="original">원본</option>
-            <option value="system">시스템</option>
-            <option value="lf">LF</option>
-            <option value="crlf">CRLF</option>
-          </select>
-        </label>
+            {conflicts.length ? `${activeIndex + 1} / ${conflicts.length} 충돌` : "✓ 충돌 없음"}
+          </span>
+          <button
+            className="command-button"
+            onClick={nextConflict}
+            disabled={!activeConflict}
+            aria-keyshortcuts={commandAriaKeyshortcuts("nextConflict")}
+          >
+            ↓ 다음 충돌
+          </button>
+        </div>
+        <div className="command-group" aria-label="결과 편집">
+          <span
+            className={dirty ? "dirty-count" : "clean-count"}
+            role="status"
+            aria-live="polite"
+            aria-label={dirty ? "병합 결과 저장 안 됨" : "병합 결과 저장됨"}
+          >
+            {dirty ? "저장 안 됨" : "저장됨"}
+          </span>
+          <button
+            className="command-button"
+            onClick={undoResult}
+            disabled={!canUndoTextHistory(resultHistory)}
+            aria-keyshortcuts={commandAriaKeyshortcuts("undo")}
+          >
+            실행 취소
+          </button>
+          <button
+            className="command-button"
+            onClick={redoResult}
+            disabled={!canRedoTextHistory(resultHistory)}
+            aria-keyshortcuts={commandAriaKeyshortcuts("redo")}
+          >
+            다시 실행
+          </button>
+        </div>
+        <div className="command-group" aria-label="병합 옵션">
+          <label className="toolbar-check">
+            <input
+              type="checkbox"
+              checked={mergeSettings.autoAdvanceConflict}
+              onChange={(event) =>
+                setMergeSettings((current) => ({
+                  ...current,
+                  autoAdvanceConflict: event.target.checked,
+                }))
+              }
+            />
+            해결 후 다음
+          </label>
+          <label className="toolbar-check">
+            <input
+              type="checkbox"
+              checked={mergeSettings.recoveryDraftsEnabled}
+              onChange={(event) =>
+                setMergeSettings((current) => ({
+                  ...current,
+                  recoveryDraftsEnabled: event.target.checked,
+                }))
+              }
+            />
+            draft 복구
+          </label>
+          <label className="toolbar-field">
+            <span>저장 EOL</span>
+            <select
+              className="toolbar-select"
+              value={mergeSettings.saveLineEnding}
+              onChange={(event) =>
+                setMergeSettings((current) => ({
+                  ...current,
+                  saveLineEnding: event.target.value as SaveLineEndingMode,
+                }))
+              }
+            >
+              <option value="original">원본</option>
+              <option value="system">시스템</option>
+              <option value="lf">LF</option>
+              <option value="crlf">CRLF</option>
+            </select>
+          </label>
+        </div>
         <div className="toolbar-spacer" />
-        <button
-          onClick={saveResult}
-          disabled={busy}
-          aria-keyshortcuts={commandAriaKeyshortcuts("save")}
-        >
-          저장
-        </button>
-        <button
-          className="primary-button"
-          onClick={() => onSaveAs(mergeSettings.saveLineEnding)}
-          disabled={busy}
-          aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
-        >
-          다른 이름으로 저장
-        </button>
-        <button
-          onClick={onShowBackups}
-          disabled={busy || !session.outputPath}
-        >
-          백업 복원
-        </button>
+        <div className="command-group" aria-label="저장">
+          <button
+            className="command-button primary-button"
+            onClick={saveResult}
+            disabled={busy}
+            aria-keyshortcuts={commandAriaKeyshortcuts("save")}
+          >
+            저장
+          </button>
+          <button
+            className="command-button"
+            onClick={() => onSaveAs(mergeSettings.saveLineEnding)}
+            disabled={busy}
+            aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
+          >
+            다른 이름으로 저장
+          </button>
+          <button
+            className="command-button"
+            onClick={onShowBackups}
+            disabled={busy || !session.outputPath}
+          >
+            백업 복원
+          </button>
+        </div>
       </header>
 
       {activeConflict && sideDiffs && (
@@ -543,16 +557,16 @@ export function MergeView({
           editorTheme={editorTheme}
         />
         <div
-          className="result-panel"
+          className={`result-panel${activeConflict ? " has-resolution" : ""}`}
           role="region"
           aria-label={`병합 결과 편집기, 저장 경로 ${session.outputPath ?? "미정"}`}
         >
-          <div className="result-heading">
-            <div>
-              <span className="side-label">RESULT</span>
-              <strong>{session.outputPath ?? "저장 경로 미정"}</strong>
-            </div>
-            {activeConflict && (
+          {activeConflict && (
+            <div className="resolution-rail" aria-label="활성 충돌 해결">
+              <div>
+                <span className="side-label">ACTIVE CONFLICT</span>
+                <strong>{activeIndex + 1} / {conflicts.length}</strong>
+              </div>
               <div className="resolution-buttons">
                 <button
                   onClick={() => applyResolution("ours")}
@@ -579,7 +593,13 @@ export function MergeView({
                   둘 다 유지
                 </button>
               </div>
-            )}
+            </div>
+          )}
+          <div className="result-heading">
+            <div>
+              <span className="side-label">RESULT</span>
+              <strong>{session.outputPath ?? "저장 경로 미정"}</strong>
+            </div>
           </div>
           <Editor
             height="100%"

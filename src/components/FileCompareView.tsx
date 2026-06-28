@@ -455,124 +455,142 @@ export function FileCompareView({
 
   return (
     <main className="workspace">
-      <header className="toolbar">
-        <button onClick={onBack}>← 홈</button>
-        <div className="toolbar-divider" />
-        <button
-          onClick={onSwap}
-          disabled={anyDirty}
-          aria-keyshortcuts={commandAriaKeyshortcuts("swapSides")}
-        >
-          좌우 교환
-        </button>
-        <button
-          onClick={() => navigateDiff("previous")}
-          disabled={!navigation.canMove}
-          aria-keyshortcuts={commandAriaKeyshortcuts("previousDiff")}
-        >
-          이전 변경
-        </button>
-        <button
-          onClick={() => navigateDiff("next")}
-          disabled={!navigation.canMove}
-          aria-keyshortcuts={commandAriaKeyshortcuts("nextDiff")}
-        >
-          다음 변경
-        </button>
-        <button
-          onClick={() => applyCurrentHunk("right")}
-          disabled={!canApplyLeftToRight}
-          title="선택한 변경을 왼쪽 내용으로 오른쪽에 반영합니다."
-        >
-          왼쪽→오른쪽
-        </button>
-        <button
-          onClick={() => applyCurrentHunk("left")}
-          disabled={!canApplyRightToLeft}
-          title="선택한 변경을 오른쪽 내용으로 왼쪽에 반영합니다."
-        >
-          오른쪽→왼쪽
-        </button>
-        <button
-          onClick={undoLastHunkCopy}
-          disabled={!canUndoHunkCopy}
-          title="마지막 hunk 적용을 되돌립니다."
-        >
-          hunk 되돌리기
-        </button>
-        <span
-          className={navigation.canMove ? "diff-count" : "clean-count"}
-          role="status"
-          aria-live="polite"
-          aria-label={
-            navigation.canMove
-              ? `현재 변경 ${navigation.currentIndex + 1}, 전체 변경 ${navigation.total}`
-              : "변경 없음"
-          }
-        >
-          {navigation.canMove ? `${navigation.currentIndex + 1} / ${navigation.total} 변경` : "변경 없음"}
-        </span>
-        <div className="toolbar-divider" />
-        <label className="toolbar-field">
-          <span>편집</span>
-          <select
-            className="toolbar-select"
-            value={editableSide}
-            disabled={busy || binary}
-            onChange={(event) => setEditableSide(event.target.value as CompareSide | "none")}
+      <header className="toolbar command-toolbar">
+        <div className="command-group">
+          <button className="command-button" onClick={onBack}>← 홈</button>
+          <button
+            className="command-button"
+            onClick={onSwap}
+            disabled={anyDirty}
+            aria-keyshortcuts={commandAriaKeyshortcuts("swapSides")}
           >
-            <option value="none">읽기 전용</option>
-            <option value="left">왼쪽</option>
-            <option value="right">오른쪽</option>
-          </select>
-        </label>
-        <span
-          className={activeDirty ? "dirty-count" : "clean-count"}
-          role="status"
-          aria-live="polite"
-          aria-label={
-            editableSide === "none"
-              ? "편집 대상 없음"
-              : activeDirty
-                ? `${activeSideLabel} 파일 저장 안 됨`
-                : `${activeSideLabel} 파일 저장됨`
-          }
-        >
-          {editableSide === "none" ? "읽기 전용" : activeDirty ? "저장 안 됨" : "저장됨"}
-        </span>
-        <button
-          onClick={() => {
-            if (editableSide !== "none") onSaveSide(editableSide, viewSettings.saveLineEnding);
-          }}
-          disabled={busy || binary || editableSide === "none" || !activeDirty}
-          aria-keyshortcuts={commandAriaKeyshortcuts("save")}
-        >
-          저장
-        </button>
-        <button
-          onClick={() => {
-            if (editableSide !== "none") onSaveSideAs(editableSide, viewSettings.saveLineEnding);
-          }}
-          disabled={busy || binary || editableSide === "none"}
-          aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
-        >
-          다른 이름으로 저장
-        </button>
-        <button
-          onClick={() => {
-            if (editableSide !== "none") onShowBackups(editableSide);
-          }}
-          disabled={busy || binary || editableSide === "none"}
-        >
-          백업 복원
-        </button>
-        <button
-          onClick={() => onExportReport(viewSettings.diffOptions)}
-          disabled={busy || binary}
-        >
-          리포트 저장
-        </button>
+            좌우 교환
+          </button>
+        </div>
+        <div className="command-group command-group-primary" aria-label="변경 탐색">
+          <button
+            className="command-button"
+            onClick={() => navigateDiff("previous")}
+            disabled={!navigation.canMove}
+            aria-keyshortcuts={commandAriaKeyshortcuts("previousDiff")}
+          >
+            이전 변경
+          </button>
+          <span
+            className={navigation.canMove ? "diff-count" : "clean-count"}
+            role="status"
+            aria-live="polite"
+            aria-label={
+              navigation.canMove
+                ? `현재 변경 ${navigation.currentIndex + 1}, 전체 변경 ${navigation.total}`
+                : "변경 없음"
+            }
+          >
+            {navigation.canMove ? `${navigation.currentIndex + 1} / ${navigation.total} 변경` : "변경 없음"}
+          </span>
+          <button
+            className="command-button"
+            onClick={() => navigateDiff("next")}
+            disabled={!navigation.canMove}
+            aria-keyshortcuts={commandAriaKeyshortcuts("nextDiff")}
+          >
+            다음 변경
+          </button>
+        </div>
+        <div className="command-group" aria-label="hunk 복사">
+          <button
+            className="command-button"
+            onClick={() => applyCurrentHunk("right")}
+            disabled={!canApplyLeftToRight}
+            title="선택한 변경을 왼쪽 내용으로 오른쪽에 반영합니다."
+          >
+            왼쪽→오른쪽
+          </button>
+          <button
+            className="command-button"
+            onClick={() => applyCurrentHunk("left")}
+            disabled={!canApplyRightToLeft}
+            title="선택한 변경을 오른쪽 내용으로 왼쪽에 반영합니다."
+          >
+            오른쪽→왼쪽
+          </button>
+          <button
+            className="command-button"
+            onClick={undoLastHunkCopy}
+            disabled={!canUndoHunkCopy}
+            title="마지막 hunk 적용을 되돌립니다."
+          >
+            hunk 되돌리기
+          </button>
+        </div>
+        <div className="command-group" aria-label="편집 상태">
+          <label className="toolbar-field">
+            <span>편집</span>
+            <select
+              className="toolbar-select"
+              value={editableSide}
+              disabled={busy || binary}
+              onChange={(event) => setEditableSide(event.target.value as CompareSide | "none")}
+            >
+              <option value="none">읽기 전용</option>
+              <option value="left">왼쪽</option>
+              <option value="right">오른쪽</option>
+            </select>
+          </label>
+          <span
+            className={activeDirty ? "dirty-count" : "clean-count"}
+            role="status"
+            aria-live="polite"
+            aria-label={
+              editableSide === "none"
+                ? "편집 대상 없음"
+                : activeDirty
+                  ? `${activeSideLabel} 파일 저장 안 됨`
+                  : `${activeSideLabel} 파일 저장됨`
+            }
+          >
+            {editableSide === "none" ? "읽기 전용" : activeDirty ? "저장 안 됨" : "저장됨"}
+          </span>
+        </div>
         <div className="toolbar-spacer" />
+        <div className="command-group" aria-label="저장 및 내보내기">
+          <button
+            className="command-button primary-button"
+            onClick={() => {
+              if (editableSide !== "none") onSaveSide(editableSide, viewSettings.saveLineEnding);
+            }}
+            disabled={busy || binary || editableSide === "none" || !activeDirty}
+            aria-keyshortcuts={commandAriaKeyshortcuts("save")}
+          >
+            저장
+          </button>
+          <button
+            className="command-button"
+            onClick={() => {
+              if (editableSide !== "none") onSaveSideAs(editableSide, viewSettings.saveLineEnding);
+            }}
+            disabled={busy || binary || editableSide === "none"}
+            aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
+          >
+            다른 이름으로 저장
+          </button>
+          <button
+            className="command-button"
+            onClick={() => {
+              if (editableSide !== "none") onShowBackups(editableSide);
+            }}
+            disabled={busy || binary || editableSide === "none"}
+          >
+            백업 복원
+          </button>
+          <button
+            className="command-button"
+            onClick={() => onExportReport(viewSettings.diffOptions)}
+            disabled={busy || binary}
+          >
+            리포트 저장
+          </button>
+        </div>
         <span className="badge" aria-label={`언어: ${language}`}>{language}</span>
       </header>
 
