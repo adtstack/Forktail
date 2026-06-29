@@ -484,7 +484,7 @@ input, select {
 }
 .demo-row { color: var(--muted); display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .link-button { padding: 4px 2px; border: 0; background: transparent; color: var(--accent); text-decoration: underline; }
-.theme-row {
+.settings-row {
   display: flex;
   align-items: center;
   justify-content: space-between;

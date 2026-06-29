@@ -28,11 +28,14 @@ const SORT_KEYS: FolderSortKey[] = ["path", "status", "size", "modified"];
 const FOLDER_COMPARE_MODES: FolderCompareMode[] = ["metadata", "quickHash", "fullHash"];
 const WHITESPACE_MODES: WhitespaceCompareMode[] = ["none", "trim", "all"];
 const THEME_MODES: ThemeMode[] = ["system", "dark", "light"];
+const APP_LANGUAGES: AppLanguage[] = ["en", "ko"];
 export const MAX_RECENT_SESSIONS = 20;
 
 export type ThemeMode = "system" | "dark" | "light";
+export type AppLanguage = "en" | "ko";
 
 export interface AppearanceSettings {
+  language: AppLanguage;
   theme: ThemeMode;
 }
 
@@ -122,6 +125,7 @@ export const DEFAULT_MERGE_SETTINGS: MergeSettings = {
 };
 
 export const DEFAULT_APPEARANCE_SETTINGS: AppearanceSettings = {
+  language: "en",
   theme: "system",
 };
 
@@ -300,6 +304,9 @@ export function sanitizeAppearanceSettings(value: unknown): AppearanceSettings {
   if (!isRecord(value)) return DEFAULT_APPEARANCE_SETTINGS;
 
   return {
+    language: APP_LANGUAGES.includes(value.language as AppLanguage)
+      ? (value.language as AppLanguage)
+      : DEFAULT_APPEARANCE_SETTINGS.language,
     theme: THEME_MODES.includes(value.theme as ThemeMode)
       ? (value.theme as ThemeMode)
       : DEFAULT_APPEARANCE_SETTINGS.theme,

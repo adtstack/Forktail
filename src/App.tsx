@@ -43,7 +43,6 @@ import {
 import {
   mergeSavePreconditionForPath,
   mergeSaveStateAfterWrite,
-  unresolvedSaveMessage,
   type WritePrecondition,
 } from "./core/mergeSave";
 import {
@@ -74,6 +73,7 @@ import {
   saveRecentSessions,
   upsertRecentSession,
   type ActiveSession,
+  type AppLanguage,
   type ThemeMode,
   type RecentSession,
   type RecentSessionInput,
@@ -82,9 +82,8 @@ import {
   hasUnsavedCompareChanges,
   hasUnsavedMergeChanges,
   markBeforeUnloadIfUnsaved,
-  unsavedCompareNavigationMessage,
-  unsavedMergeNavigationMessage,
 } from "./core/unsaved";
+import { APP_TEXT, localeForLanguage } from "./core/i18n";
 import { parseStartupSessionArgs } from "./core/startupSession";
 import type {
   AppMode,
@@ -162,6 +161,9 @@ export default function App() {
   } | null>(null);
   const [backupDialog, setBackupDialog] = useState<BackupDialogState | null>(null);
   const [themeMode, setThemeMode] = useState<ThemeMode>(() => loadAppearanceSettings().theme);
+  const [languageMode, setLanguageMode] = useState<AppLanguage>(
+    () => loadAppearanceSettings().language,
+  );
   const [systemTheme, setSystemTheme] = useState<"dark" | "light">(() => preferredSystemTheme());
   const pendingLeaveAction = useRef<(() => void) | null>(null);
   const pendingSaveAction = useRef<(() => void) | null>(null);
@@ -173,6 +175,7 @@ export default function App() {
   const [activeSessionStorageReady, setActiveSessionStorageReady] = useState(false);
 
   const busy = busyCount > 0;
+  const appText = APP_TEXT[languageMode];
 
   const beginBusy = useCallback(() => {
     setBusyCount((current) => current + 1);
@@ -262,8 +265,8 @@ export default function App() {
       return next;
     });
     setRecentSessionFailure((current) => current?.session.id === id ? null : current);
-    setMessage("최근 세션 항목을 제거했습니다.");
-  }, []);
+    setMessage(appText.recentSessionRemoved);
+  }, [appText]);
 
   const compareHasUnsavedChanges =
     mode === "compare" &&
@@ -283,13 +286,13 @@ export default function App() {
     mergeSession != null &&
     hasUnsavedMergeChanges(mergeSession.result, savedMergeResult);
   const activeUnsavedMessage = compareHasUnsavedChanges
-    ? unsavedCompareNavigationMessage
+    ? appText.unsavedCompareMessage
     : mergeHasUnsavedChanges
-      ? unsavedMergeNavigationMessage
+      ? appText.unsavedMergeMessage
       : null;
   const activeUnsavedTitle = compareHasUnsavedChanges
-    ? "저장하지 않은 비교 파일"
-    : "저장하지 않은 병합 결과";
+    ? appText.unsavedCompareTitle
+    : appText.unsavedMergeTitle;
   const resolvedTheme = themeMode === "system" ? systemTheme : themeMode;
   const editorTheme = resolvedTheme === "dark" ? "vs-dark" : "vs";
 
@@ -326,11 +329,15 @@ export default function App() {
       setCompareFileChangeNotice(null);
       return;
     }
+    const localizedNotice = {
+      ...notice,
+      message: appText.fileChangeNotice(notice.leftChanged, notice.rightChanged),
+    };
     if (notice.versionKey === suppressedCompareFileChangeKey) return;
     setCompareFileChangeNotice((current) =>
-      current?.versionKey === notice.versionKey ? current : notice,
+      current?.versionKey === notice.versionKey ? current : localizedNotice,
     );
-  }, [compareOutputVersion, compareSession, suppressedCompareFileChangeKey]);
+  }, [appText, compareOutputVersion, compareSession, suppressedCompareFileChangeKey]);
 
   const reloadChangedCompareFiles = useCallback(() => run(async () => {
     if (!compareSession || !compareFileChangeNotice) return;
@@ -345,8 +352,8 @@ export default function App() {
     setCleanCompareSession({ left, right });
     setCompareFileChangeNotice(null);
     setSuppressedCompareFileChangeKey(null);
-    setMessage("변경된 파일을 다시 읽었습니다.");
-  }), [compareFileChangeNotice, compareSession, run, setCleanCompareSession]);
+    setMessage(appText.changedFilesReloaded);
+  }), [appText, compareFileChangeNotice, compareSession, run, setCleanCompareSession]);
 
   const keepCurrentCompareFiles = useCallback(() => {
     if (compareFileChangeNotice) {
@@ -372,7 +379,7 @@ export default function App() {
       active: true,
       leftRoot,
       rightRoot,
-      message: "폴더 스캔 중입니다. 오래 걸리면 취소하고 옵션을 조정할 수 있습니다.",
+      message: appText.folderScanActive,
     });
 
     void (async () => {
@@ -396,7 +403,7 @@ export default function App() {
         endBusy();
       }
     })();
-  }, [beginBusy, endBusy, rememberRecentSession]);
+  }, [appText, beginBusy, endBusy, rememberRecentSession]);
 
   const cancelFolderScan = useCallback(() => {
     if (!folderScanProgress?.active) return;
@@ -406,13 +413,13 @@ export default function App() {
     void cancelFolderScanJob(scanId).catch(() => {});
     endBusy();
     setError(null);
-    setMessage("폴더 스캔을 취소했습니다.");
+    setMessage(appText.folderScanCancelled);
     setFolderScanProgress({
       ...folderScanProgress,
       active: false,
-      message: "스캔을 취소했습니다. 늦게 도착한 결과는 화면에 반영하지 않습니다.",
+      message: appText.folderScanCancelledLate,
     });
-  }, [endBusy, folderScanProgress]);
+  }, [appText, endBusy, folderScanProgress]);
 
   const restoreStoredSession = useCallback((
     session: ActiveSession,
@@ -423,7 +430,7 @@ export default function App() {
         setCleanCompareSession(demoCompareSession());
       } else {
         if (!isTauriRuntime()) {
-          throw new Error("브라우저에서는 데모 세션만 자동 복원할 수 있습니다.");
+          throw new Error(appText.demoRestoreOnly);
         }
         const [left, right] = await Promise.all([
           readTextFile(session.leftPath),
@@ -446,7 +453,7 @@ export default function App() {
         return;
       }
       if (!isTauriRuntime()) {
-        throw new Error("브라우저에서는 데모 세션만 자동 복원할 수 있습니다.");
+        throw new Error(appText.demoRestoreOnly);
       }
       startFolderScan(session.leftRoot, session.rightRoot, session.options);
       return;
@@ -456,7 +463,7 @@ export default function App() {
       setCleanMergeSession({ ...demoMergeSession(), outputPath: session.outputPath });
     } else {
       if (!isTauriRuntime()) {
-        throw new Error("브라우저에서는 데모 세션만 자동 복원할 수 있습니다.");
+        throw new Error(appText.demoRestoreOnly);
       }
       const [base, ours, theirs] = await Promise.all([
         readTextFile(session.basePath),
@@ -464,7 +471,7 @@ export default function App() {
         readTextFile(session.theirsPath),
       ]);
       if (base.isBinary || ours.isBinary || theirs.isBinary) {
-        throw new Error("3-way 병합은 텍스트 파일만 지원합니다.");
+        throw new Error(appText.mergeTextOnly);
       }
       const merged = await mergeTexts(base.text, ours.text, theirs.text);
       setCleanMergeSession({
@@ -480,14 +487,15 @@ export default function App() {
   }), [
     rememberRecentSession,
     run,
+    appText,
     setCleanCompareSession,
     setCleanMergeSession,
     startFolderScan,
   ]);
 
   useEffect(() => {
-    saveAppearanceSettings({ theme: themeMode });
-  }, [themeMode]);
+    saveAppearanceSettings({ language: languageMode, theme: themeMode });
+  }, [languageMode, themeMode]);
 
   useEffect(() => {
     setCompareFileChangeNotice(null);
@@ -678,9 +686,9 @@ export default function App() {
   };
 
   const openCompare = () => requestLeaveActiveSession(() => run(async () => {
-    const leftPath = await chooseTextFile("왼쪽 파일 선택");
+    const leftPath = await chooseTextFile(appText.chooseLeftFile);
     if (!leftPath) return;
-    const rightPath = await chooseTextFile("오른쪽 파일 선택");
+    const rightPath = await chooseTextFile(appText.chooseRightFile);
     if (!rightPath) return;
     const [left, right] = await Promise.all([readTextFile(leftPath), readTextFile(rightPath)]);
     setCleanCompareSession({ left, right });
@@ -710,7 +718,7 @@ export default function App() {
             left: writePreconditionFromDocument(document),
           }));
           setCompareModelRevision((current) => current + 1);
-          setMessage("왼쪽 파일을 드롭한 파일로 바꿨습니다.");
+          setMessage(appText.leftFileReplacedFromDrop);
           return;
         }
 
@@ -721,7 +729,7 @@ export default function App() {
           right: writePreconditionFromDocument(document),
         }));
         setCompareModelRevision((current) => current + 1);
-        setMessage("오른쪽 파일을 드롭한 파일로 바꿨습니다.");
+        setMessage(appText.rightFileReplacedFromDrop);
       });
     };
 
@@ -734,9 +742,9 @@ export default function App() {
   };
 
   const openFolders = () => requestLeaveActiveSession(() => run(async () => {
-    const leftRoot = await chooseDirectory("왼쪽 폴더 선택");
+    const leftRoot = await chooseDirectory(appText.chooseLeftFolder);
     if (!leftRoot) return;
-    const rightRoot = await chooseDirectory("오른쪽 폴더 선택");
+    const rightRoot = await chooseDirectory(appText.chooseRightFolder);
     if (!rightRoot) return;
     startFolderScan(leftRoot, rightRoot, folderOptions);
   }));
@@ -754,15 +762,15 @@ export default function App() {
 
   const openFolderEntry = (entry: FolderEntry) => run(async () => {
     if (!entry.leftPath || !entry.rightPath) {
-      throw new Error("양쪽에 모두 존재하는 파일만 2-way 비교할 수 있습니다.");
+      throw new Error(appText.folderEntryNeedsBoth);
     }
     if (entry.left?.kind !== "file" || entry.right?.kind !== "file") {
-      throw new Error("현재는 일반 파일만 열 수 있습니다.");
+      throw new Error(appText.regularFilesOnly);
     }
     if (folderResult && isDemoFolderRoots(folderResult.leftRoot, folderResult.rightRoot)) {
       const demoSession = demoFolderEntryCompareSession(entry);
       if (!demoSession) {
-        throw new Error("양쪽 일반 파일만 2-way 비교할 수 있습니다.");
+        throw new Error(appText.regularFilesBoth);
       }
       setCleanCompareSession(demoSession);
       setMode("compare");
@@ -780,16 +788,16 @@ export default function App() {
   const revealFolderPath = useCallback((path: string) => {
     void run(async () => {
       await revealPath(path);
-      setMessage("파일 관리자에서 항목을 열었습니다.");
+      setMessage(appText.openedInFileManager);
     });
-  }, [run]);
+  }, [appText, run]);
 
   const openMerge = useCallback(() => requestLeaveActiveSession(() => run(async () => {
-    const basePath = await chooseTextFile("BASE 파일 선택");
+    const basePath = await chooseTextFile(appText.chooseBaseFile);
     if (!basePath) return;
-    const oursPath = await chooseTextFile("OURS 파일 선택");
+    const oursPath = await chooseTextFile(appText.chooseOursFile);
     if (!oursPath) return;
-    const theirsPath = await chooseTextFile("THEIRS 파일 선택");
+    const theirsPath = await chooseTextFile(appText.chooseTheirsFile);
     if (!theirsPath) return;
 
     const [base, ours, theirs] = await Promise.all([
@@ -798,7 +806,7 @@ export default function App() {
       readTextFile(theirsPath),
     ]);
     if (base.isBinary || ours.isBinary || theirs.isBinary) {
-      throw new Error("3-way 병합은 텍스트 파일만 지원합니다.");
+      throw new Error(appText.mergeTextOnly);
     }
 
     const merged = await mergeTexts(base.text, ours.text, theirs.text);
@@ -811,7 +819,7 @@ export default function App() {
       outputPath: null,
     });
     setMode("merge");
-  })), [rememberRecentSession, requestLeaveActiveSession, run, setCleanMergeSession]);
+  })), [appText, rememberRecentSession, requestLeaveActiveSession, run, setCleanMergeSession]);
 
   const openRecentSession = (session: RecentSession) => requestLeaveActiveSession(() => run(async () => {
     if (session.kind === "compare") {
@@ -835,7 +843,7 @@ export default function App() {
       startFolderScan(session.leftRoot, session.rightRoot, session.options, (failureMessage) => {
         setRecentSessionFailure({
           session,
-          message: `최근 세션을 열 수 없습니다. ${failureMessage} 경로가 이동되었거나 권한이 바뀌었다면 이 항목을 제거하세요.`,
+          message: appText.recentSessionFailure(failureMessage),
         });
       });
       return;
@@ -847,7 +855,7 @@ export default function App() {
       readTextFile(session.theirsPath),
     ]);
     if (base.isBinary || ours.isBinary || theirs.isBinary) {
-      throw new Error("3-way 병합은 텍스트 파일만 지원합니다.");
+      throw new Error(appText.mergeTextOnly);
     }
 
     const merged = await mergeTexts(base.text, ours.text, theirs.text);
@@ -863,7 +871,7 @@ export default function App() {
   }, (failureMessage) => {
     setRecentSessionFailure({
       session,
-      message: `최근 세션을 열 수 없습니다. ${failureMessage} 경로가 이동되었거나 권한이 바뀌었다면 이 항목을 제거하세요.`,
+      message: appText.recentSessionFailure(failureMessage),
     });
   }));
 
@@ -875,10 +883,9 @@ export default function App() {
   ) => run(async () => {
     if (!compareSession) return;
     const target = compareSession[side];
-    const sideLabel = side === "left" ? "왼쪽" : "오른쪽";
     let outputPath = forceSaveAs ? null : target.path;
     if (!outputPath) {
-      outputPath = await chooseSavePath(target.path, `${sideLabel} 파일 저장`);
+      outputPath = await chooseSavePath(target.path, appText.saveSideFile(side));
     }
     if (!outputPath) return;
 
@@ -907,34 +914,33 @@ export default function App() {
       leftPath: saved.session.left.path,
       rightPath: saved.session.right.path,
     });
-    setMessage(`${sideLabel} ${saved.message}`);
-  }), [compareOutputVersion, compareSession, rememberRecentSession, run]);
+    setMessage(appText.sideSaved(side, written.backupPath));
+  }), [appText, compareOutputVersion, compareSession, rememberRecentSession, run]);
 
   const exportCompareReport = useCallback((options: TextDiffOptions) => run(async () => {
     if (!compareSession) return;
     const outputPath = await chooseSavePath(
       compareReportDefaultPath(compareSession),
-      "Diff 리포트 저장",
+      appText.saveDiffReport,
     );
     if (!outputPath) return;
     const report = buildDiffReport({ session: compareSession, options, generatedAt: new Date() });
     const written = await writeTextFileAtomic(outputPath, report, true, null, "UTF-8");
-    setMessage(`리포트 저장 완료: ${written.path}`);
-  }), [compareSession, run]);
+    setMessage(appText.reportSaved(written.path));
+  }), [appText, compareSession, run]);
 
   const showCompareBackups = useCallback((side: CompareSide) => run(async () => {
     if (!compareSession) return;
     const target = compareSession[side];
-    const sideLabel = side === "left" ? "왼쪽" : "오른쪽";
     const backups = await listFileBackups(target.path);
     setBackupDialog({
       kind: "compare",
       side,
       targetPath: target.path,
-      title: `${sideLabel} 파일 백업`,
+      title: appText.sideFileBackups(side),
       backups,
     });
-  }), [compareSession, run]);
+  }), [appText, compareSession, run]);
 
   const saveMergeNow = useCallback((
     forceSaveAs: boolean,
@@ -945,7 +951,7 @@ export default function App() {
     if (!outputPath) {
       outputPath = await chooseSavePath(
         mergeSession.outputPath ?? mergeSession.ours.path,
-        "병합 결과 저장",
+        appText.saveMergeResult,
       );
     }
     if (!outputPath) return;
@@ -977,8 +983,8 @@ export default function App() {
       theirsPath: mergeSession.theirs.path,
       outputPath: saved.outputPath,
     });
-    setMessage(saved.message);
-  }), [mergeOutputVersion, mergeSession, rememberRecentSession, run]);
+    setMessage(appText.saved(written.backupPath));
+  }), [appText, mergeOutputVersion, mergeSession, rememberRecentSession, run]);
 
   const showMergeBackups = useCallback(() => run(async () => {
     if (!mergeSession?.outputPath) return;
@@ -986,10 +992,10 @@ export default function App() {
     setBackupDialog({
       kind: "merge",
       targetPath: mergeSession.outputPath,
-      title: "병합 결과 백업",
+      title: appText.mergeResultBackups,
       backups,
     });
-  }), [mergeSession, run]);
+  }), [appText, mergeSession, run]);
 
   const restoreBackup = useCallback((backup: FileBackup) => run(async () => {
     if (!backupDialog) return;
@@ -1034,8 +1040,16 @@ export default function App() {
     }
 
     setBackupDialog(null);
-    setMessage(`백업 복원 완료: ${restored.path}`);
-  }), [backupDialog, compareOutputVersion, compareSession, mergeOutputVersion, mergeSession, run]);
+    setMessage(appText.backupRestored(restored.path));
+  }), [
+    appText,
+    backupDialog,
+    compareOutputVersion,
+    compareSession,
+    mergeOutputVersion,
+    mergeSession,
+    run,
+  ]);
 
   const saveMerge = useCallback((
     forceSaveAs: boolean,
@@ -1108,20 +1122,22 @@ export default function App() {
   }, []);
 
   return (
-    <div className="app-shell" data-theme={resolvedTheme}>
-      {busy && <div className="busy-bar" role="status" aria-live="polite" aria-label="작업 중" />}
+    <div className="app-shell" data-theme={resolvedTheme} lang={languageMode}>
+      {busy && (
+        <div className="busy-bar" role="status" aria-live="polite" aria-label={appText.busyAria} />
+      )}
       {error && (
         <div className="toast error-toast">
-          <strong>오류</strong>
+          <strong>{appText.errorTitle}</strong>
           <span>{error}</span>
-          <button aria-label="오류 메시지 닫기" onClick={() => setError(null)}>×</button>
+          <button aria-label={appText.closeError} onClick={() => setError(null)}>×</button>
         </div>
       )}
       {message && (
         <div className="toast success-toast">
-          <strong>완료</strong>
+          <strong>{appText.doneTitle}</strong>
           <span>{message}</span>
-          <button aria-label="완료 메시지 닫기" onClick={() => setMessage(null)}>×</button>
+          <button aria-label={appText.closeSuccess} onClick={() => setMessage(null)}>×</button>
         </div>
       )}
       {showUnsavedDialog && (
@@ -1135,9 +1151,9 @@ export default function App() {
             <h2 id="unsaved-dialog-title">{activeUnsavedTitle}</h2>
             <p>{activeUnsavedMessage}</p>
             <div className="dialog-actions">
-              <button type="button" onClick={cancelPendingLeave}>계속 편집</button>
+              <button type="button" onClick={cancelPendingLeave}>{appText.keepEditing}</button>
               <button type="button" className="danger-button" onClick={confirmPendingLeave}>
-                변경 버리고 이동
+                {appText.discardAndLeave}
               </button>
             </div>
           </section>
@@ -1151,12 +1167,12 @@ export default function App() {
             aria-modal="true"
             aria-labelledby="unresolved-save-dialog-title"
           >
-            <h2 id="unresolved-save-dialog-title">충돌 마커가 남아 있습니다</h2>
-            <p>{unresolvedSaveMessage}</p>
+            <h2 id="unresolved-save-dialog-title">{appText.conflictMarkersRemain}</h2>
+            <p>{appText.unresolvedSaveMessage}</p>
             <div className="dialog-actions">
-              <button type="button" onClick={cancelPendingSave}>계속 편집</button>
+              <button type="button" onClick={cancelPendingSave}>{appText.keepEditing}</button>
               <button type="button" className="danger-button" onClick={confirmPendingSave}>
-                그래도 저장
+                {appText.saveAnyway}
               </button>
             </div>
           </section>
@@ -1173,7 +1189,7 @@ export default function App() {
             <h2 id="backup-dialog-title">{backupDialog.title}</h2>
             <p>{backupDialog.targetPath}</p>
             {backupDialog.backups.length === 0 ? (
-              <p>복원할 백업이 없습니다.</p>
+              <p>{appText.noBackups}</p>
             ) : (
               <ul className="backup-list">
                 {backupDialog.backups.map((backup) => (
@@ -1181,18 +1197,18 @@ export default function App() {
                     <div>
                       <strong>{backup.name}</strong>
                       <span>
-                        {formatBytes(backup.size)} · {formatBackupTime(backup.modifiedMs)}
+                        {formatBytes(backup.size)} · {formatBackupTime(backup.modifiedMs, languageMode)}
                       </span>
                     </div>
                     <button type="button" onClick={() => restoreBackup(backup)}>
-                      복원
+                      {appText.restore}
                     </button>
                   </li>
                 ))}
               </ul>
             )}
             <div className="dialog-actions">
-              <button type="button" onClick={() => setBackupDialog(null)}>닫기</button>
+              <button type="button" onClick={() => setBackupDialog(null)}>{appText.close}</button>
             </div>
           </section>
         </div>
@@ -1204,16 +1220,18 @@ export default function App() {
             className="busy-bar"
             role="status"
             aria-live="polite"
-            aria-label="편집기 로딩 중"
+            aria-label={appText.loadingEditor}
           />
         }
       >
         {mode === "home" && (
           <StartPage
             busy={busy}
+            languageMode={languageMode}
             themeMode={themeMode}
             recentSessions={recentSessions}
             recentSessionFailure={recentSessionFailure}
+            onLanguageModeChange={setLanguageMode}
             onThemeModeChange={setThemeMode}
             onOpenCompare={openCompare}
             onOpenFolders={openFolders}
@@ -1309,12 +1327,12 @@ export default function App() {
             onRestoreRecoveryDraft={() => {
               if (!mergeRecoveryDraft) return;
               updateMergeResult(mergeRecoveryDraft.result);
-              setMessage("병합 결과 draft를 복구했습니다.");
+              setMessage(appText.mergeDraftRestored);
             }}
             onDiscardRecoveryDraft={() => {
               clearMergeRecoveryDraft(mergeSession);
               setMergeRecoveryDraft(null);
-              setMessage("병합 결과 draft를 삭제했습니다.");
+              setMessage(appText.mergeDraftDeleted);
             }}
             onSave={(lineEndingMode) => saveMerge(false, lineEndingMode)}
             onSaveAs={(lineEndingMode) => saveMerge(true, lineEndingMode)}
@@ -1331,9 +1349,9 @@ function preferredSystemTheme(): "dark" | "light" {
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
 }
 
-function formatBackupTime(modifiedMs: number | null): string {
-  if (modifiedMs == null) return "수정 시간 알 수 없음";
-  return new Date(modifiedMs).toLocaleString();
+function formatBackupTime(modifiedMs: number | null, languageMode: AppLanguage): string {
+  if (modifiedMs == null) return APP_TEXT[languageMode].modifiedTimeUnknown;
+  return new Date(modifiedMs).toLocaleString(localeForLanguage(languageMode));
 }
 
 function formatBytes(bytes: number): string {

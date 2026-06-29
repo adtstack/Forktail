@@ -1,16 +1,23 @@
 import { useState, type DragEvent } from "react";
 import { commandAriaKeyshortcuts } from "../core/commands";
 import {
-  compareDropRejectionMessage,
   droppedFilePaths,
 } from "../core/dropPaths";
-import type { RecentSession, ThemeMode } from "../core/settings";
+import {
+  LANGUAGE_OPTIONS,
+  START_PAGE_TEXT,
+  localeForLanguage,
+  themeOptionsForLanguage,
+} from "../core/i18n";
+import type { AppLanguage, RecentSession, ThemeMode } from "../core/settings";
 
 interface StartPageProps {
   busy: boolean;
+  languageMode: AppLanguage;
   themeMode: ThemeMode;
   recentSessions: RecentSession[];
   recentSessionFailure: { session: RecentSession; message: string } | null;
+  onLanguageModeChange: (languageMode: AppLanguage) => void;
   onThemeModeChange: (themeMode: ThemeMode) => void;
   onOpenCompare: () => void;
   onOpenFolders: () => void;
@@ -27,9 +34,11 @@ interface StartPageProps {
 
 export function StartPage({
   busy,
+  languageMode,
   themeMode,
   recentSessions,
   recentSessionFailure,
+  onLanguageModeChange,
   onThemeModeChange,
   onOpenCompare,
   onOpenFolders,
@@ -44,6 +53,8 @@ export function StartPage({
   onRemoveRecentSession,
 }: StartPageProps) {
   const [dropActive, setDropActive] = useState(false);
+  const text = START_PAGE_TEXT[languageMode];
+  const themeOptions = themeOptionsForLanguage(languageMode);
   const failedRecentSessionStillVisible = recentSessionFailure
     ? recentSessions.some((session) => session.id === recentSessionFailure.session.id)
     : false;
@@ -66,7 +77,7 @@ export function StartPage({
     event.preventDefault();
     setDropActive(false);
     const paths = droppedFilePaths(event.dataTransfer);
-    const rejection = compareDropRejectionMessage(paths.length);
+    const rejection = startPageDropRejectionMessage(paths.length, languageMode);
     if (rejection) {
       onDropRejected(rejection);
       return;
@@ -84,18 +95,18 @@ export function StartPage({
       <section className="start-workbench">
         <header className="start-header">
           <div>
-            <span className="eyebrow">LOCAL-FIRST COMPARE</span>
+            <span className="eyebrow">{text.eyebrow}</span>
             <h1>forktail</h1>
-            <p>파일과 폴더 차이를 빠르게 검토하고, 충돌은 명시적으로 해결합니다.</p>
+            <p>{text.subtitle}</p>
           </div>
-          <div className="start-assurance" aria-label="작업 경계">
-            <span>오프라인</span>
-            <span>텍스트 전용</span>
-            <span>백업 저장</span>
+          <div className="start-assurance" aria-label={text.workBoundariesAria}>
+            {text.assurances.map((assurance) => (
+              <span key={assurance}>{assurance}</span>
+            ))}
           </div>
         </header>
 
-        <section className="action-grid" aria-label="비교 시작">
+        <section className="action-grid" aria-label={text.startComparingAria}>
           <button
             className="action-card primary"
             onClick={onOpenCompare}
@@ -104,8 +115,8 @@ export function StartPage({
           >
             <span className="action-icon">2</span>
             <span className="action-copy">
-              <strong>파일 2-way 비교</strong>
-              <small>F7로 변경 블록을 순회합니다.</small>
+              <strong>{text.compareTitle}</strong>
+              <small>{text.compareDescription}</small>
             </span>
           </button>
           <button
@@ -116,8 +127,8 @@ export function StartPage({
           >
             <span className="action-icon">⇄</span>
             <span className="action-copy">
-              <strong>폴더 비교</strong>
-              <small>상태 필터와 해시 모드로 좁힙니다.</small>
+              <strong>{text.folderTitle}</strong>
+              <small>{text.folderDescription}</small>
             </span>
           </button>
           <button
@@ -128,23 +139,23 @@ export function StartPage({
           >
             <span className="action-icon">3</span>
             <span className="action-copy">
-              <strong>3-way 병합</strong>
-              <small>충돌만 선택하고 결과를 저장합니다.</small>
+              <strong>{text.mergeTitle}</strong>
+              <small>{text.mergeDescription}</small>
             </span>
           </button>
         </section>
 
         <div className="start-drop-hint" role="status">
-          파일 두 개를 이 화면에 놓으면 바로 2-way 비교로 엽니다.
+          {text.dropHint}
         </div>
 
         <section className="start-lower-grid">
-          <section className="recent-panel" aria-label="최근 세션">
+          <section className="recent-panel" aria-label={text.recentAria}>
             <div className="recent-heading">
-              <strong>최근 세션</strong>
+              <strong>{text.recentTitle}</strong>
               {recentSessions.length > 0 && (
                 <button className="link-button" onClick={onClearRecentSessions} disabled={busy}>
-                  지우기
+                  {text.clear}
                 </button>
               )}
             </div>
@@ -157,7 +168,7 @@ export function StartPage({
                   onClick={() => onRemoveRecentSession(recentSessionFailure.session.id)}
                   disabled={busy}
                 >
-                  이 항목 제거
+                  {text.remove}
                 </button>
               </div>
             )}
@@ -170,31 +181,31 @@ export function StartPage({
                     onClick={() => onOpenRecentSession(session)}
                     disabled={busy}
                   >
-                    <span className="recent-kind">{recentKindLabel(session)}</span>
+                    <span className="recent-kind">{recentKindLabel(session, languageMode)}</span>
                     <span className="recent-paths">{recentPathLabel(session)}</span>
                     <time dateTime={new Date(session.updatedAt).toISOString()}>
-                      {formatRecentTime(session.updatedAt)}
+                      {formatRecentTime(session.updatedAt, languageMode)}
                     </time>
                   </button>
                 ))}
               </div>
             ) : (
-              <p className="recent-empty">최근 세션이 없습니다.</p>
+              <p className="recent-empty">{text.noRecent}</p>
             )}
           </section>
 
           <aside className="start-side-panel">
-            <section className="demo-row" aria-label="샘플 세션">
-              <span>샘플</span>
-              <button className="link-button" onClick={onDemoCompare}>2-way 데모</button>
-              <button className="link-button" onClick={onDemoFolders}>폴더 데모</button>
-              <button className="link-button" onClick={onDemoMerge}>3-way 데모</button>
+            <section className="demo-row" aria-label={text.samplesAria}>
+              <span>{text.samples}</span>
+              <button className="link-button" onClick={onDemoCompare}>{text.sampleCompare}</button>
+              <button className="link-button" onClick={onDemoFolders}>{text.sampleFolders}</button>
+              <button className="link-button" onClick={onDemoMerge}>{text.sampleMerge}</button>
             </section>
 
-            <section className="theme-row" aria-label="테마">
-              <span>테마</span>
-              <div className="segmented-control" role="group" aria-label="테마 선택">
-                {THEME_OPTIONS.map((option) => (
+            <section className="settings-row" aria-label={text.themeAria}>
+              <span>{text.theme}</span>
+              <div className="segmented-control" role="group" aria-label={text.chooseThemeAria}>
+                {themeOptions.map((option) => (
                   <button
                     key={option.value}
                     type="button"
@@ -207,13 +218,29 @@ export function StartPage({
               </div>
             </section>
 
-            <section className="scope-card" aria-label="1차 개발 범위">
-              <strong>Phase 1</strong>
+            <section className="settings-row" aria-label={text.languageAria}>
+              <span>{text.language}</span>
+              <div className="segmented-control" role="group" aria-label={text.chooseLanguageAria}>
+                {LANGUAGE_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    aria-pressed={languageMode === option.value}
+                    onClick={() => onLanguageModeChange(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="scope-card" aria-label={text.phaseScopeAria}>
+              <strong>{text.phaseScope}</strong>
               <div className="scope-pills">
-                <span>텍스트 Diff</span>
-                <span>폴더 스캔</span>
-                <span>3-way Merge</span>
-                <span>원자적 저장</span>
+                <span>{text.scopeTextDiff}</span>
+                <span>{text.scopeFolderScan}</span>
+                <span>{text.scopeMerge}</span>
+                <span>{text.scopeAtomicSave}</span>
               </div>
             </section>
           </aside>
@@ -223,15 +250,16 @@ export function StartPage({
   );
 }
 
-const THEME_OPTIONS: Array<{ value: ThemeMode; label: string }> = [
-  { value: "system", label: "시스템" },
-  { value: "dark", label: "다크" },
-  { value: "light", label: "라이트" },
-];
+function startPageDropRejectionMessage(pathCount: number, languageMode: AppLanguage): string | null {
+  const text = START_PAGE_TEXT[languageMode];
+  if (pathCount === 0) return text.dropPathUnavailable;
+  if (pathCount !== 2) return text.dropWrongCount(pathCount);
+  return null;
+}
 
-function recentKindLabel(session: RecentSession): string {
+function recentKindLabel(session: RecentSession, languageMode: AppLanguage): string {
   if (session.kind === "compare") return "2-way";
-  if (session.kind === "folders") return "폴더";
+  if (session.kind === "folders") return START_PAGE_TEXT[languageMode].folderKind;
   return "3-way";
 }
 
@@ -250,7 +278,7 @@ function basename(path: string): string {
   return name ?? path;
 }
 
-function formatRecentTime(timestamp: number): string {
+function formatRecentTime(timestamp: number, languageMode: AppLanguage): string {
   if (timestamp <= 0) return "";
-  return new Date(timestamp).toLocaleString();
+  return new Date(timestamp).toLocaleString(localeForLanguage(languageMode));
 }

@@ -60,14 +60,18 @@ describe("appearance settings", () => {
 
   it("persists and sanitizes theme mode", () => {
     const storage = new MemoryStorage();
-    const settings: AppearanceSettings = { theme: "light" };
+    const settings: AppearanceSettings = { language: "ko", theme: "light" };
 
     saveAppearanceSettings(settings, storage);
 
     expect(loadAppearanceSettings(storage)).toEqual(settings);
-    expect(sanitizeAppearanceSettings({ theme: "high-contrast" })).toEqual(
+    expect(sanitizeAppearanceSettings({ language: "fr", theme: "high-contrast" })).toEqual(
       DEFAULT_APPEARANCE_SETTINGS,
     );
+    expect(sanitizeAppearanceSettings({ theme: "dark" })).toEqual({
+      language: DEFAULT_APPEARANCE_SETTINGS.language,
+      theme: "dark",
+    });
   });
 });
 
