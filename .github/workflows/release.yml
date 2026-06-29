@@ -118,19 +118,22 @@ jobs:
             os: macos-14
             bundle: app
             output: macos
-            artifact: forktail-macos-app
+            artifact: forktail-macos-dmg
+            asset: forktail-macos-universal
             target: universal-apple-darwin
           - platform: Windows
             os: windows-2022
             bundle: nsis
             output: nsis
             artifact: forktail-windows-nsis
+            asset: forktail-windows-x64
             target: ""
           - platform: Linux
             os: ubuntu-22.04
             bundle: appimage
             output: appimage
             artifact: forktail-linux-appimage
+            asset: forktail-linux-x86_64
             target: ""
     steps:
       - uses: actions/checkout@v4.2.2
@@ -202,10 +205,11 @@ jobs:
           codesign --verify --deep --strict --verbose=4 \
             "${bundle_root}/forktail.app"
 
-      - name: Package bundle artifact
+      - name: Stage release asset
         shell: bash
         env:
-          ARTIFACT: ${{ matrix.artifact }}
+          PLATFORM: ${{ matrix.platform }}
+          ASSET: ${{ matrix.asset }}
           BUNDLE_OUTPUT: ${{ matrix.output }}
           BUILD_TARGET: ${{ matrix.target }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
@@ -216,13 +220,40 @@ jobs:
             bundle_root="src-tauri/target/${BUILD_TARGET}/release/bundle/${BUNDLE_OUTPUT}"
           fi
           mkdir -p release-artifact
-          tar -czf "release-artifact/${ARTIFACT}-${RELEASE_TAG}.tar.gz" \
-            -C "$bundle_root" .
+          case "$PLATFORM" in
+            macOS)
+              dmg_staging="$(mktemp -d)"
+              cp -R "${bundle_root}/forktail.app" "${dmg_staging}/"
+              ln -s /Applications "${dmg_staging}/Applications"
+              dmg_path="release-artifact/${ASSET}-${RELEASE_TAG}.dmg"
+              hdiutil create \
+                -volname "forktail ${RELEASE_TAG}" \
+                -srcfolder "$dmg_staging" \
+                -ov \
+                -format UDZO \
+                "$dmg_path"
+              hdiutil verify "$dmg_path"
+              ;;
+            Windows)
+              asset_path="$(find "$bundle_root" -maxdepth 1 -type f -name '*.exe' -print -quit)"
+              test -n "$asset_path"
+              cp "$asset_path" "release-artifact/${ASSET}-${RELEASE_TAG}.exe"
+              ;;
+            Linux)
+              asset_path="$(find "$bundle_root" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+              test -n "$asset_path"
+              cp "$asset_path" "release-artifact/${ASSET}-${RELEASE_TAG}.AppImage"
+              ;;
+            *)
+              echo "Unsupported release platform: $PLATFORM" >&2
+              exit 1
+              ;;
+          esac
 
       - uses: actions/upload-artifact@v4.6.2
         with:
           name: ${{ matrix.artifact }}
-          path: release-artifact/*.tar.gz
+          path: release-artifact/*
           if-no-files-found: error
           retention-days: 14
 
@@ -257,11 +288,11 @@ jobs:
         run: |
           set -euo pipefail
           cat > release-notes.md <<'NOTES'
-          Unsigned draft artifacts for forktail.
+          Draft release artifacts for forktail.
 
           Security status:
           - No updater is included.
-          - Artifacts are not code signed or notarized.
+          - The macOS app is ad-hoc signed inside the DMG, but artifacts are not Developer ID signed or notarized.
           - Treat this as a prerelease until the three-platform smoke, signing, rollback, SBOM, and NOTICE checks are complete.
           NOTES
 

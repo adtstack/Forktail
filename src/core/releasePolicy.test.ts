@@ -60,16 +60,19 @@ describe("release workflow policy", () => {
       "os: macos-14",
       "bundle: app",
       "output: macos",
-      "forktail-macos-app",
+      "forktail-macos-dmg",
+      "forktail-macos-universal",
       "target: universal-apple-darwin",
       "os: windows-2022",
       "bundle: nsis",
       "output: nsis",
       "forktail-windows-nsis",
+      "forktail-windows-x64",
       "os: ubuntu-22.04",
       "bundle: appimage",
       "output: appimage",
       "forktail-linux-appimage",
+      "forktail-linux-x86_64",
       "Install macOS universal Rust targets",
       "rustup target add aarch64-apple-darwin x86_64-apple-darwin",
       "npm run tauri build --",
@@ -77,7 +80,12 @@ describe("release workflow policy", () => {
       'bundle_root="src-tauri/target/${BUILD_TARGET}/release/bundle/${BUNDLE_OUTPUT}"',
       "codesign --force --deep --sign -",
       "codesign --verify --deep --strict",
-      ".tar.gz",
+      "Stage release asset",
+      ".dmg",
+      ".exe",
+      ".AppImage",
+      "hdiutil create",
+      "hdiutil verify",
       "checksums.txt",
       "gh release create",
       "gh release view",
@@ -86,16 +94,18 @@ describe("release workflow policy", () => {
       "--clobber",
       "--draft",
       "--prerelease",
-      "not code signed or notarized",
+      "not Developer ID signed or notarized",
     ]) {
       expect(releaseWorkflow).toContain(fragment);
     }
+
+    expect(releaseWorkflow).not.toContain(".tar.gz");
 
     expectInOrder(releaseWorkflow, [
       "Install macOS universal Rust targets",
       "Build Tauri bundle",
       "Ad-hoc sign macOS app bundle",
-      "Package bundle artifact",
+      "Stage release asset",
     ]);
   });
 

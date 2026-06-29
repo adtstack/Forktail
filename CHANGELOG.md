@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.2 - Native release artifacts
+
+- Publish the macOS release artifact as a universal DMG instead of a compressed app bundle.
+- Publish the Windows NSIS installer and Linux AppImage directly as release assets.
+- Keep checksums for the native release assets in the draft prerelease.
+
 ## 0.2.1 - macOS release packaging fix
 
 - Rebuilt the macOS release artifact as a universal app for Intel and Apple Silicon Macs.
