@@ -79,6 +79,22 @@ jobs:
 
       - run: npm run build
 
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            pkg-config \
+            curl \
+            wget \
+            file \
+            libgtk-3-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
       - name: Install Rust checks
         run: rustup component add rustfmt clippy
 
@@ -130,9 +146,11 @@ jobs:
           sudo apt-get install -y \
             libwebkit2gtk-4.1-dev \
             build-essential \
+            pkg-config \
             curl \
             wget \
             file \
+            libgtk-3-dev \
             libxdo-dev \
             libssl-dev \
             libayatana-appindicator3-dev \

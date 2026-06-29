@@ -43,6 +43,18 @@ describe("release workflow policy", () => {
     ]);
   });
 
+  it("installs Linux system libraries before Rust/Tauri compilation on Ubuntu runners", () => {
+    expect(countOccurrences(releaseWorkflow, "libwebkit2gtk-4.1-dev")).toBeGreaterThanOrEqual(2);
+    expect(countOccurrences(releaseWorkflow, "pkg-config")).toBeGreaterThanOrEqual(2);
+    expect(countOccurrences(releaseWorkflow, "libgtk-3-dev")).toBeGreaterThanOrEqual(2);
+    expectInOrder(releaseWorkflow, [
+      "Install Tauri Linux dependencies",
+      "cargo clippy --all-targets -- -D warnings",
+      "Install Linux bundle dependencies",
+      "npm run tauri build -- --bundles",
+    ]);
+  });
+
   it("creates unsigned draft prerelease artifacts with checksums for all three platforms", () => {
     for (const fragment of [
       "os: macos-14",
@@ -86,4 +98,8 @@ function expectInOrder(text: string, fragments: string[]): void {
     expect(index).toBeGreaterThan(cursor);
     cursor = index;
   }
+}
+
+function countOccurrences(text: string, fragment: string): number {
+  return text.split(fragment).length - 1;
 }
