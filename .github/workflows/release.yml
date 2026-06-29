@@ -188,24 +188,36 @@ jobs:
       - name: Ad-hoc sign macOS app bundle
         if: matrix.os == 'macos-14'
         shell: bash
+        env:
+          BUNDLE_OUTPUT: ${{ matrix.output }}
+          BUILD_TARGET: ${{ matrix.target }}
         run: |
           set -euo pipefail
+          bundle_root="src-tauri/target/release/bundle/${BUNDLE_OUTPUT}"
+          if [ -n "$BUILD_TARGET" ]; then
+            bundle_root="src-tauri/target/${BUILD_TARGET}/release/bundle/${BUNDLE_OUTPUT}"
+          fi
           codesign --force --deep --sign - \
-            "src-tauri/target/release/bundle/macos/forktail.app"
+            "${bundle_root}/forktail.app"
           codesign --verify --deep --strict --verbose=4 \
-            "src-tauri/target/release/bundle/macos/forktail.app"
+            "${bundle_root}/forktail.app"
 
       - name: Package bundle artifact
         shell: bash
         env:
           ARTIFACT: ${{ matrix.artifact }}
           BUNDLE_OUTPUT: ${{ matrix.output }}
+          BUILD_TARGET: ${{ matrix.target }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: |
           set -euo pipefail
+          bundle_root="src-tauri/target/release/bundle/${BUNDLE_OUTPUT}"
+          if [ -n "$BUILD_TARGET" ]; then
+            bundle_root="src-tauri/target/${BUILD_TARGET}/release/bundle/${BUNDLE_OUTPUT}"
+          fi
           mkdir -p release-artifact
           tar -czf "release-artifact/${ARTIFACT}-${RELEASE_TAG}.tar.gz" \
-            -C "src-tauri/target/release/bundle/${BUNDLE_OUTPUT}" .
+            -C "$bundle_root" .
 
       - uses: actions/upload-artifact@v4.6.2
         with:

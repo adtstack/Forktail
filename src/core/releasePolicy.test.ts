@@ -74,6 +74,7 @@ describe("release workflow policy", () => {
       "rustup target add aarch64-apple-darwin x86_64-apple-darwin",
       "npm run tauri build --",
       "Ad-hoc sign macOS app bundle",
+      'bundle_root="src-tauri/target/${BUILD_TARGET}/release/bundle/${BUNDLE_OUTPUT}"',
       "codesign --force --deep --sign -",
       "codesign --verify --deep --strict",
       ".tar.gz",
