@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 - macOS release packaging fix
+
+- Rebuilt the macOS release artifact as a universal app for Intel and Apple Silicon Macs.
+- Added ad-hoc signing and verification before packaging macOS release artifacts.
+- Made the release workflow update existing draft release assets safely.
+
 ## 0.2.0 - Language and release gate refresh
 
 - Added language settings with local persistence.
