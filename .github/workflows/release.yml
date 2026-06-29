@@ -254,9 +254,18 @@ jobs:
           NOTES
 
           mapfile -d '' assets < <(find release-artifacts -type f -print0 | sort -z)
-          flags=(--draft --title "forktail ${RELEASE_TAG}" --notes-file release-notes.md)
+          create_flags=(--draft --title "forktail ${RELEASE_TAG}" --notes-file release-notes.md)
+          edit_flags=(--draft --title "forktail ${RELEASE_TAG}" --notes-file release-notes.md)
           if [ "$PRERELEASE" = "true" ]; then
-            flags+=(--prerelease)
+            create_flags+=(--prerelease)
+            edit_flags+=(--prerelease)
+          else
+            edit_flags+=(--prerelease=false)
           fi
 
-          gh release create "$RELEASE_TAG" "${assets[@]}" "${flags[@]}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" "${edit_flags[@]}"
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" "${create_flags[@]}"
+          fi
