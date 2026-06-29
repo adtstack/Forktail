@@ -77,6 +77,14 @@ describe("FolderCompareView", () => {
     expect(markup).not.toContain("Apply sync");
   });
 
+  it("labels row primary actions for compare and one-sided reveal", () => {
+    const markup = renderFolderView(null);
+
+    expect(markup).toContain("Enter or double-click to compare files");
+    expect(markup).toContain("Enter or double-click to reveal the left file");
+    expect(markup).toContain("Enter or double-click to reveal the right file");
+  });
+
   it("renders folder tree expand controls for directory rows with visible children", () => {
     const result: FolderScanResult = {
       leftRoot: "/left",
@@ -116,6 +124,7 @@ describe("FolderCompareView", () => {
 
     expect(markup).toContain("aria-expanded=\"true\"");
     expect(markup).toContain("aria-label=\"src collapse\"");
+    expect(markup).toContain("Enter or double-click to expand or collapse this folder");
     expect(markup).toContain("src/App.tsx");
   });
 

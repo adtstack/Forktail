@@ -55,6 +55,7 @@ interface FileCompareViewProps {
   fileChangeNotice: CompareFileChangeNotice | null;
   modelRevision: number;
   dirtySides: Record<CompareSide, boolean>;
+  backLabel?: string;
   onBack: () => void;
   onCheckFileVersions: () => void;
   onKeepCurrentFiles: () => void;
@@ -89,6 +90,7 @@ export function FileCompareView({
   fileChangeNotice,
   modelRevision,
   dirtySides,
+  backLabel,
   onBack,
   onCheckFileVersions,
   onKeepCurrentFiles,
@@ -472,7 +474,7 @@ export function FileCompareView({
     <main className="workspace">
       <header className="toolbar command-toolbar">
         <div className="command-group">
-          <button className="command-button" onClick={onBack}>{text.home}</button>
+          <button className="command-button" onClick={onBack}>{backLabel ?? text.home}</button>
           <button
             className="command-button"
             onClick={onSwap}

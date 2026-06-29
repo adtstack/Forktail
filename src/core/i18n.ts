@@ -139,6 +139,7 @@ export const APP_TEXT = {
     regularFilesOnly: "Only regular files can be opened right now.",
     regularFilesBoth: "Only regular files on both sides can open in 2-way compare.",
     openedInFileManager: "Opened item in the file manager.",
+    folderResults: "Folder Results",
     recentSessionFailure: (message: string) =>
       `Cannot open the recent session. ${message} Remove it if paths moved or permissions changed.`,
     sideName: (side: CompareSide) => side === "left" ? "Left" : "Right",
@@ -205,6 +206,7 @@ export const APP_TEXT = {
     regularFilesOnly: "현재는 일반 파일만 열 수 있습니다.",
     regularFilesBoth: "양쪽 일반 파일만 2-way 비교할 수 있습니다.",
     openedInFileManager: "파일 관리자에서 항목을 열었습니다.",
+    folderResults: "폴더 결과",
     recentSessionFailure: (message: string) =>
       `최근 세션을 열 수 없습니다. ${message} 경로가 이동되었거나 권한이 바뀌었다면 이 항목을 제거하세요.`,
     sideName: (side: CompareSide) => side === "left" ? "왼쪽" : "오른쪽",
@@ -577,7 +579,11 @@ export const FOLDER_COMPARE_TEXT = {
     size: "Size",
     modified: "Modified",
     kind: "Kind",
-    rowTitle: "Double-click to compare files",
+    rowActionCompare: "Enter or double-click to compare files",
+    rowActionRevealLeft: "Enter or double-click to reveal the left file",
+    rowActionRevealRight: "Enter or double-click to reveal the right file",
+    rowActionToggle: "Enter or double-click to expand or collapse this folder",
+    rowActionUnavailable: "Open details for available actions",
     statusAria: (label: string) => `Status: ${label}`,
     expand: "expand",
     collapse: "collapse",
@@ -588,7 +594,8 @@ export const FOLDER_COMPARE_TEXT = {
     compareUnavailable: "Only regular files present on both sides can open in 2-way compare.",
     shownTotal: (shown: number, total: number) =>
       `${shown.toLocaleString()} shown / ${total.toLocaleString()} total`,
-    selectedStatus: (path: string) => `${path} selected · Enter compares · Space shows details`,
+    selectedStatus: (path: string, action: string) =>
+      `${path} selected · ${action} · Space shows details`,
     noRowsStatus: "No rows in the current filter",
     pathSideLabel: (side: CompareSide) => side === "left" ? "Left" : "Right",
   },
@@ -638,7 +645,11 @@ export const FOLDER_COMPARE_TEXT = {
     size: "크기",
     modified: "수정 시각",
     kind: "종류",
-    rowTitle: "더블 클릭하여 파일 비교",
+    rowActionCompare: "Enter 또는 더블 클릭으로 파일 비교",
+    rowActionRevealLeft: "Enter 또는 더블 클릭으로 왼쪽 파일 위치 열기",
+    rowActionRevealRight: "Enter 또는 더블 클릭으로 오른쪽 파일 위치 열기",
+    rowActionToggle: "Enter 또는 더블 클릭으로 폴더 펼침/접기",
+    rowActionUnavailable: "세부 정보에서 가능한 작업 확인",
     statusAria: (label: string) => `상태: ${label}`,
     expand: "펼치기",
     collapse: "접기",
@@ -649,7 +660,8 @@ export const FOLDER_COMPARE_TEXT = {
     compareUnavailable: "양쪽에 있는 일반 파일만 2-way 비교로 열 수 있습니다.",
     shownTotal: (shown: number, total: number) =>
       `${shown.toLocaleString()}개 표시 / ${total.toLocaleString()}개 전체`,
-    selectedStatus: (path: string) => `${path} 선택됨 · Enter로 2-way 비교 · Space로 세부 정보`,
+    selectedStatus: (path: string, action: string) =>
+      `${path} 선택됨 · ${action} · Space로 세부 정보`,
     noRowsStatus: "현재 필터에 표시된 항목 없음",
     pathSideLabel: (side: CompareSide) => side === "left" ? "왼쪽" : "오른쪽",
   },

@@ -26,6 +26,7 @@ import {
   type AppCommandId,
 } from "./core/commands";
 import { listenForNativeMenuCommands } from "./core/nativeMenu";
+import { modeAfterCompareBack, type CompareBackTarget } from "./core/navigation";
 import {
   type CompareSide,
   compareSavePreconditionForPath,
@@ -130,6 +131,7 @@ type BackupDialogState =
 export default function App() {
   const [mode, setMode] = useState<AppMode>("home");
   const [compareSession, setCompareSession] = useState<CompareSession | null>(null);
+  const [compareBackTarget, setCompareBackTarget] = useState<CompareBackTarget>("home");
   const [savedCompareText, setSavedCompareText] = useState<Record<CompareSide, string | null>>({
     left: null,
     right: null,
@@ -438,6 +440,7 @@ export default function App() {
         ]);
         setCleanCompareSession({ left, right });
       }
+      setCompareBackTarget("home");
       if (options.remember) rememberRecentSession(session);
       setMode("compare");
       return;
@@ -680,6 +683,16 @@ export default function App() {
   const backHome = () => {
     requestLeaveActiveSession(() => {
       setMode("home");
+      setCompareBackTarget("home");
+      setMessage(null);
+      setError(null);
+    });
+  };
+
+  const backFromCompare = () => {
+    requestLeaveActiveSession(() => {
+      setMode(modeAfterCompareBack(compareBackTarget, folderResult != null));
+      setCompareBackTarget("home");
       setMessage(null);
       setError(null);
     });
@@ -692,6 +705,7 @@ export default function App() {
     if (!rightPath) return;
     const [left, right] = await Promise.all([readTextFile(leftPath), readTextFile(rightPath)]);
     setCleanCompareSession({ left, right });
+    setCompareBackTarget("home");
     rememberRecentSession({ kind: "compare", leftPath, rightPath });
     setMode("compare");
   }));
@@ -701,6 +715,7 @@ export default function App() {
       const [leftPath, rightPath] = paths;
       const [left, right] = await Promise.all([readTextFile(leftPath), readTextFile(rightPath)]);
       setCleanCompareSession({ left, right });
+      setCompareBackTarget("home");
       rememberRecentSession({ kind: "compare", leftPath, rightPath });
       setMode("compare");
     }));
@@ -773,6 +788,7 @@ export default function App() {
         throw new Error(appText.regularFilesBoth);
       }
       setCleanCompareSession(demoSession);
+      setCompareBackTarget("folders");
       setMode("compare");
       return;
     }
@@ -781,6 +797,7 @@ export default function App() {
       readTextFile(entry.rightPath),
     ]);
     setCleanCompareSession({ left, right });
+    setCompareBackTarget("folders");
     rememberRecentSession({ kind: "compare", leftPath: entry.leftPath, rightPath: entry.rightPath });
     setMode("compare");
   });
@@ -828,6 +845,7 @@ export default function App() {
         readTextFile(session.rightPath),
       ]);
       setCleanCompareSession({ left, right });
+      setCompareBackTarget("home");
       rememberRecentSession({
         kind: "compare",
         leftPath: session.leftPath,
@@ -1244,6 +1262,7 @@ export default function App() {
             onDemoCompare={() => {
               requestLeaveActiveSession(() => {
                 setCleanCompareSession(demoCompareSession());
+                setCompareBackTarget("home");
                 setMode("compare");
               });
             }}
@@ -1272,7 +1291,8 @@ export default function App() {
             fileChangeNotice={compareFileChangeNotice}
             modelRevision={compareModelRevision}
             dirtySides={compareDirtySides}
-            onBack={backHome}
+            backLabel={compareBackTarget === "folders" ? appText.folderResults : undefined}
+            onBack={backFromCompare}
             onCheckFileVersions={() => {
               void checkCompareFileVersions();
             }}

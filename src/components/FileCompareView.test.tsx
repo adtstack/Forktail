@@ -47,6 +47,7 @@ function renderHeading(editing: boolean): string {
 function renderCompareView(
   session: CompareSession,
   fileChangeNotice: CompareFileChangeNotice | null = null,
+  backLabel?: string,
 ): string {
   return renderToStaticMarkup(
     <FileCompareView
@@ -56,6 +57,7 @@ function renderCompareView(
       fileChangeNotice={fileChangeNotice}
       modelRevision={0}
       dirtySides={{ left: false, right: false }}
+      backLabel={backLabel}
       onBack={() => {}}
       onCheckFileVersions={() => {}}
       onKeepCurrentFiles={() => {}}
@@ -132,6 +134,15 @@ describe("FileCompareView TXT controls", () => {
     expect(markup).toContain("aria-keyshortcuts=\"Shift+F7\"");
     expect(markup).toContain("aria-keyshortcuts=\"F7\"");
     expect(markup).toContain("aria-live=\"polite\"");
+  });
+
+  it("uses a custom back label for folder-originated compare sessions", () => {
+    const markup = renderCompareView({
+      left: { ...document, path: "demo/left.ts", name: "left.ts", text: "left\n" },
+      right: document,
+    }, null, "Folder Results");
+
+    expect(markup).toContain(">Folder Results</button>");
   });
 
   it("shows final-newline and external-change recovery actions", () => {

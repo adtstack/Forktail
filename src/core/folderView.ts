@@ -53,6 +53,12 @@ export interface FolderEntryPathAction {
   path: string;
 }
 
+export type FolderEntryPrimaryAction =
+  | { kind: "compare" }
+  | { kind: "reveal"; side: "left" | "right"; path: string }
+  | { kind: "toggle"; path: string }
+  | { kind: "none" };
+
 export interface FolderPathConflict {
   identityKey: string;
   variants: string[];
@@ -193,6 +199,29 @@ export function canCompareFolderEntry(entry: FolderEntry): boolean {
       entry.left?.kind === "file" &&
       entry.right?.kind === "file",
   );
+}
+
+export function folderEntryPrimaryAction(
+  entry: FolderEntry,
+  entries: FolderEntry[],
+): FolderEntryPrimaryAction {
+  if (canCompareFolderEntry(entry)) {
+    return { kind: "compare" };
+  }
+
+  if (folderEntryHasChildren(entry, entries)) {
+    return { kind: "toggle", path: entry.relativePath };
+  }
+
+  if (entry.status === "leftOnly" && entry.leftPath && entry.left?.kind === "file") {
+    return { kind: "reveal", side: "left", path: entry.leftPath };
+  }
+
+  if (entry.status === "rightOnly" && entry.rightPath && entry.right?.kind === "file") {
+    return { kind: "reveal", side: "right", path: entry.rightPath };
+  }
+
+  return { kind: "none" };
 }
 
 export function isFolderDirectoryEntry(entry: FolderEntry): boolean {

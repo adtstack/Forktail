@@ -18,6 +18,7 @@ import {
   folderEntryHasChildren,
   folderEntryModifiedMs,
   folderEntryPathActions,
+  folderEntryPrimaryAction,
   folderScanOptionsWithMode,
   folderScanOptionsWithToggle,
   folderVirtualRange,
@@ -27,6 +28,7 @@ import {
   nextFolderSort,
   prepareFolderEntries,
   summarizeFolderSyncDryRun,
+  type FolderEntryPrimaryAction,
   type FolderEntryPathAction,
   type FolderSortKey,
   type FolderSyncDirection,
@@ -252,7 +254,7 @@ export function FolderCompareView({
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      onOpenEntry(entry);
+      runPrimaryAction(entry);
       return;
     }
     if (event.key === " ") {
@@ -297,6 +299,21 @@ export function FolderCompareView({
       }
       return next;
     });
+  };
+
+  const runPrimaryAction = (entry: FolderEntry) => {
+    const action = folderEntryPrimaryAction(entry, preparedEntries);
+    if (action.kind === "compare") {
+      onOpenEntry(entry);
+      return;
+    }
+    if (action.kind === "reveal") {
+      onRevealPath(action.path);
+      return;
+    }
+    if (action.kind === "toggle") {
+      toggleFolderCollapse(action.path);
+    }
   };
 
   const copyPath = async (side: FolderEntryPathAction["side"], path: string) => {
@@ -471,6 +488,8 @@ export function FolderCompareView({
               const index = virtualRange.start + visibleIndex;
               const collapsible = folderEntryHasChildren(entry, preparedEntries);
               const collapsed = collapsedPaths.has(entry.relativePath);
+              const primaryAction = folderEntryPrimaryAction(entry, preparedEntries);
+              const rowTitle = folderPrimaryActionTitle(primaryAction, text);
               return (
                 <tr
                   key={entry.relativePath}
@@ -480,13 +499,13 @@ export function FolderCompareView({
                   tabIndex={0}
                   aria-rowindex={index + 2}
                   aria-selected={selectedIndex === index}
-                  aria-label={`${entry.relativePath}, ${statusLabels[entry.status]}`}
+                  aria-label={`${entry.relativePath}, ${statusLabels[entry.status]}, ${rowTitle}`}
                   className={`status-${entry.status} ${selectedIndex === index ? "selected-row" : ""}`}
                   onFocus={() => selectRow(index)}
                   onClick={() => selectRow(index)}
-                  onDoubleClick={() => onOpenEntry(entry)}
+                  onDoubleClick={() => runPrimaryAction(entry)}
                   onKeyDown={(event) => handleRowKeyDown(event, entry, index)}
-                  title={entry.message ?? text.rowTitle}
+                  title={entry.message ?? rowTitle}
                 >
                   <td>
                     <span
@@ -510,6 +529,9 @@ export function FolderCompareView({
                           onClick={(event) => {
                             event.stopPropagation();
                             toggleFolderCollapse(entry.relativePath);
+                          }}
+                          onDoubleClick={(event) => {
+                            event.stopPropagation();
                           }}
                         >
                           {collapsed ? "▸" : "▾"}
@@ -593,7 +615,13 @@ export function FolderCompareView({
         <span>{text.shownTotal(entries.length, result.entries.length)}</span>
         <span id="folder-selection-status" aria-live="polite">
           {selectedEntry
-            ? text.selectedStatus(selectedEntry.relativePath)
+            ? text.selectedStatus(
+                selectedEntry.relativePath,
+                folderPrimaryActionTitle(
+                  folderEntryPrimaryAction(selectedEntry, preparedEntries),
+                  text,
+                ),
+              )
             : text.noRowsStatus}
         </span>
       </footer>
@@ -689,4 +717,20 @@ function formatBytes(bytes: number): string {
 
 function copyPathSideLabel(side: FolderEntryPathAction["side"], languageMode: AppLanguage): string {
   return FOLDER_COMPARE_TEXT[languageMode].pathSideLabel(side);
+}
+
+function folderPrimaryActionTitle(
+  action: FolderEntryPrimaryAction,
+  text: (typeof FOLDER_COMPARE_TEXT)[AppLanguage],
+): string {
+  switch (action.kind) {
+    case "compare":
+      return text.rowActionCompare;
+    case "reveal":
+      return action.side === "left" ? text.rowActionRevealLeft : text.rowActionRevealRight;
+    case "toggle":
+      return text.rowActionToggle;
+    case "none":
+      return text.rowActionUnavailable;
+  }
 }

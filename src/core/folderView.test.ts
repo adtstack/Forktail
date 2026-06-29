@@ -13,6 +13,7 @@ import {
   folderEntryDetailRows,
   folderEntryHasChildren,
   folderEntryPathActions,
+  folderEntryPrimaryAction,
   folderPortablePathIdentity,
   folderScanOptionsWithMode,
   folderScanOptionsWithToggle,
@@ -204,6 +205,41 @@ describe("folder entry actions", () => {
         left: { kind: "directory", size: 0, modifiedMs: null, hash: null },
       }),
     ).toBe(false);
+  });
+
+  it("chooses folder row primary actions for compare, one-sided reveal, and tree toggle", () => {
+    const twoSidedFile = entry("src/App.tsx", "different", 100);
+    const leftOnlyFile: FolderEntry = {
+      ...entry("docs/guide.md", "leftOnly", 50),
+      rightPath: null,
+      right: null,
+    };
+    const rightOnlyFile: FolderEntry = {
+      ...entry("config/prod.yml", "rightOnly", 90),
+      leftPath: null,
+      left: null,
+    };
+    const directory = directoryEntry("src", "same");
+    const typeMismatch: FolderEntry = {
+      ...entry("assets/logo", "typeMismatch", 10),
+      left: { kind: "directory", size: 0, modifiedMs: null, hash: null },
+      right: { kind: "file", size: 10, modifiedMs: null, hash: null },
+    };
+    const tree = [directory, twoSidedFile, leftOnlyFile, rightOnlyFile, typeMismatch];
+
+    expect(folderEntryPrimaryAction(twoSidedFile, tree)).toEqual({ kind: "compare" });
+    expect(folderEntryPrimaryAction(leftOnlyFile, tree)).toEqual({
+      kind: "reveal",
+      side: "left",
+      path: "/left/docs/guide.md",
+    });
+    expect(folderEntryPrimaryAction(rightOnlyFile, tree)).toEqual({
+      kind: "reveal",
+      side: "right",
+      path: "/right/config/prod.yml",
+    });
+    expect(folderEntryPrimaryAction(directory, tree)).toEqual({ kind: "toggle", path: "src" });
+    expect(folderEntryPrimaryAction(typeMismatch, tree)).toEqual({ kind: "none" });
   });
 
   it("builds metadata rows for the folder detail panel without file contents", () => {
