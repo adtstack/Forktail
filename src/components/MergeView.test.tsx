@@ -35,13 +35,13 @@ describe("MergeView accessibility", () => {
   it("labels merge state, source regions, result region, and shortcuts", () => {
     const markup = renderMergeView(true);
 
-    expect(markup).toContain("aria-label=\"병합 결과 저장 안 됨\"");
+    expect(markup).toContain("aria-label=\"Merge result has unsaved changes\"");
     expect(markup).toContain("role=\"status\"");
     expect(markup).toContain("aria-live=\"polite\"");
-    expect(markup).toContain("aria-label=\"BASE 원본: demo/base.ts\"");
-    expect(markup).toContain("aria-label=\"OURS 원본: demo/ours.ts\"");
-    expect(markup).toContain("aria-label=\"THEIRS 원본: demo/theirs.ts\"");
-    expect(markup).toContain("aria-label=\"병합 결과 편집기, 저장 경로 미정\"");
+    expect(markup).toContain("aria-label=\"BASE source: demo/base.ts\"");
+    expect(markup).toContain("aria-label=\"OURS source: demo/ours.ts\"");
+    expect(markup).toContain("aria-label=\"THEIRS source: demo/theirs.ts\"");
+    expect(markup).toContain("aria-label=\"Merge result editor, output path unset\"");
     expect(markup).toContain("aria-keyshortcuts=\"Alt+1\"");
     expect(markup).toContain("aria-keyshortcuts=\"Control+S Meta+S\"");
   });
@@ -50,24 +50,24 @@ describe("MergeView accessibility", () => {
     const markup = renderMergeView(true);
 
     for (const label of [
-      "↑ 이전 충돌",
-      "↓ 다음 충돌",
-      "1 / 2 충돌",
-      "실행 취소",
-      "다시 실행",
-      "해결 후 다음",
-      "draft 복구",
-      "저장 EOL",
-      "원본",
-      "시스템",
-      "OURS 채택",
-      "THEIRS 채택",
-      "BASE 복원",
-      "둘 다 유지",
+      "Prev",
+      "Next",
+      "1 / 2",
+      "Undo",
+      "Redo",
+      "Auto next",
+      "Drafts",
+      "Save EOL",
+      "Original",
+      "System",
+      "Accept OURS",
+      "Accept THEIRS",
+      "Restore BASE",
+      "Keep both",
       "BASE → OURS",
       "BASE → THEIRS",
-      "다른 이름으로 저장",
-      "백업 복원",
+      "Save As",
+      "Backups",
     ]) {
       expect(markup).toContain(label);
     }
@@ -87,10 +87,10 @@ describe("MergeView accessibility", () => {
     };
     const markup = renderMergeView(false, session);
 
-    expect(markup).toContain("✓ 충돌 없음");
-    expect(markup).toContain("자동 병합 또는 수동 해결 완료");
-    expect(markup).toContain("aria-label=\"병합 결과 편집기, 저장 경로 /repo/result.txt\"");
-    expect(markup).not.toContain("OURS 채택");
+    expect(markup).toContain("Clean");
+    expect(markup).toContain("Auto merge or manual resolution complete.");
+    expect(markup).toContain("aria-label=\"Merge result editor, output path /repo/result.txt\"");
+    expect(markup).not.toContain("Accept OURS");
   });
 });
 
@@ -105,7 +105,7 @@ describe("MergeView save encoding warning", () => {
       },
     });
 
-    expect(markup).toContain("병합 결과 저장은 UTF-8로 기록");
-    expect(markup).toContain("원본 인코딩");
+    expect(markup).toContain("saved as UTF-8");
+    expect(markup).toContain("original encoding");
   });
 });

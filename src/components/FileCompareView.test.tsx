@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { CompareFileChangeNotice } from "../core/fileVersion";
+import { FILE_COMPARE_TEXT } from "../core/i18n";
 import type { CompareSession, FileDocument } from "../core/models";
 import { activeChangedCompareSide, FileCompareView, FileHeading } from "./FileCompareView";
 
@@ -27,12 +28,14 @@ const document: FileDocument = {
 function renderHeading(editing: boolean): string {
   return renderToStaticMarkup(
     <FileHeading
-      side="RIGHT"
+      sideLabel="RIGHT"
+      sideName="Right"
       dropSide="right"
       dropActive={false}
       editing={editing}
       path={document.path}
       document={document}
+      text={FILE_COMPARE_TEXT.en}
       onCopyPath={() => {}}
       onDragOver={() => {}}
       onDragLeave={() => {}}
@@ -89,8 +92,8 @@ describe("FileCompareView save encoding warning", () => {
       right: document,
     });
 
-    expect(markup).toContain("왼쪽:");
-    expect(markup).toContain("UTF-8로 기록");
+    expect(markup).toContain("Left:");
+    expect(markup).toContain("writes UTF-8");
     expect(markup).toContain("windows-1252");
   });
 });
@@ -103,26 +106,26 @@ describe("FileCompareView TXT controls", () => {
     });
 
     for (const label of [
-      "이전 변경",
-      "다음 변경",
-      "왼쪽→오른쪽",
-      "오른쪽→왼쪽",
-      "hunk 되돌리기",
-      "저장",
-      "다른 이름으로 저장",
-      "백업 복원",
-      "리포트 저장",
-      "저장 EOL",
-      "원본",
-      "시스템",
-      "공백",
-      "끝 무시",
-      "전체 무시",
-      "Aa 무시",
-      "EOL 무시",
-      "줄바꿈",
-      "공백 표시",
-      "순환",
+      "Prev",
+      "Next",
+      "L -&gt; R",
+      "R -&gt; L",
+      "Undo hunk",
+      "Save",
+      "Save As",
+      "Backups",
+      "Export",
+      "Save EOL",
+      "Original",
+      "System",
+      "Whitespace",
+      "Trim end",
+      "Ignore all",
+      "Ignore case",
+      "Ignore EOL",
+      "Wrap",
+      "Spaces",
+      "Loop",
     ]) {
       expect(markup).toContain(label);
     }
@@ -145,15 +148,15 @@ describe("FileCompareView TXT controls", () => {
       {
         leftChanged: true,
         rightChanged: false,
-        message: "왼쪽 파일이 열린 뒤 변경됐습니다. 다시 읽거나 현재 비교 내용을 유지하세요.",
+        message: "Left file changed after it was opened. Reload or keep the current compare content.",
         versionKey: "left:changed|right:same",
       },
     );
 
-    expect(markup).toContain("왼쪽 파일에 마지막 개행이 없습니다.");
-    expect(markup).toContain("다시 읽기");
-    expect(markup).toContain("현재 내용 유지");
-    expect(markup).toContain("다시 확인");
+    expect(markup).toContain("Left file has no final newline.");
+    expect(markup).toContain("Reload");
+    expect(markup).toContain("Keep Current");
+    expect(markup).toContain("Check Again");
   });
 });
 
@@ -162,7 +165,7 @@ describe("activeChangedCompareSide", () => {
     const notice: CompareFileChangeNotice = {
       leftChanged: true,
       rightChanged: false,
-      message: "왼쪽 파일이 열린 뒤 변경됐습니다.",
+      message: "Left file changed after it was opened.",
       versionKey: "left-changed",
     };
 

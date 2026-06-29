@@ -1,4 +1,6 @@
+import { CORE_TEXT } from "./i18n";
 import type { CompareSession, FileDocument, LineEnding, WriteResult } from "./models";
+import type { AppLanguage } from "./settings";
 import type { WritePrecondition } from "./mergeSave";
 
 export type CompareSide = "left" | "right";
@@ -50,6 +52,7 @@ export function compareSaveStateAfterSideWrite(
   side: CompareSide,
   text: string,
   written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs">,
+  language: AppLanguage = "en",
 ): SavedCompareSideState {
   const document = fileDocumentAfterTextWrite(session[side], text, written);
   return {
@@ -59,7 +62,7 @@ export function compareSaveStateAfterSideWrite(
     },
     savedSnapshot: text,
     outputVersion: writePreconditionFromWriteResult(written),
-    message: written.backupPath ? `저장 완료 · 백업: ${written.backupPath}` : "저장 완료",
+    message: CORE_TEXT[language].saved(written.backupPath),
   };
 }
 
@@ -67,8 +70,9 @@ export function compareSaveStateAfterWrite(
   session: CompareSession,
   rightText: string,
   written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs">,
+  language: AppLanguage = "en",
 ): SavedCompareState {
-  const saved = compareSaveStateAfterSideWrite(session, "right", rightText, written);
+  const saved = compareSaveStateAfterSideWrite(session, "right", rightText, written, language);
   return {
     session: saved.session,
     savedRightSnapshot: saved.savedSnapshot,
@@ -90,19 +94,21 @@ export function fileDocumentWithText(document: FileDocument, text: string): File
 export function saveEncodingWarningForDocument(
   document: Pick<FileDocument, "encoding" | "decodeHadErrors">,
   mode: SaveEncodingMode = "preserve",
+  language: AppLanguage = "en",
 ): string | null {
+  const text = CORE_TEXT[language];
   const preservedEncoding = preservedSaveEncodingForDocument(document);
   const isPlainUtf8 = document.encoding.trim().toUpperCase() === "UTF-8";
   const willWriteUtf8 = mode === "utf8" || preservedEncoding === "UTF-8";
 
   if (document.decodeHadErrors && willWriteUtf8 && !isPlainUtf8) {
-    return `디코딩 손실이 있고 현재 저장은 UTF-8로 기록됩니다. 원본 인코딩(${document.encoding})과 일부 문자가 보존되지 않을 수 있습니다.`;
+    return text.decodeLossUtf8(document.encoding);
   }
   if (document.decodeHadErrors) {
-    return "디코딩 손실이 있는 파일입니다. 저장하면 손실된 문자가 그대로 기록될 수 있습니다.";
+    return text.decodeLoss;
   }
   if (willWriteUtf8 && !isPlainUtf8) {
-    return `현재 저장은 UTF-8로 기록됩니다. 원본 인코딩(${document.encoding})과 BOM은 보존되지 않을 수 있습니다.`;
+    return text.utf8EncodingRisk(document.encoding);
   }
 
   return null;
@@ -116,13 +122,15 @@ export function preservedSaveEncodingForDocument(
 
 export function compareSaveEncodingWarnings(
   session: CompareSession,
+  language: AppLanguage = "en",
 ): CompareSaveEncodingWarning[] {
+  const text = CORE_TEXT[language];
   return (["left", "right"] as const).flatMap((side) => {
-    const message = saveEncodingWarningForDocument(session[side]);
+    const message = saveEncodingWarningForDocument(session[side], "preserve", language);
     if (!message) return [];
     return [{
       side,
-      label: side === "left" ? "왼쪽" : "오른쪽",
+      label: text.compareSide(side),
       message,
     }];
   });

@@ -156,7 +156,7 @@ export function demoFolderScanResult(): FolderScanResult {
       left: directoryMeta(1782408000000),
       right: fileMeta(690, 1782408000000, "logo"),
       status: "typeMismatch",
-      message: "왼쪽은 폴더, 오른쪽은 파일입니다.",
+      message: "Left is a folder; right is a file.",
     },
     {
       relativePath: "private/secret.txt",
@@ -165,7 +165,7 @@ export function demoFolderScanResult(): FolderScanResult {
       left: null,
       right: null,
       status: "error",
-      message: "권한이 없어 메타데이터를 읽지 못했습니다.",
+      message: "Permission denied while reading metadata.",
     },
   ];
 

@@ -1,3 +1,6 @@
+import { CORE_TEXT } from "./i18n";
+import type { AppLanguage } from "./settings";
+
 export type CompareDropSide = "left" | "right";
 
 interface DroppedFileLike {
@@ -11,7 +14,7 @@ interface DataTransferLike {
 }
 
 export const dropPathUnavailableMessage =
-  "드롭한 항목의 파일 경로를 읽을 수 없습니다. 데스크톱 앱에서 로컬 파일을 드롭하세요.";
+  CORE_TEXT.en.dropPathUnavailable;
 
 export function droppedFilePaths(dataTransfer: DataTransferLike | null | undefined): string[] {
   if (!dataTransfer) return [];
@@ -20,24 +23,33 @@ export function droppedFilePaths(dataTransfer: DataTransferLike | null | undefin
   return pathsFromUriList(dataTransfer.getData?.("text/uri-list") ?? "");
 }
 
-export function compareDropRejectionMessage(pathCount: number): string | null {
-  if (pathCount === 0) return dropPathUnavailableMessage;
+export function compareDropRejectionMessage(
+  pathCount: number,
+  language: AppLanguage = "en",
+): string | null {
+  const text = CORE_TEXT[language];
+  if (pathCount === 0) return text.dropPathUnavailable;
   if (pathCount !== 2) {
-    return `2-way 비교에는 파일 2개를 드롭하세요. 현재 ${pathCount}개입니다.`;
+    return text.compareDropWrongCount(pathCount);
   }
   return null;
 }
 
-export function paneDropRejectionMessage(side: CompareDropSide, pathCount: number): string | null {
-  if (pathCount === 0) return dropPathUnavailableMessage;
+export function paneDropRejectionMessage(
+  side: CompareDropSide,
+  pathCount: number,
+  language: AppLanguage = "en",
+): string | null {
+  const text = CORE_TEXT[language];
+  if (pathCount === 0) return text.dropPathUnavailable;
   if (pathCount !== 1) {
-    return `${sideLabel(side)}에는 파일 1개만 드롭할 수 있습니다. 현재 ${pathCount}개입니다.`;
+    return text.paneDropWrongCount(side, pathCount);
   }
   return null;
 }
 
-export function sideLabel(side: CompareDropSide): string {
-  return side === "left" ? "왼쪽" : "오른쪽";
+export function sideLabel(side: CompareDropSide, language: AppLanguage = "en"): string {
+  return CORE_TEXT[language].compareSideLower(side);
 }
 
 function pathsFromFileList(files: ArrayLike<DroppedFileLike> | null | undefined): string[] {

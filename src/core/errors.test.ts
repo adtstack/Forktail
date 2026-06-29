@@ -19,36 +19,45 @@ describe("app error contract", () => {
   });
 
   it("recognizes serialized command errors", () => {
-    expect(isAppError({ code: "NOT_FOUND", message: "파일이 없습니다." })).toBe(true);
+    expect(isAppError({ code: "NOT_FOUND", message: "File not found." })).toBe(true);
     expect(isAppError({ code: "io", message: "raw os error" })).toBe(false);
     expect(isAppError({ code: "NOT_FOUND" })).toBe(false);
   });
 
   it("prefers command error messages for display", () => {
+    expect(errorMessage({ code: "BINARY_FILE", message: "This is not a text file." })).toBe(
+      "This is not a text file.",
+    );
+  });
+
+  it("uses localized guidance when the default English UI receives a Korean command message", () => {
     expect(errorMessage({ code: "BINARY_FILE", message: "텍스트 파일이 아닙니다." })).toBe(
+      "This is not a text file. Binary files are not opened in compare views.",
+    );
+    expect(errorMessage({ code: "BINARY_FILE", message: "텍스트 파일이 아닙니다." }, "ko")).toBe(
       "텍스트 파일이 아닙니다.",
     );
   });
 
   it("falls back to code-specific guidance when a command message is empty", () => {
-    expect(errorMessage({ code: "TOO_LARGE", message: " " })).toContain("64 MiB 이하");
-    expect(errorMessage({ code: "FILE_CHANGED", message: "" })).toContain("다시 읽거나");
+    expect(errorMessage({ code: "TOO_LARGE", message: " " })).toContain("64 MiB");
+    expect(errorMessage({ code: "FILE_CHANGED", message: "" })).toContain("Reload");
   });
 
   it("does not expose raw OS or stack-shaped debug strings to users", () => {
     expect(errorMessage("Os { code: 32, kind: Uncategorized, message: \"busy\" }")).toBe(
-      "작업을 완료하지 못했습니다. 입력 경로와 권한을 확인한 뒤 다시 시도하세요.",
+      "Could not complete the action. Check paths and permissions, then try again.",
     );
     expect(
       errorMessage({
         message: "thread 'main' panicked at src-tauri/src/lib.rs:10:5",
       }),
-    ).toBe("작업을 완료하지 못했습니다. 입력 경로와 권한을 확인한 뒤 다시 시도하세요.");
+    ).toBe("Could not complete the action. Check paths and permissions, then try again.");
   });
 
   it("keeps deliberate app-level errors actionable", () => {
-    expect(errorMessage(new Error("브라우저에서는 데모 세션만 자동 복원할 수 있습니다."))).toBe(
-      "브라우저에서는 데모 세션만 자동 복원할 수 있습니다.",
+    expect(errorMessage(new Error("Only demo sessions can be restored automatically in the browser."))).toBe(
+      "Only demo sessions can be restored automatically in the browser.",
     );
   });
 });

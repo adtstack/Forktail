@@ -14,9 +14,14 @@ import { parseConflictBlocks, resolveConflict, type ConflictResolution } from ".
 import { mergeSaveEncodingWarning } from "../core/mergeSave";
 import type { SaveLineEndingMode } from "../core/lineEndings";
 import { buildSideDiff, type SideDiffSegment } from "../core/sideDiff";
-import { loadMergeSettings, saveMergeSettings } from "../core/settings";
+import { MERGE_VIEW_TEXT } from "../core/i18n";
+import { loadMergeSettings, saveMergeSettings, type AppLanguage } from "../core/settings";
 import type { MergeRecoveryDraft } from "../core/mergeRecovery";
-import { pathCopyFailureMessage, pathCopySuccessMessage, writeClipboardText } from "../core/pathCopy";
+import {
+  pathCopyFailureMessageForLanguage,
+  pathCopySuccessMessage,
+  writeClipboardText,
+} from "../core/pathCopy";
 import {
   canRedoTextHistory,
   canUndoTextHistory,
@@ -31,6 +36,7 @@ import type { ConflictBlock, MergeSession } from "../core/models";
 interface MergeViewProps {
   session: MergeSession;
   busy: boolean;
+  languageMode?: AppLanguage;
   dirty: boolean;
   editorTheme: "vs" | "vs-dark";
   recoveryDraft: MergeRecoveryDraft | null;
@@ -52,6 +58,7 @@ interface PathCopyState {
 export function MergeView({
   session,
   busy,
+  languageMode = "en",
   dirty,
   editorTheme,
   recoveryDraft,
@@ -64,6 +71,7 @@ export function MergeView({
   onSaveAs,
   onShowBackups,
 }: MergeViewProps) {
+  const text = MERGE_VIEW_TEXT[languageMode];
   const [activeIndex, setActiveIndex] = useState(0);
   const [resultHistory, setResultHistory] = useState(() => createTextHistory(session.result));
   const [mergeSettings, setMergeSettings] = useState(() => loadMergeSettings());
@@ -78,7 +86,10 @@ export function MergeView({
     [session.base.path, session.ours.path, session.theirs.path],
   );
   const [editorLanguage, setEditorLanguage] = useState(language);
-  const saveEncodingWarning = useMemo(() => mergeSaveEncodingWarning(session), [session]);
+  const saveEncodingWarning = useMemo(
+    () => mergeSaveEncodingWarning(session, languageMode),
+    [languageMode, session],
+  );
 
   useEffect(() => {
     if (session.result === resultHistory.present) return;
@@ -338,9 +349,9 @@ export function MergeView({
   const copyPath = async (label: string, path: string) => {
     try {
       await writeClipboardText(path);
-      setPathCopyState({ message: pathCopySuccessMessage(label), fallbackPath: null });
+      setPathCopyState({ message: pathCopySuccessMessage(label, languageMode), fallbackPath: null });
     } catch {
-      setPathCopyState({ message: pathCopyFailureMessage, fallbackPath: path });
+      setPathCopyState({ message: pathCopyFailureMessageForLanguage(languageMode), fallbackPath: path });
     }
   };
 
@@ -348,16 +359,16 @@ export function MergeView({
     <main className="workspace merge-workspace">
       <header className="toolbar command-toolbar merge-command-toolbar">
         <div className="command-group">
-          <button className="command-button" onClick={onBack}>← 홈</button>
+          <button className="command-button" onClick={onBack}>{text.home}</button>
         </div>
-        <div className="command-group command-group-primary" aria-label="충돌 탐색">
+        <div className="command-group command-group-primary" aria-label={text.conflictNavigationAria}>
           <button
             className="command-button"
             onClick={previousConflict}
             disabled={!activeConflict}
             aria-keyshortcuts={commandAriaKeyshortcuts("previousConflict")}
           >
-            ↑ 이전 충돌
+            {text.previousConflict}
           </button>
           <span
             className={conflicts.length ? "conflict-count" : "clean-count"}
@@ -365,11 +376,11 @@ export function MergeView({
             aria-live="polite"
             aria-label={
               conflicts.length
-                ? `현재 충돌 ${activeIndex + 1}, 전체 충돌 ${conflicts.length}`
-                : "충돌 없음"
+                ? text.currentConflictAria(activeIndex + 1, conflicts.length)
+                : text.noConflictsAria
             }
           >
-            {conflicts.length ? `${activeIndex + 1} / ${conflicts.length} 충돌` : "✓ 충돌 없음"}
+            {conflicts.length ? `${activeIndex + 1} / ${conflicts.length}` : text.clean}
           </span>
           <button
             className="command-button"
@@ -377,17 +388,17 @@ export function MergeView({
             disabled={!activeConflict}
             aria-keyshortcuts={commandAriaKeyshortcuts("nextConflict")}
           >
-            ↓ 다음 충돌
+            {text.nextConflict}
           </button>
         </div>
-        <div className="command-group" aria-label="결과 편집">
+        <div className="command-group" aria-label={text.resultEditingAria}>
           <span
             className={dirty ? "dirty-count" : "clean-count"}
             role="status"
             aria-live="polite"
-            aria-label={dirty ? "병합 결과 저장 안 됨" : "병합 결과 저장됨"}
+            aria-label={dirty ? text.mergeDirtyAria : text.mergeSavedAria}
           >
-            {dirty ? "저장 안 됨" : "저장됨"}
+            {dirty ? text.dirty : text.saved}
           </span>
           <button
             className="command-button"
@@ -395,7 +406,7 @@ export function MergeView({
             disabled={!canUndoTextHistory(resultHistory)}
             aria-keyshortcuts={commandAriaKeyshortcuts("undo")}
           >
-            실행 취소
+            {text.undo}
           </button>
           <button
             className="command-button"
@@ -403,10 +414,10 @@ export function MergeView({
             disabled={!canRedoTextHistory(resultHistory)}
             aria-keyshortcuts={commandAriaKeyshortcuts("redo")}
           >
-            다시 실행
+            {text.redo}
           </button>
         </div>
-        <div className="command-group" aria-label="병합 옵션">
+        <div className="command-group" aria-label={text.mergeOptionsAria}>
           <label className="toolbar-check">
             <input
               type="checkbox"
@@ -418,7 +429,7 @@ export function MergeView({
                 }))
               }
             />
-            해결 후 다음
+            {text.autoNext}
           </label>
           <label className="toolbar-check">
             <input
@@ -431,10 +442,10 @@ export function MergeView({
                 }))
               }
             />
-            draft 복구
+            {text.drafts}
           </label>
           <label className="toolbar-field">
-            <span>저장 EOL</span>
+            <span>{text.saveEol}</span>
             <select
               className="toolbar-select"
               value={mergeSettings.saveLineEnding}
@@ -445,22 +456,22 @@ export function MergeView({
                 }))
               }
             >
-              <option value="original">원본</option>
-              <option value="system">시스템</option>
+              <option value="original">{text.original}</option>
+              <option value="system">{text.system}</option>
               <option value="lf">LF</option>
               <option value="crlf">CRLF</option>
             </select>
           </label>
         </div>
         <div className="toolbar-spacer" />
-        <div className="command-group" aria-label="저장">
+        <div className="command-group" aria-label={text.saveAria}>
           <button
             className="command-button primary-button"
             onClick={saveResult}
             disabled={busy}
             aria-keyshortcuts={commandAriaKeyshortcuts("save")}
           >
-            저장
+            {text.save}
           </button>
           <button
             className="command-button"
@@ -468,26 +479,32 @@ export function MergeView({
             disabled={busy}
             aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
           >
-            다른 이름으로 저장
+            {text.saveAs}
           </button>
           <button
             className="command-button"
             onClick={onShowBackups}
             disabled={busy || !session.outputPath}
           >
-            백업 복원
+            {text.backups}
           </button>
         </div>
       </header>
 
       {activeConflict && sideDiffs && (
-        <ConflictSideDiff conflict={activeConflict} ours={sideDiffs.ours} theirs={sideDiffs.theirs} />
+        <ConflictSideDiff
+          conflict={activeConflict}
+          ours={sideDiffs.ours}
+          theirs={sideDiffs.theirs}
+          text={text}
+        />
       )}
 
       <section className="merge-source-headings">
         <PaneHeading
           label="BASE"
           path={session.base.path}
+          text={text}
           onCopyPath={() => {
             void copyPath("BASE", session.base.path);
           }}
@@ -495,6 +512,7 @@ export function MergeView({
         <PaneHeading
           label="OURS"
           path={session.ours.path}
+          text={text}
           onCopyPath={() => {
             void copyPath("OURS", session.ours.path);
           }}
@@ -502,6 +520,7 @@ export function MergeView({
         <PaneHeading
           label="THEIRS"
           path={session.theirs.path}
+          text={text}
           onCopyPath={() => {
             void copyPath("THEIRS", session.theirs.path);
           }}
@@ -516,14 +535,14 @@ export function MergeView({
       {recoveryDraft && (
         <div className="metadata-warning merge-draft-warning" role="status">
           <span>
-            이전에 저장하지 못한 병합 결과 draft가 있습니다. 원본 파일 내용은 별도 캐시하지 않았습니다.
+            {text.draftWarning}
           </span>
           <div className="warning-actions">
             <button type="button" onClick={onRestoreRecoveryDraft}>
-              draft 복구
+              {text.restoreDraft}
             </button>
             <button type="button" onClick={onDiscardRecoveryDraft}>
-              삭제
+              {text.delete}
             </button>
           </div>
         </div>
@@ -536,21 +555,21 @@ export function MergeView({
 
       <section className="merge-grid">
         <SourceEditor
-          label="BASE 원본"
+          label={text.sourceLabel("BASE")}
           path={session.base.path}
           value={session.base.text}
           language={editorLanguage}
           editorTheme={editorTheme}
         />
         <SourceEditor
-          label="OURS 원본"
+          label={text.sourceLabel("OURS")}
           path={session.ours.path}
           value={session.ours.text}
           language={editorLanguage}
           editorTheme={editorTheme}
         />
         <SourceEditor
-          label="THEIRS 원본"
+          label={text.sourceLabel("THEIRS")}
           path={session.theirs.path}
           value={session.theirs.text}
           language={editorLanguage}
@@ -559,12 +578,12 @@ export function MergeView({
         <div
           className={`result-panel${activeConflict ? " has-resolution" : ""}`}
           role="region"
-          aria-label={`병합 결과 편집기, 저장 경로 ${session.outputPath ?? "미정"}`}
+          aria-label={text.resultEditorAria(session.outputPath)}
         >
           {activeConflict && (
-            <div className="resolution-rail" aria-label="활성 충돌 해결">
+            <div className="resolution-rail" aria-label={text.resolveActiveConflictAria}>
               <div>
-                <span className="side-label">ACTIVE CONFLICT</span>
+                <span className="side-label">{text.activeConflict}</span>
                 <strong>{activeIndex + 1} / {conflicts.length}</strong>
               </div>
               <div className="resolution-buttons">
@@ -572,33 +591,33 @@ export function MergeView({
                   onClick={() => applyResolution("ours")}
                   aria-keyshortcuts={commandAriaKeyshortcuts("acceptOurs")}
                 >
-                  OURS 채택
+                  {text.acceptOurs}
                 </button>
                 <button
                   onClick={() => applyResolution("theirs")}
                   aria-keyshortcuts={commandAriaKeyshortcuts("acceptTheirs")}
                 >
-                  THEIRS 채택
+                  {text.acceptTheirs}
                 </button>
                 <button
                   onClick={() => applyResolution("base")}
                   aria-keyshortcuts={commandAriaKeyshortcuts("acceptBase")}
                 >
-                  BASE 복원
+                  {text.restoreBase}
                 </button>
                 <button
                   onClick={() => applyResolution("both")}
                   aria-keyshortcuts={commandAriaKeyshortcuts("acceptBoth")}
                 >
-                  둘 다 유지
+                  {text.keepBoth}
                 </button>
               </div>
             </div>
           )}
           <div className="result-heading">
             <div>
-              <span className="side-label">RESULT</span>
-              <strong>{session.outputPath ?? "저장 경로 미정"}</strong>
+              <span className="side-label">{text.result}</span>
+              <strong>{session.outputPath ?? text.noOutputPath}</strong>
             </div>
           </div>
           <Editor
@@ -623,13 +642,13 @@ export function MergeView({
       </section>
 
       <footer className="status-bar">
-        <span>{language} · 편집 가능</span>
+        <span>{language} · {text.editable}</span>
         <span>
           {dirty
-            ? "저장하지 않은 결과가 있습니다."
+            ? text.unsavedResultChanges
             : conflicts.length
-              ? "모든 충돌을 해결한 뒤 저장하세요."
-              : "자동 병합 또는 수동 해결 완료"}
+              ? text.resolveBeforeSaving
+              : text.mergeComplete}
         </span>
       </footer>
     </main>
@@ -640,19 +659,28 @@ function ConflictSideDiff({
   conflict,
   ours,
   theirs,
+  text,
 }: {
   conflict: ConflictBlock;
   ours: ReturnType<typeof buildSideDiff>;
   theirs: ReturnType<typeof buildSideDiff>;
+  text: (typeof MERGE_VIEW_TEXT)[AppLanguage];
 }) {
   return (
-    <section className="conflict-side-diff" aria-label={`충돌 ${conflict.id} 단어 차이`}>
-      <SideDiffPair title="BASE → OURS" base={ours.base} changed={ours.changed} changedLabel="OURS" />
+    <section className="conflict-side-diff" aria-label={text.conflictWordDiffAria(conflict.id)}>
+      <SideDiffPair
+        title="BASE → OURS"
+        base={ours.base}
+        changed={ours.changed}
+        changedLabel="OURS"
+        text={text}
+      />
       <SideDiffPair
         title="BASE → THEIRS"
         base={theirs.base}
         changed={theirs.changed}
         changedLabel="THEIRS"
+        text={text}
       />
     </section>
   );
@@ -663,28 +691,38 @@ function SideDiffPair({
   base,
   changed,
   changedLabel,
+  text,
 }: {
   title: string;
   base: SideDiffSegment[];
   changed: SideDiffSegment[];
   changedLabel: string;
+  text: (typeof MERGE_VIEW_TEXT)[AppLanguage];
 }) {
   return (
     <div className="side-diff-pair">
       <strong>{title}</strong>
-      <DiffLine label="BASE" segments={base} />
-      <DiffLine label={changedLabel} segments={changed} />
+      <DiffLine label="BASE" segments={base} text={text} />
+      <DiffLine label={changedLabel} segments={changed} text={text} />
     </div>
   );
 }
 
-function DiffLine({ label, segments }: { label: string; segments: SideDiffSegment[] }) {
+function DiffLine({
+  label,
+  segments,
+  text,
+}: {
+  label: string;
+  segments: SideDiffSegment[];
+  text: (typeof MERGE_VIEW_TEXT)[AppLanguage];
+}) {
   return (
     <div className="side-diff-line">
       <span>{label}</span>
       <code>
         {segments.length === 0 ? (
-          <mark className="side-diff-empty">비어 있음</mark>
+          <mark className="side-diff-empty">{text.empty}</mark>
         ) : (
           segments.map((segment, index) => (
             <mark key={`${segment.kind}-${index}`} className={`side-diff-${segment.kind}`}>
@@ -700,18 +738,20 @@ function DiffLine({ label, segments }: { label: string; segments: SideDiffSegmen
 function PaneHeading({
   label,
   path,
+  text,
   onCopyPath,
 }: {
   label: string;
   path: string;
+  text: (typeof MERGE_VIEW_TEXT)[AppLanguage];
   onCopyPath: () => void;
 }) {
   return (
-    <div title={path} role="group" aria-label={`${label} 파일 경로 ${path}`}>
+    <div title={path} role="group" aria-label={text.filePathAria(label, path)}>
       <span className="side-label">{label}</span>
       <strong>{path.split(/[\\/]/).pop()}</strong>
       <button type="button" className="file-copy-button" onClick={onCopyPath}>
-        경로 복사
+        {text.copyPath}
       </button>
       <small>{path}</small>
     </div>

@@ -56,7 +56,7 @@ describe("mergeSaveStateAfterWrite", () => {
         expectedSize: 7,
         expectedModifiedMs: 1234,
       },
-      message: "저장 완료",
+      message: "Saved",
     });
   });
 
@@ -68,7 +68,7 @@ describe("mergeSaveStateAfterWrite", () => {
         size: 7,
         modifiedMs: null,
       }).message,
-    ).toBe("저장 완료 · 백업: /out/merged.txt.bak");
+    ).toBe("Saved · backup: /out/merged.txt.bak");
   });
 });
 
@@ -88,7 +88,7 @@ describe("mergeSaveEncodingWarning", () => {
           encoding: "UTF-16BE BOM",
         },
       }),
-    ).toContain("원본 인코딩");
+    ).toContain("original encoding");
   });
 
   it("prioritizes decode-loss wording when any source decoded with replacement", () => {
@@ -102,7 +102,7 @@ describe("mergeSaveEncodingWarning", () => {
           decodeHadErrors: true,
         },
       }),
-    ).toContain("디코딩 손실");
+    ).toContain("decode loss");
   });
 });
 

@@ -1,4 +1,6 @@
 import { DEFAULT_FOLDER_SCAN_OPTIONS, type ActiveSession } from "./settings";
+import { CORE_TEXT } from "./i18n";
+import type { AppLanguage } from "./settings";
 
 export type StartupSessionParseResult =
   | { status: "none" }
@@ -12,25 +14,28 @@ const FOLDER_FLAGS = new Set(["--folders", "--folder", "folders", "folder"]);
 const MERGE_FLAGS = new Set(["--merge", "merge"]);
 const MERGETOOL_FLAGS = new Set(["--mergetool", "--merge-tool", "mergetool", "merge-tool"]);
 
-export function parseStartupSessionArgs(args: string[]): StartupSessionParseResult {
+export function parseStartupSessionArgs(
+  args: string[],
+  language: AppLanguage = "en",
+): StartupSessionParseResult {
   const normalized = args.filter((arg) => arg.length > 0);
   const separatorIndex = normalized.indexOf("--");
   const appArgs = separatorIndex >= 0 ? normalized.slice(separatorIndex + 1) : normalized;
   if (appArgs.length === 0) return { status: "none" };
 
   const [command, ...rest] = appArgs;
-  if (COMPARE_FLAGS.has(command)) return compareSession(rest);
-  if (FOLDER_FLAGS.has(command)) return folderSession(rest);
-  if (MERGE_FLAGS.has(command)) return mergeSession(rest, "merge");
-  if (MERGETOOL_FLAGS.has(command)) return mergeSession(rest, "mergetool");
+  if (COMPARE_FLAGS.has(command)) return compareSession(rest, language);
+  if (FOLDER_FLAGS.has(command)) return folderSession(rest, language);
+  if (MERGE_FLAGS.has(command)) return mergeSession(rest, "merge", language);
+  if (MERGETOOL_FLAGS.has(command)) return mergeSession(rest, "mergetool", language);
   if (command.startsWith("-")) {
-    return invalidStartupArgs();
+    return invalidStartupArgs(language);
   }
-  return compareSession(appArgs);
+  return compareSession(appArgs, language);
 }
 
-function compareSession(paths: string[]): StartupSessionParseResult {
-  if (paths.length !== 2) return invalidStartupArgs();
+function compareSession(paths: string[], language: AppLanguage): StartupSessionParseResult {
+  if (paths.length !== 2) return invalidStartupArgs(language);
   return {
     status: "valid",
     source: "compare",
@@ -38,8 +43,8 @@ function compareSession(paths: string[]): StartupSessionParseResult {
   };
 }
 
-function folderSession(paths: string[]): StartupSessionParseResult {
-  if (paths.length !== 2) return invalidStartupArgs();
+function folderSession(paths: string[], language: AppLanguage): StartupSessionParseResult {
+  if (paths.length !== 2) return invalidStartupArgs(language);
   return {
     status: "valid",
     source: "folders",
@@ -55,9 +60,10 @@ function folderSession(paths: string[]): StartupSessionParseResult {
 function mergeSession(
   paths: string[],
   source: Extract<StartupSessionSource, "merge" | "mergetool">,
+  language: AppLanguage,
 ): StartupSessionParseResult {
   if (source === "mergetool" ? paths.length !== 4 : paths.length !== 3 && paths.length !== 4) {
-    return invalidStartupArgs();
+    return invalidStartupArgs(language);
   }
   return {
     status: "valid",
@@ -72,10 +78,9 @@ function mergeSession(
   };
 }
 
-function invalidStartupArgs(): StartupSessionParseResult {
+function invalidStartupArgs(language: AppLanguage): StartupSessionParseResult {
   return {
     status: "invalid",
-    message:
-      "시작 인자를 이해하지 못했습니다. 사용법: forktail left right, forktail --folders left right, forktail --merge base ours theirs [output], forktail --mergetool base ours theirs output",
+    message: CORE_TEXT[language].startupInvalidArgs,
   };
 }

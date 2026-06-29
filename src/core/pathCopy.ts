@@ -1,8 +1,15 @@
-export const pathCopyFailureMessage =
-  "경로를 클립보드에 복사하지 못했습니다. 아래 경로를 선택해 복사하세요.";
+import { CORE_TEXT } from "./i18n";
+import type { AppLanguage } from "./settings";
 
-export function pathCopySuccessMessage(label: string): string {
-  return `${label} 경로를 복사했습니다.`;
+export const pathCopyFailureMessage =
+  CORE_TEXT.en.pathCopyFailure;
+
+export function pathCopyFailureMessageForLanguage(language: AppLanguage = "en"): string {
+  return CORE_TEXT[language].pathCopyFailure;
+}
+
+export function pathCopySuccessMessage(label: string, language: AppLanguage = "en"): string {
+  return CORE_TEXT[language].pathCopySuccess(label);
 }
 
 export async function writeClipboardText(text: string): Promise<void> {

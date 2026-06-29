@@ -1,10 +1,12 @@
 import { hasUnresolvedConflicts } from "./conflicts";
 import { saveEncodingWarningForDocument } from "./compareSave";
+import { CORE_TEXT } from "./i18n";
 import type { FileDocument, MergeSession, WriteResult } from "./models";
+import type { AppLanguage } from "./settings";
 
 export type ConfirmSave = (message: string) => boolean;
 
-export const unresolvedSaveMessage = "병합 결과에 충돌 마커가 남아 있습니다. 그래도 저장하시겠습니까?";
+export const unresolvedSaveMessage = CORE_TEXT.en.unresolvedSaveMessage;
 
 export interface WritePrecondition {
   expectedSize: number;
@@ -26,25 +28,32 @@ export function canSaveMergeResult(text: string, confirmSave: ConfirmSave): bool
 export function mergeSaveStateAfterWrite(
   resultText: string,
   written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs">,
+  language: AppLanguage = "en",
 ): SavedMergeState {
   return {
     outputPath: written.path,
     savedSnapshot: resultText,
     outputVersion: versionFromWriteResult(written),
-    message: written.backupPath ? `저장 완료 · 백업: ${written.backupPath}` : "저장 완료",
+    message: CORE_TEXT[language].saved(written.backupPath),
   };
 }
 
-export function mergeSaveEncodingWarning(session: MergeSession): string | null {
+export function mergeSaveEncodingWarning(
+  session: MergeSession,
+  language: AppLanguage = "en",
+): string | null {
+  const text = CORE_TEXT[language];
   const documents = [session.base, session.ours, session.theirs];
   const hasDecodeLoss = documents.some((document) => document.decodeHadErrors);
-  const hasEncodingRisk = documents.some((document) => saveEncodingWarningForDocument(document, "utf8") != null);
+  const hasEncodingRisk = documents.some((document) =>
+    saveEncodingWarningForDocument(document, "utf8", language) != null
+  );
 
   if (hasDecodeLoss) {
-    return "원본 중 디코딩 손실이 있는 파일이 있습니다. 병합 결과 저장은 UTF-8로 기록되며 손실된 문자가 그대로 저장될 수 있습니다.";
+    return text.mergeDecodeLoss;
   }
   if (hasEncodingRisk) {
-    return "원본 중 UTF-8이 아닌 파일이 있습니다. 병합 결과 저장은 UTF-8로 기록되며 원본 인코딩과 BOM은 보존되지 않을 수 있습니다.";
+    return text.mergeEncodingRisk;
   }
 
   return null;

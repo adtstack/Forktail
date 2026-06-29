@@ -92,7 +92,7 @@ describe("compareSaveStateAfterWrite", () => {
         expectedSize: 13,
         expectedModifiedMs: 4000,
       },
-      message: "저장 완료 · 백업: C:\\out\\copy.txt.bak",
+      message: "Saved · backup: C:\\out\\copy.txt.bak",
     });
   });
 
@@ -127,7 +127,7 @@ describe("compareSaveStateAfterWrite", () => {
         expectedSize: 9,
         expectedModifiedMs: 5000,
       },
-      message: "저장 완료",
+      message: "Saved",
     });
   });
 
@@ -207,7 +207,7 @@ describe("saveEncodingWarningForDocument", () => {
         ...document("/repo/legacy.txt", "hello\n"),
         encoding: "windows-1252",
       }),
-    ).toContain("UTF-8로 기록");
+    ).toContain("writes UTF-8");
   });
 
   it("warns when a UTF-8 output save cannot preserve a source BOM encoding", () => {
@@ -219,7 +219,7 @@ describe("saveEncodingWarningForDocument", () => {
         },
         "utf8",
       ),
-    ).toContain("UTF-8로 기록");
+    ).toContain("writes UTF-8");
   });
 
   it("warns when decode errors may already have lost characters", () => {
@@ -228,7 +228,7 @@ describe("saveEncodingWarningForDocument", () => {
         ...document("/repo/bad.txt", "hello\n"),
         decodeHadErrors: true,
       }),
-    ).toContain("디코딩 손실");
+    ).toContain("decode loss");
   });
 });
 
@@ -248,8 +248,8 @@ describe("compareSaveEncodingWarnings", () => {
     });
 
     expect(warnings).toMatchObject([
-      { side: "left", label: "왼쪽" },
-      { side: "right", label: "오른쪽" },
+      { side: "left", label: "Left" },
+      { side: "right", label: "Right" },
     ]);
   });
 });

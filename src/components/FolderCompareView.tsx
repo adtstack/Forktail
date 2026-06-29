@@ -27,10 +27,12 @@ import {
   nextFolderSort,
   prepareFolderEntries,
   summarizeFolderSyncDryRun,
+  type FolderEntryPathAction,
   type FolderSortKey,
   type FolderSyncDirection,
   type FolderSyncDryRunSummary,
 } from "../core/folderView";
+import { FOLDER_COMPARE_TEXT, localeForLanguage } from "../core/i18n";
 import type {
   FolderCompareMode,
   FolderEntry,
@@ -39,13 +41,18 @@ import type {
   FolderScanProgress,
   FolderScanResult,
 } from "../core/models";
-import { pathCopyFailureMessage, pathCopySuccessMessage, writeClipboardText } from "../core/pathCopy";
-import { loadFolderViewSettings, saveFolderViewSettings } from "../core/settings";
+import {
+  pathCopyFailureMessageForLanguage,
+  pathCopySuccessMessage,
+  writeClipboardText,
+} from "../core/pathCopy";
+import { loadFolderViewSettings, saveFolderViewSettings, type AppLanguage } from "../core/settings";
 
 interface FolderCompareViewProps {
   result: FolderScanResult;
   options: FolderScanOptions;
   busy: boolean;
+  languageMode?: AppLanguage;
   scanProgress: FolderScanProgress | null;
   onBack: () => void;
   onNewScan: () => void;
@@ -55,19 +62,11 @@ interface FolderCompareViewProps {
   onRevealPath: (path: string) => void;
 }
 
-const statusLabels: Record<FolderEntryStatus, string> = {
-  same: "동일",
-  different: "변경",
-  leftOnly: "왼쪽만",
-  rightOnly: "오른쪽만",
-  typeMismatch: "형식 충돌",
-  error: "오류",
-};
-
 export function FolderCompareView({
   result,
   options,
   busy,
+  languageMode = "en",
   scanProgress,
   onBack,
   onNewScan,
@@ -76,6 +75,8 @@ export function FolderCompareView({
   onOpenEntry,
   onRevealPath,
 }: FolderCompareViewProps) {
+  const text = FOLDER_COMPARE_TEXT[languageMode];
+  const statusLabels = text.statusLabels;
   const [query, setQuery] = useState("");
   const [viewSettings, setViewSettings] = useState(() => loadFolderViewSettings());
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -117,9 +118,13 @@ export function FolderCompareView({
   const statusCounts = useMemo(() => countFolderStatuses(result.entries), [result.entries]);
   const pathConflicts = useMemo(() => detectFolderPathConflicts(result.entries), [result.entries]);
   const syncDryRun = useMemo(() => ({
-    leftToRight: summarizeFolderSyncDryRun(buildFolderSyncDryRunPlan(result, "leftToRight")),
-    rightToLeft: summarizeFolderSyncDryRun(buildFolderSyncDryRunPlan(result, "rightToLeft")),
-  }), [result]);
+    leftToRight: summarizeFolderSyncDryRun(
+      buildFolderSyncDryRunPlan(result, "leftToRight", languageMode),
+    ),
+    rightToLeft: summarizeFolderSyncDryRun(
+      buildFolderSyncDryRunPlan(result, "rightToLeft", languageMode),
+    ),
+  }), [languageMode, result]);
   const preparedEntries = useMemo(() => {
     return prepareFolderEntries(
       result.entries,
@@ -294,12 +299,12 @@ export function FolderCompareView({
     });
   };
 
-  const copyPath = async (label: string, path: string) => {
+  const copyPath = async (side: FolderEntryPathAction["side"], path: string) => {
     try {
       await writeClipboardText(path);
-      setCopyMessage(pathCopySuccessMessage(label.replace(" 경로 복사", "")));
+      setCopyMessage(pathCopySuccessMessage(copyPathSideLabel(side, languageMode), languageMode));
     } catch {
-      setCopyMessage(pathCopyFailureMessage);
+      setCopyMessage(pathCopyFailureMessageForLanguage(languageMode));
     }
   };
 
@@ -307,24 +312,24 @@ export function FolderCompareView({
     <main className="workspace">
       <header className="toolbar command-toolbar folder-command-toolbar">
         <div className="command-group">
-          <button className="command-button" onClick={onBack}>← 홈</button>
-          <button className="command-button" onClick={onNewScan} disabled={busy}>새 폴더</button>
+          <button className="command-button" onClick={onBack}>{text.home}</button>
+          <button className="command-button" onClick={onNewScan} disabled={busy}>{text.newScan}</button>
           <button className="command-button primary-button" onClick={() => onRescan(options)} disabled={busy}>
-            다시 스캔
+            {text.rescan}
           </button>
         </div>
-        <div className="command-group" aria-label="스캔 옵션">
+        <div className="command-group" aria-label={text.scanOptionsAria}>
           <label className="toolbar-field">
-            <span>비교 방식</span>
+            <span>{text.mode}</span>
             <select
               className="toolbar-select wide"
               value={options.compareMode}
               onChange={(event) => updateMode(event.target.value as FolderCompareMode)}
               disabled={busy}
             >
-              <option value="metadata">메타데이터</option>
-              <option value="quickHash">빠른 해시</option>
-              <option value="fullHash">전체 해시</option>
+              <option value="metadata">{text.metadata}</option>
+              <option value="quickHash">{text.quickHash}</option>
+              <option value="fullHash">{text.fullHash}</option>
             </select>
           </label>
           <label className="toolbar-check">
@@ -334,7 +339,7 @@ export function FolderCompareView({
               onChange={(event) => updateScanOption("includeHidden", event.target.checked)}
               disabled={busy}
             />
-            숨김 포함
+            {text.hidden}
           </label>
           <label className="toolbar-check">
             <input
@@ -352,7 +357,7 @@ export function FolderCompareView({
               onChange={(event) => updateScanOption("followSymlinks", event.target.checked)}
               disabled={busy}
             />
-            symlink 추적
+            {text.symlinks}
           </label>
         </div>
         <div className="toolbar-spacer" />
@@ -367,8 +372,8 @@ export function FolderCompareView({
               event.preventDefault();
               setQuery("");
             }}
-            placeholder="경로 필터"
-            aria-label="경로 필터"
+            placeholder={text.pathFilter}
+            aria-label={text.pathFilter}
             aria-keyshortcuts={commandAriaKeyshortcuts("searchPath")}
           />
         </div>
@@ -379,16 +384,18 @@ export function FolderCompareView({
         <div title={result.rightRoot}><span>RIGHT</span><strong>{result.rightRoot}</strong></div>
       </section>
 
-      <section className="folder-filter-row" aria-label="상태 필터">
+      <section className="folder-filter-row" aria-label={text.statusFiltersAria}>
         {FOLDER_STATUSES.map((status) => (
           <button
             key={status}
             type="button"
             className={`filter-chip ${viewSettings.statusFilters[status] ? "active" : ""} ${status}`}
             aria-pressed={viewSettings.statusFilters[status]}
-            aria-label={`${statusLabels[status]} ${statusCounts[status].toLocaleString()}개, ${
-              viewSettings.statusFilters[status] ? "표시 중" : "숨김"
-            }`}
+            aria-label={text.statusFilterAria(
+              statusLabels[status],
+              statusCounts[status],
+              viewSettings.statusFilters[status],
+            )}
             onClick={() => toggleStatus(status)}
           >
             <strong>{statusCounts[status].toLocaleString()}</strong>
@@ -405,15 +412,15 @@ export function FolderCompareView({
           aria-live="polite"
         >
           <div>
-            <strong>{scanProgress.active ? "스캔 중" : "스캔 취소됨"}</strong>
+            <strong>{scanProgress.active ? text.scanning : text.cancelled}</strong>
             <span>{scanProgress.message}</span>
             <small>
-              작업 #{scanProgress.jobId} · {scanProgress.leftRoot} ↔ {scanProgress.rightRoot}
+              {text.job} #{scanProgress.jobId} · {scanProgress.leftRoot} ↔ {scanProgress.rightRoot}
             </small>
           </div>
           {scanProgress.active && (
             <button type="button" onClick={onCancelScan}>
-              스캔 취소
+              {text.cancel}
             </button>
           )}
         </section>
@@ -421,42 +428,39 @@ export function FolderCompareView({
 
       {pathConflicts.length > 0 && (
         <section className="folder-path-warning" role="status" aria-live="polite">
-          <strong>포터블 경로 충돌 {pathConflicts.length.toLocaleString()}개</strong>
-          <span>
-            대소문자 또는 Unicode 정규화만 다른 경로가 있습니다. Windows/macOS 기본 파일시스템에서는 같은 항목처럼
-            보일 수 있습니다.
-          </span>
+          <strong>{text.portableConflicts(pathConflicts.length)}</strong>
+          <span>{text.portableConflictDescription}</span>
           <small>{pathConflicts[0].variants.join(" ↔ ")}</small>
         </section>
       )}
 
-      <section className="folder-sync-dry-run" aria-label="동기화 드라이런 요약">
-        <strong>동기화 드라이런</strong>
-        <span>실제 파일 변경 없음</span>
-        <DryRunSummary direction="leftToRight" summary={syncDryRun.leftToRight} />
-        <DryRunSummary direction="rightToLeft" summary={syncDryRun.rightToLeft} />
+      <section className="folder-sync-dry-run" aria-label={text.syncDryRunAria}>
+        <strong>{text.syncDryRun}</strong>
+        <span>{text.noFileChanges}</span>
+        <DryRunSummary direction="leftToRight" summary={syncDryRun.leftToRight} text={text} />
+        <DryRunSummary direction="rightToLeft" summary={syncDryRun.rightToLeft} text={text} />
       </section>
 
       <section
         ref={tableWrapRef}
         className="folder-table-wrap"
-        aria-label="폴더 비교 결과"
+        aria-label={text.resultsAria}
         aria-describedby="folder-selection-status"
         onScroll={updateScrollViewport}
       >
         <table className="folder-table" aria-rowcount={entries.length}>
           <thead>
             <tr>
-              <SortableHeader label="상태" sortKey="status" current={viewSettings.sort} onSort={changeSort} />
-              <SortableHeader label="상대 경로" sortKey="path" current={viewSettings.sort} onSort={changeSort} />
-              <SortableHeader label="크기" sortKey="size" current={viewSettings.sort} onSort={changeSort} />
+              <SortableHeader label={text.status} sortKey="status" current={viewSettings.sort} onSort={changeSort} />
+              <SortableHeader label={text.relativePath} sortKey="path" current={viewSettings.sort} onSort={changeSort} />
+              <SortableHeader label={text.size} sortKey="size" current={viewSettings.sort} onSort={changeSort} />
               <SortableHeader
-                label="수정 시각"
+                label={text.modified}
                 sortKey="modified"
                 current={viewSettings.sort}
                 onSort={changeSort}
               />
-              <th>종류</th>
+              <th>{text.kind}</th>
             </tr>
           </thead>
           <tbody>
@@ -482,12 +486,12 @@ export function FolderCompareView({
                   onClick={() => selectRow(index)}
                   onDoubleClick={() => onOpenEntry(entry)}
                   onKeyDown={(event) => handleRowKeyDown(event, entry, index)}
-                  title={entry.message ?? "더블 클릭하여 파일 비교"}
+                  title={entry.message ?? text.rowTitle}
                 >
                   <td>
                     <span
                       className={`status-chip ${entry.status}`}
-                      aria-label={`상태: ${statusLabels[entry.status]}`}
+                      aria-label={text.statusAria(statusLabels[entry.status])}
                     >
                       {statusLabels[entry.status]}
                     </span>
@@ -502,7 +506,7 @@ export function FolderCompareView({
                           type="button"
                           className="folder-tree-toggle"
                           aria-expanded={!collapsed}
-                          aria-label={`${entry.relativePath} ${collapsed ? "펼치기" : "접기"}`}
+                          aria-label={`${entry.relativePath} ${collapsed ? text.expand : text.collapse}`}
                           onClick={(event) => {
                             event.stopPropagation();
                             toggleFolderCollapse(entry.relativePath);
@@ -516,7 +520,7 @@ export function FolderCompareView({
                     </span>
                   </td>
                   <td>{formatEntrySize(entry)}</td>
-                  <td>{formatModified(folderEntryModifiedMs(entry))}</td>
+                  <td>{formatModified(folderEntryModifiedMs(entry), languageMode)}</td>
                   <td>{formatKind(entry)}</td>
                 </tr>
               );
@@ -527,15 +531,15 @@ export function FolderCompareView({
           </tbody>
         </table>
         {entries.length === 0 && (
-          <div className="empty-table">현재 필터에 해당하는 항목이 없습니다.</div>
+          <div className="empty-table">{text.noRows}</div>
         )}
       </section>
 
       {detailEntry && (
-        <section className="folder-action-panel" aria-label="선택 항목 세부 정보">
+        <section className="folder-action-panel" aria-label={text.detailsAria}>
           <div className="folder-action-heading">
             <div>
-              <span className="side-label">SELECTED</span>
+              <span className="side-label">{text.selected}</span>
               <strong>{detailEntry.relativePath}</strong>
             </div>
             <button
@@ -543,14 +547,14 @@ export function FolderCompareView({
               onClick={() => onOpenEntry(detailEntry)}
               disabled={busy || !canCompareFolderEntry(detailEntry)}
             >
-              2-way 비교
+              {text.compare}
             </button>
           </div>
           {!canCompareFolderEntry(detailEntry) && (
-            <p className="folder-action-note">양쪽에 있는 일반 파일만 2-way 비교로 열 수 있습니다.</p>
+            <p className="folder-action-note">{text.compareUnavailable}</p>
           )}
           <div className="folder-path-actions">
-            {folderEntryPathActions(detailEntry).map((action) => (
+            {folderEntryPathActions(detailEntry, languageMode).map((action) => (
               <span className="folder-path-action-group" key={action.side}>
                 <button
                   type="button"
@@ -561,7 +565,7 @@ export function FolderCompareView({
                 <button
                   type="button"
                   onClick={() => {
-                    void copyPath(action.copyLabel, action.path);
+                    void copyPath(action.side, action.path);
                   }}
                 >
                   {action.copyLabel}
@@ -575,7 +579,7 @@ export function FolderCompareView({
             </p>
           )}
           <dl className="folder-detail-list">
-            {folderEntryDetailRows(detailEntry).map((row) => (
+            {folderEntryDetailRows(detailEntry, languageMode).map((row) => (
               <div key={row.label}>
                 <dt>{row.label}</dt>
                 <dd>{row.value}</dd>
@@ -586,11 +590,11 @@ export function FolderCompareView({
       )}
 
       <footer className="status-bar">
-        <span>{entries.length.toLocaleString()}개 표시 / {result.entries.length.toLocaleString()}개 전체</span>
+        <span>{text.shownTotal(entries.length, result.entries.length)}</span>
         <span id="folder-selection-status" aria-live="polite">
           {selectedEntry
-            ? `${selectedEntry.relativePath} 선택됨 · Enter로 2-way 비교 · Space로 세부 정보`
-            : "현재 필터에 표시된 항목 없음"}
+            ? text.selectedStatus(selectedEntry.relativePath)
+            : text.noRowsStatus}
         </span>
       </footer>
     </main>
@@ -617,14 +621,12 @@ function SortableHeader({
   onSort: (sortKey: FolderSortKey) => void;
 }) {
   const active = current.key === sortKey;
-  const directionLabel = current.direction === "asc" ? "오름차순" : "내림차순";
 
   return (
     <th aria-sort={active ? (current.direction === "asc" ? "ascending" : "descending") : "none"}>
       <button className="sort-header" type="button" onClick={() => onSort(sortKey)}>
         {label}
         {active && <span>{current.direction === "asc" ? "↑" : "↓"}</span>}
-        {active && <small>{directionLabel}</small>}
       </button>
     </th>
   );
@@ -633,25 +635,30 @@ function SortableHeader({
 function DryRunSummary({
   direction,
   summary,
+  text,
 }: {
   direction: FolderSyncDirection;
   summary: FolderSyncDryRunSummary;
+  text: (typeof FOLDER_COMPARE_TEXT)[AppLanguage];
 }) {
   return (
     <span className="dry-run-summary">
-      <b>{direction === "leftToRight" ? "왼쪽→오른쪽" : "오른쪽→왼쪽"}</b>
-      {formatDryRunSummary(summary)}
+      <b>{direction === "leftToRight" ? text.leftToRight : text.rightToLeft}</b>
+      {formatDryRunSummary(summary, text)}
     </span>
   );
 }
 
-function formatDryRunSummary(summary: FolderSyncDryRunSummary): string {
-  if (summary.total === 0) return "작업 없음";
+function formatDryRunSummary(
+  summary: FolderSyncDryRunSummary,
+  text: (typeof FOLDER_COMPARE_TEXT)[AppLanguage],
+): string {
+  if (summary.total === 0) return text.noActions;
   const parts = [];
-  if (summary.copies > 0) parts.push(`복사 ${summary.copies.toLocaleString()}`);
-  if (summary.overwrites > 0) parts.push(`덮어쓰기 ${summary.overwrites.toLocaleString()}`);
-  if (summary.blocked > 0) parts.push(`확인 필요 ${summary.blocked.toLocaleString()}`);
-  if (summary.destructive > 0) parts.push(`주의 ${summary.destructive.toLocaleString()}`);
+  if (summary.copies > 0) parts.push(text.copyCount(summary.copies));
+  if (summary.overwrites > 0) parts.push(text.overwriteCount(summary.overwrites));
+  if (summary.blocked > 0) parts.push(text.reviewCount(summary.blocked));
+  if (summary.destructive > 0) parts.push(text.cautionCount(summary.destructive));
   return parts.join(" · ");
 }
 
@@ -662,9 +669,9 @@ function formatEntrySize(entry: FolderEntry): string {
   return `${left} / ${right}`;
 }
 
-function formatModified(modifiedMs: number | null): string {
+function formatModified(modifiedMs: number | null, languageMode: AppLanguage): string {
   if (modifiedMs == null) return "—";
-  return new Date(modifiedMs).toLocaleString();
+  return new Date(modifiedMs).toLocaleString(localeForLanguage(languageMode));
 }
 
 function formatKind(entry: FolderEntry): string {
@@ -678,4 +685,8 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function copyPathSideLabel(side: FolderEntryPathAction["side"], languageMode: AppLanguage): string {
+  return FOLDER_COMPARE_TEXT[languageMode].pathSideLabel(side);
 }

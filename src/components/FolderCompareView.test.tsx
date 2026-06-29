@@ -51,30 +51,30 @@ describe("FolderCompareView", () => {
       null,
     );
 
-    expect(defaultMarkup).toContain("<option value=\"quickHash\" selected=\"\">빠른 해시</option>");
-    expect(defaultMarkup).toContain("숨김 포함");
+    expect(defaultMarkup).toContain("<option value=\"quickHash\" selected=\"\">Quick hash</option>");
+    expect(defaultMarkup).toContain("Hidden");
     expect(defaultMarkup).toContain(".gitignore");
-    expect(defaultMarkup).toContain("symlink 추적");
-    expect(enabledMarkup).toContain("<option value=\"fullHash\" selected=\"\">전체 해시</option>");
+    expect(defaultMarkup).toContain("Symlinks");
+    expect(enabledMarkup).toContain("<option value=\"fullHash\" selected=\"\">Full hash</option>");
     expect(enabledMarkup.match(/checked=""/g)?.length).toBeGreaterThanOrEqual(3);
   });
 
   it("labels status filter chips with counts and visibility state", () => {
     const markup = renderFolderView(null);
 
-    expect(markup).toContain("aria-label=\"변경 1개, 표시 중\"");
-    expect(markup).toContain("aria-label=\"동일 1개, 숨김\"");
+    expect(markup).toContain("aria-label=\"Changed 1, shown\"");
+    expect(markup).toContain("aria-label=\"Same 1, hidden\"");
   });
 
   it("renders copy/sync dry-run summaries without apply controls", () => {
     const markup = renderFolderView(null);
 
-    expect(markup).toContain("동기화 드라이런");
-    expect(markup).toContain("실제 파일 변경 없음");
-    expect(markup).toContain("왼쪽→오른쪽");
-    expect(markup).toContain("오른쪽→왼쪽");
-    expect(markup).toContain("복사 2 · 덮어쓰기 1 · 확인 필요 2 · 주의 1");
-    expect(markup).not.toContain("동기화 적용");
+    expect(markup).toContain("Sync dry run");
+    expect(markup).toContain("No file changes");
+    expect(markup).toContain("L -&gt; R");
+    expect(markup).toContain("R -&gt; L");
+    expect(markup).toContain("copy 2 · overwrite 1 · review 2 · caution 1");
+    expect(markup).not.toContain("Apply sync");
   });
 
   it("renders folder tree expand controls for directory rows with visible children", () => {
@@ -115,7 +115,7 @@ describe("FolderCompareView", () => {
     const markup = renderFolderViewWithResult(result, DEFAULT_FOLDER_SCAN_OPTIONS, null);
 
     expect(markup).toContain("aria-expanded=\"true\"");
-    expect(markup).toContain("aria-label=\"src 접기\"");
+    expect(markup).toContain("aria-label=\"src collapse\"");
     expect(markup).toContain("src/App.tsx");
   });
 
@@ -156,7 +156,7 @@ describe("FolderCompareView", () => {
 
     const markup = renderFolderViewWithResult(result, DEFAULT_FOLDER_SCAN_OPTIONS, null);
 
-    expect(markup).toContain("포터블 경로 충돌 1개");
+    expect(markup).toContain("Portable path conflicts: 1");
     expect(markup).toContain("Config/Prod.yml ↔ config/prod.yml");
   });
 
@@ -166,12 +166,12 @@ describe("FolderCompareView", () => {
       active: true,
       leftRoot: "/left/root",
       rightRoot: "/right/root",
-      message: "폴더 스캔 중입니다.",
+      message: "Scanning folders.",
     });
 
-    expect(markup).toContain("스캔 중");
-    expect(markup).toContain("작업 #1");
-    expect(markup).toContain("<button type=\"button\">스캔 취소</button>");
+    expect(markup).toContain("Scanning");
+    expect(markup).toContain("Job #1");
+    expect(markup).toContain("<button type=\"button\">Cancel</button>");
     expect(markup).toContain("/left/root");
     expect(markup).toContain("/right/root");
   });
@@ -182,11 +182,11 @@ describe("FolderCompareView", () => {
       active: false,
       leftRoot: "/left/root",
       rightRoot: "/right/root",
-      message: "스캔을 취소했습니다. 늦게 도착한 결과는 화면에 반영하지 않습니다.",
+      message: "Scan cancelled. Late results will not update the screen.",
     });
 
-    expect(markup).toContain("스캔 취소됨");
-    expect(markup).toContain("늦게 도착한 결과는 화면에 반영하지 않습니다.");
-    expect(markup).not.toContain("<button type=\"button\">스캔 취소</button>");
+    expect(markup).toContain("Cancelled");
+    expect(markup).toContain("Late results will not update the screen.");
+    expect(markup).not.toContain("<button type=\"button\">Cancel</button>");
   });
 });

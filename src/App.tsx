@@ -196,13 +196,13 @@ export default function App() {
     try {
       await operation();
     } catch (caught) {
-      const message = errorMessage(caught);
+      const message = errorMessage(caught, languageMode);
       setError(message);
       onError?.(message);
     } finally {
       endBusy();
     }
-  }, [beginBusy, endBusy]);
+  }, [beginBusy, endBusy, languageMode]);
 
   const rememberRecentSession = useCallback((input: RecentSessionInput) => {
     setRecentSessions((current) => {
@@ -394,7 +394,7 @@ export default function App() {
         setFolderScanProgress(null);
       } catch (caught) {
         if (activeFolderScanId.current !== scanId) return;
-        const message = errorMessage(caught);
+        const message = errorMessage(caught, languageMode);
         setError(message);
         onError?.(message);
         setFolderScanProgress(null);
@@ -403,7 +403,7 @@ export default function App() {
         endBusy();
       }
     })();
-  }, [appText, beginBusy, endBusy, rememberRecentSession]);
+  }, [appText, beginBusy, endBusy, languageMode, rememberRecentSession]);
 
   const cancelFolderScan = useCallback(() => {
     if (!folderScanProgress?.active) return;
@@ -552,7 +552,7 @@ export default function App() {
     void (async () => {
       if (isTauriRuntime()) {
         try {
-          const startupSession = parseStartupSessionArgs(await startupArgs());
+          const startupSession = parseStartupSessionArgs(await startupArgs(), languageMode);
           if (startupSession.status === "valid") {
             await restoreStoredSession(startupSession.session, { remember: true });
             return;
@@ -563,7 +563,7 @@ export default function App() {
             return;
           }
         } catch (caught) {
-          setError(errorMessage(caught));
+          setError(errorMessage(caught, languageMode));
         }
       }
 
@@ -577,7 +577,7 @@ export default function App() {
       .finally(() => {
         setActiveSessionStorageReady(true);
       });
-  }, [restoreStoredSession]);
+  }, [languageMode, restoreStoredSession]);
 
   useEffect(() => {
     if (!activeSessionStorageReady) return;
@@ -1267,6 +1267,7 @@ export default function App() {
           <FileCompareView
             session={compareSession}
             busy={busy}
+            languageMode={languageMode}
             editorTheme={editorTheme}
             fileChangeNotice={compareFileChangeNotice}
             modelRevision={compareModelRevision}
@@ -1304,6 +1305,7 @@ export default function App() {
             result={folderResult}
             options={folderOptions}
             busy={busy}
+            languageMode={languageMode}
             scanProgress={folderScanProgress}
             onBack={backHome}
             onNewScan={openFolders}
@@ -1318,6 +1320,7 @@ export default function App() {
           <MergeView
             session={mergeSession}
             busy={busy}
+            languageMode={languageMode}
             dirty={mergeHasUnsavedChanges}
             editorTheme={editorTheme}
             recoveryDraft={mergeRecoveryDraft}

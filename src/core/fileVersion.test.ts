@@ -67,14 +67,14 @@ describe("buildCompareFileChangeNotice", () => {
     ).toMatchObject({
       leftChanged: false,
       rightChanged: true,
-      message: "오른쪽 파일이 열린 뒤 변경됐습니다. 다시 읽거나 현재 비교 내용을 유지하세요.",
+      message: "Right file changed after it was opened. Reload or keep the current compare content.",
     });
     expect(
       buildCompareFileChangeNotice(session, null, version("/work/right.txt", 25, 2000)),
     ).toMatchObject({
       leftChanged: true,
       rightChanged: true,
-      message: "왼쪽과 오른쪽 파일이 열린 뒤 변경됐습니다. 다시 읽거나 현재 비교 내용을 유지하세요.",
+      message: "Left and Right file changed after it was opened. Reload or keep the current compare content.",
     });
   });
 });

@@ -7,8 +7,9 @@ import {
 
 describe("finalNewlineLabel", () => {
   it("describes whether a document has a final newline", () => {
-    expect(finalNewlineLabel(true)).toBe("마지막 개행 있음");
-    expect(finalNewlineLabel(false)).toBe("마지막 개행 없음");
+    expect(finalNewlineLabel(true)).toBe("Final newline");
+    expect(finalNewlineLabel(false)).toBe("No final newline");
+    expect(finalNewlineLabel(false, "ko")).toBe("마지막 개행 없음");
   });
 });
 
@@ -27,7 +28,10 @@ describe("finalNewlineDifference", () => {
 describe("finalNewlineDifferenceLabel", () => {
   it("returns a user-facing label only for differences", () => {
     expect(finalNewlineDifferenceLabel("same")).toBeNull();
-    expect(finalNewlineDifferenceLabel("leftMissing")).toBe("왼쪽 파일에 마지막 개행이 없습니다.");
-    expect(finalNewlineDifferenceLabel("rightMissing")).toBe("오른쪽 파일에 마지막 개행이 없습니다.");
+    expect(finalNewlineDifferenceLabel("leftMissing")).toBe("Left file has no final newline.");
+    expect(finalNewlineDifferenceLabel("rightMissing")).toBe("Right file has no final newline.");
+    expect(finalNewlineDifferenceLabel("leftMissing", "ko")).toBe(
+      "왼쪽 파일에 마지막 개행이 없습니다.",
+    );
   });
 });

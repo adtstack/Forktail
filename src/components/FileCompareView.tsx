@@ -39,12 +39,18 @@ import type { CompareFileChangeNotice } from "../core/fileVersion";
 import type { SaveLineEndingMode } from "../core/lineEndings";
 import type { CompareSession } from "../core/models";
 import { languageFromPath } from "../core/language";
-import { pathCopyFailureMessage, pathCopySuccessMessage, writeClipboardText } from "../core/pathCopy";
-import { loadCompareViewSettings, saveCompareViewSettings } from "../core/settings";
+import { FILE_COMPARE_TEXT } from "../core/i18n";
+import {
+  pathCopyFailureMessageForLanguage,
+  pathCopySuccessMessage,
+  writeClipboardText,
+} from "../core/pathCopy";
+import { loadCompareViewSettings, saveCompareViewSettings, type AppLanguage } from "../core/settings";
 
 interface FileCompareViewProps {
   session: CompareSession;
   busy: boolean;
+  languageMode?: AppLanguage;
   editorTheme: "vs" | "vs-dark";
   fileChangeNotice: CompareFileChangeNotice | null;
   modelRevision: number;
@@ -78,6 +84,7 @@ interface HunkCopyUndoState {
 export function FileCompareView({
   session,
   busy,
+  languageMode = "en",
   editorTheme,
   fileChangeNotice,
   modelRevision,
@@ -96,6 +103,7 @@ export function FileCompareView({
   onShowBackups,
   onSwap,
 }: FileCompareViewProps) {
+  const text = FILE_COMPARE_TEXT[languageMode];
   const [viewSettings, setViewSettings] = useState(() => loadCompareViewSettings());
   const [editableSide, setEditableSide] = useState<CompareSide | "none">("none");
   const [hunkCount, setHunkCount] = useState(0);
@@ -130,13 +138,20 @@ export function FileCompareView({
   const navigation = diffNavigationState(activeHunk, hunkCount);
   const activeDirty = editableSide === "none" ? false : dirtySides[editableSide];
   const anyDirty = dirtySides.left || dirtySides.right;
-  const activeSideLabel = editableSide === "left" ? "왼쪽" : editableSide === "right" ? "오른쪽" : "읽기 전용";
+  const activeSideLabel = editableSide === "left"
+    ? text.left
+    : editableSide === "right"
+      ? text.right
+      : text.readOnly;
   const newlineDifference = finalNewlineDifference(
     session.left.hadFinalNewline,
     session.right.hadFinalNewline,
   );
-  const newlineDifferenceLabel = finalNewlineDifferenceLabel(newlineDifference);
-  const saveEncodingWarnings = useMemo(() => compareSaveEncodingWarnings(session), [session]);
+  const newlineDifferenceLabel = finalNewlineDifferenceLabel(newlineDifference, languageMode);
+  const saveEncodingWarnings = useMemo(
+    () => compareSaveEncodingWarnings(session, languageMode),
+    [languageMode, session],
+  );
   const activeChangedSide = activeChangedCompareSide(fileChangeNotice, editableSide);
   const canApplyLeftToRight = !busy && !binary && editableSide === "right" && navigation.canMove;
   const canApplyRightToLeft = !busy && !binary && editableSide === "left" && navigation.canMove;
@@ -310,7 +325,7 @@ export function FileCompareView({
     event.preventDefault();
     setDropSide(null);
     const paths = droppedFilePaths(event.dataTransfer);
-    const rejection = paneDropRejectionMessage(side, paths.length);
+    const rejection = paneDropRejectionMessage(side, paths.length, languageMode);
     if (rejection) {
       onDropRejected(rejection);
       return;
@@ -447,9 +462,9 @@ export function FileCompareView({
   const copyPath = async (label: string, path: string) => {
     try {
       await writeClipboardText(path);
-      setPathCopyState({ message: pathCopySuccessMessage(label), fallbackPath: null });
+      setPathCopyState({ message: pathCopySuccessMessage(label, languageMode), fallbackPath: null });
     } catch {
-      setPathCopyState({ message: pathCopyFailureMessage, fallbackPath: path });
+      setPathCopyState({ message: pathCopyFailureMessageForLanguage(languageMode), fallbackPath: path });
     }
   };
 
@@ -457,24 +472,24 @@ export function FileCompareView({
     <main className="workspace">
       <header className="toolbar command-toolbar">
         <div className="command-group">
-          <button className="command-button" onClick={onBack}>← 홈</button>
+          <button className="command-button" onClick={onBack}>{text.home}</button>
           <button
             className="command-button"
             onClick={onSwap}
             disabled={anyDirty}
             aria-keyshortcuts={commandAriaKeyshortcuts("swapSides")}
           >
-            좌우 교환
+            {text.swap}
           </button>
         </div>
-        <div className="command-group command-group-primary" aria-label="변경 탐색">
+        <div className="command-group command-group-primary" aria-label={text.changeNavigationAria}>
           <button
             className="command-button"
             onClick={() => navigateDiff("previous")}
             disabled={!navigation.canMove}
             aria-keyshortcuts={commandAriaKeyshortcuts("previousDiff")}
           >
-            이전 변경
+            {text.previousChange}
           </button>
           <span
             className={navigation.canMove ? "diff-count" : "clean-count"}
@@ -482,11 +497,11 @@ export function FileCompareView({
             aria-live="polite"
             aria-label={
               navigation.canMove
-                ? `현재 변경 ${navigation.currentIndex + 1}, 전체 변경 ${navigation.total}`
-                : "변경 없음"
+                ? text.currentChangeAria(navigation.currentIndex + 1, navigation.total)
+                : text.noChangesAria
             }
           >
-            {navigation.canMove ? `${navigation.currentIndex + 1} / ${navigation.total} 변경` : "변경 없음"}
+            {navigation.canMove ? `${navigation.currentIndex + 1} / ${navigation.total}` : text.clean}
           </span>
           <button
             className="command-button"
@@ -494,47 +509,47 @@ export function FileCompareView({
             disabled={!navigation.canMove}
             aria-keyshortcuts={commandAriaKeyshortcuts("nextDiff")}
           >
-            다음 변경
+            {text.nextChange}
           </button>
         </div>
-        <div className="command-group" aria-label="hunk 복사">
+        <div className="command-group" aria-label={text.hunkCopyAria}>
           <button
             className="command-button"
             onClick={() => applyCurrentHunk("right")}
             disabled={!canApplyLeftToRight}
-            title="선택한 변경을 왼쪽 내용으로 오른쪽에 반영합니다."
+            title={text.applyLeftToRightTitle}
           >
-            왼쪽→오른쪽
+            {text.leftToRight}
           </button>
           <button
             className="command-button"
             onClick={() => applyCurrentHunk("left")}
             disabled={!canApplyRightToLeft}
-            title="선택한 변경을 오른쪽 내용으로 왼쪽에 반영합니다."
+            title={text.applyRightToLeftTitle}
           >
-            오른쪽→왼쪽
+            {text.rightToLeft}
           </button>
           <button
             className="command-button"
             onClick={undoLastHunkCopy}
             disabled={!canUndoHunkCopy}
-            title="마지막 hunk 적용을 되돌립니다."
+            title={text.undoHunkTitle}
           >
-            hunk 되돌리기
+            {text.undoHunk}
           </button>
         </div>
-        <div className="command-group" aria-label="편집 상태">
+        <div className="command-group" aria-label={text.editStateAria}>
           <label className="toolbar-field">
-            <span>편집</span>
+            <span>{text.edit}</span>
             <select
               className="toolbar-select"
               value={editableSide}
               disabled={busy || binary}
               onChange={(event) => setEditableSide(event.target.value as CompareSide | "none")}
             >
-              <option value="none">읽기 전용</option>
-              <option value="left">왼쪽</option>
-              <option value="right">오른쪽</option>
+              <option value="none">{text.readOnly}</option>
+              <option value="left">{text.left}</option>
+              <option value="right">{text.right}</option>
             </select>
           </label>
           <span
@@ -543,17 +558,17 @@ export function FileCompareView({
             aria-live="polite"
             aria-label={
               editableSide === "none"
-                ? "편집 대상 없음"
+                ? text.noEditableSide
                 : activeDirty
-                  ? `${activeSideLabel} 파일 저장 안 됨`
-                  : `${activeSideLabel} 파일 저장됨`
+                  ? text.sideDirtyAria(activeSideLabel)
+                  : text.sideSavedAria(activeSideLabel)
             }
           >
-            {editableSide === "none" ? "읽기 전용" : activeDirty ? "저장 안 됨" : "저장됨"}
+            {editableSide === "none" ? text.readOnly : activeDirty ? text.dirty : text.saved}
           </span>
         </div>
         <div className="toolbar-spacer" />
-        <div className="command-group" aria-label="저장 및 내보내기">
+        <div className="command-group" aria-label={text.saveExportAria}>
           <button
             className="command-button primary-button"
             onClick={() => {
@@ -562,7 +577,7 @@ export function FileCompareView({
             disabled={busy || binary || editableSide === "none" || !activeDirty}
             aria-keyshortcuts={commandAriaKeyshortcuts("save")}
           >
-            저장
+            {text.save}
           </button>
           <button
             className="command-button"
@@ -572,7 +587,7 @@ export function FileCompareView({
             disabled={busy || binary || editableSide === "none"}
             aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
           >
-            다른 이름으로 저장
+            {text.saveAs}
           </button>
           <button
             className="command-button"
@@ -581,20 +596,20 @@ export function FileCompareView({
             }}
             disabled={busy || binary || editableSide === "none"}
           >
-            백업 복원
+            {text.backups}
           </button>
           <button
             className="command-button"
             onClick={() => onExportReport(viewSettings.diffOptions)}
             disabled={busy || binary}
           >
-            리포트 저장
+            {text.export}
           </button>
         </div>
-        <span className="badge" aria-label={`언어: ${language}`}>{language}</span>
+        <span className="badge" aria-label={text.languageAria(language)}>{language}</span>
       </header>
 
-      <div className="option-bar" aria-label="비교 옵션">
+      <div className="option-bar" aria-label={text.compareOptionsAria}>
         <label className="toolbar-check">
           <input
             type="checkbox"
@@ -603,10 +618,10 @@ export function FileCompareView({
               setViewSettings((current) => ({ ...current, sideBySide: event.target.checked }))
             }
           />
-          나란히
+          {text.sideBySide}
         </label>
         <label className="toolbar-field">
-          <span>저장 EOL</span>
+          <span>{text.saveEol}</span>
           <select
             className="toolbar-select"
             value={viewSettings.saveLineEnding}
@@ -617,14 +632,14 @@ export function FileCompareView({
               }))
             }
           >
-            <option value="original">원본</option>
-            <option value="system">시스템</option>
+            <option value="original">{text.original}</option>
+            <option value="system">{text.system}</option>
             <option value="lf">LF</option>
             <option value="crlf">CRLF</option>
           </select>
         </label>
         <label className="toolbar-field">
-          <span>공백</span>
+          <span>{text.whitespace}</span>
           <select
             className="toolbar-select"
             value={viewSettings.diffOptions.whitespace}
@@ -639,9 +654,9 @@ export function FileCompareView({
               }))
             }
           >
-            <option value="none">그대로</option>
-            <option value="trim">끝 무시</option>
-            <option value="all">전체 무시</option>
+            <option value="none">{text.whitespaceAsIs}</option>
+            <option value="trim">{text.whitespaceTrimEnd}</option>
+            <option value="all">{text.whitespaceIgnoreAll}</option>
           </select>
         </label>
         <label className="toolbar-check">
@@ -656,7 +671,7 @@ export function FileCompareView({
               }))
             }
           />
-          Aa 무시
+          {text.ignoreCase}
         </label>
         <label className="toolbar-check">
           <input
@@ -673,7 +688,7 @@ export function FileCompareView({
               }))
             }
           />
-          EOL 무시
+          {text.ignoreEol}
         </label>
         <label className="toolbar-check">
           <input
@@ -686,7 +701,7 @@ export function FileCompareView({
               }))
             }
           />
-          줄바꿈
+          {text.wrap}
         </label>
         <label className="toolbar-check">
           <input
@@ -699,7 +714,7 @@ export function FileCompareView({
               }))
             }
           />
-          공백 표시
+          {text.spaces}
         </label>
         <label className="toolbar-check">
           <input
@@ -709,34 +724,38 @@ export function FileCompareView({
               setViewSettings((current) => ({ ...current, wrapAround: event.target.checked }))
             }
           />
-          순환
+          {text.loop}
         </label>
       </div>
 
       <div className="file-heading-grid">
         <FileHeading
-          side="LEFT"
+          sideLabel="LEFT"
+          sideName={text.left}
           dropSide="left"
           dropActive={dropSide === "left"}
           editing={editableSide === "left"}
           path={session.left.path}
           document={session.left}
+          text={text}
           onCopyPath={() => {
-            void copyPath("왼쪽", session.left.path);
+            void copyPath(text.left, session.left.path);
           }}
           onDragOver={handleSideDragOver}
           onDragLeave={handleSideDragLeave}
           onDrop={handleSideDrop}
         />
         <FileHeading
-          side="RIGHT"
+          sideLabel="RIGHT"
+          sideName={text.right}
           dropSide="right"
           dropActive={dropSide === "right"}
           editing={editableSide === "right"}
           path={session.right.path}
           document={session.right}
+          text={text}
           onCopyPath={() => {
-            void copyPath("오른쪽", session.right.path);
+            void copyPath(text.right, session.right.path);
           }}
           onDragOver={handleSideDragOver}
           onDragLeave={handleSideDragLeave}
@@ -754,7 +773,7 @@ export function FileCompareView({
           <span>{fileChangeNotice.message}</span>
           <div className="warning-actions">
             <button type="button" onClick={onReloadChangedFiles}>
-              다시 읽기
+              {text.reload}
             </button>
             {activeChangedSide && (
               <>
@@ -764,21 +783,21 @@ export function FileCompareView({
                     onOverwriteChangedFile(activeChangedSide, viewSettings.saveLineEnding)
                   }
                 >
-                  변경 무시하고 저장
+                  {text.saveAnyway}
                 </button>
                 <button
                   type="button"
                   onClick={() => onSaveSideAs(activeChangedSide, viewSettings.saveLineEnding)}
                 >
-                  복사본 저장
+                  {text.saveCopy}
                 </button>
               </>
             )}
             <button type="button" onClick={onKeepCurrentFiles}>
-              현재 내용 유지
+              {text.keepCurrent}
             </button>
             <button type="button" onClick={onCheckFileVersions}>
-              다시 확인
+              {text.checkAgain}
             </button>
           </div>
         </div>
@@ -800,13 +819,13 @@ export function FileCompareView({
 
       {binary ? (
         <section className="empty-state">
-          <h2>바이너리 파일 비교는 아직 지원하지 않습니다.</h2>
-          <p>1차 릴리스에서는 텍스트 파일만 다룹니다. 텍스트로 안전하게 판별되지 않는 파일은 열지 않습니다.</p>
+          <h2>{text.binaryTitle}</h2>
+          <p>{text.binaryBody}</p>
         </section>
       ) : (
         <section
           className="editor-frame"
-          aria-label={`2-way 비교 편집기: 왼쪽 ${session.left.path}, 오른쪽 ${session.right.path}`}
+          aria-label={text.editorAria(session.left.path, session.right.path)}
         >
           <DiffEditor
             height="100%"
@@ -844,15 +863,15 @@ export function FileCompareView({
       <footer className="status-bar">
         <span>
           {session.left.encoding} · {session.left.lineEnding.toUpperCase()} ·{" "}
-          {finalNewlineLabel(session.left.hadFinalNewline)} · {formatBytes(session.left.size)}
-          {editableSide === "left" && <strong className="status-editing">EDITING</strong>}
-          {dirtySides.left && <strong className="status-dirty">DIRTY</strong>}
+          {finalNewlineLabel(session.left.hadFinalNewline, languageMode)} · {formatBytes(session.left.size)}
+          {editableSide === "left" && <strong className="status-editing">{text.editing}</strong>}
+          {dirtySides.left && <strong className="status-dirty">{text.dirtyStatus}</strong>}
         </span>
         <span>
           {session.right.encoding} · {session.right.lineEnding.toUpperCase()} ·{" "}
-          {finalNewlineLabel(session.right.hadFinalNewline)} · {formatBytes(session.right.size)}
-          {editableSide === "right" && <strong className="status-editing">EDITING</strong>}
-          {dirtySides.right && <strong className="status-dirty">DIRTY</strong>}
+          {finalNewlineLabel(session.right.hadFinalNewline, languageMode)} · {formatBytes(session.right.size)}
+          {editableSide === "right" && <strong className="status-editing">{text.editing}</strong>}
+          {dirtySides.right && <strong className="status-dirty">{text.dirtyStatus}</strong>}
         </span>
       </footer>
     </main>
@@ -860,23 +879,27 @@ export function FileCompareView({
 }
 
 export function FileHeading({
-  side,
+  sideLabel,
+  sideName,
   dropSide,
   dropActive,
   editing,
   path,
   document,
+  text,
   onCopyPath,
   onDragOver,
   onDragLeave,
   onDrop,
 }: {
-  side: string;
+  sideLabel: string;
+  sideName: string;
   dropSide: CompareDropSide;
   dropActive: boolean;
   editing: boolean;
   path: string;
   document: CompareSession["left"];
+  text: (typeof FILE_COMPARE_TEXT)[AppLanguage];
   onCopyPath: () => void;
   onDragOver: (side: CompareDropSide, event: DragEvent<HTMLElement>) => void;
   onDragLeave: (side: CompareDropSide, event: DragEvent<HTMLElement>) => void;
@@ -887,20 +910,20 @@ export function FileHeading({
       className={`file-heading${dropActive ? " drop-active" : ""}`}
       title={path}
       role="group"
-      aria-label={`${side} 파일: ${document.name}, 경로 ${path}`}
+      aria-label={text.fileHeadingAria(sideName, document.name, path)}
       onDragOver={(event) => onDragOver(dropSide, event)}
       onDragLeave={(event) => onDragLeave(dropSide, event)}
       onDrop={(event) => onDrop(dropSide, event)}
     >
-      <span className="side-label">{side}</span>
+      <span className="side-label">{sideLabel}</span>
       <strong>{document.name}</strong>
-      {editing && <span className="editing-badge">EDITING</span>}
+      {editing && <span className="editing-badge">{text.editing}</span>}
       <button type="button" className="file-copy-button" onClick={onCopyPath}>
-        경로 복사
+        {text.copyPath}
       </button>
       <small>{path}</small>
-      {document.decodeHadErrors && <span className="warning-badge">디코딩 손실</span>}
-      {!document.hadFinalNewline && <span className="warning-badge">마지막 개행 없음</span>}
+      {document.decodeHadErrors && <span className="warning-badge">{text.decodeLoss}</span>}
+      {!document.hadFinalNewline && <span className="warning-badge">{text.noFinalNewline}</span>}
     </div>
   );
 }

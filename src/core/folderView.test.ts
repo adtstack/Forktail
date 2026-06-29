@@ -211,17 +211,17 @@ describe("folder entry actions", () => {
       ...entry("src/App.tsx", "different", 100, 3000),
       left: { kind: "file", size: 100, modifiedMs: 3000, hash: "left-hash" },
       right: { kind: "file", size: 120, modifiedMs: 4000, hash: "right-hash" },
-      message: "크기가 다릅니다.",
+      message: "Sizes differ.",
     });
 
-    expect(details).toContainEqual({ label: "상대 경로", value: "src/App.tsx" });
-    expect(details).toContainEqual({ label: "왼쪽 경로", value: "/left/src/App.tsx" });
-    expect(details).toContainEqual({ label: "오른쪽 경로", value: "/right/src/App.tsx" });
+    expect(details).toContainEqual({ label: "Relative path", value: "src/App.tsx" });
+    expect(details).toContainEqual({ label: "Left path", value: "/left/src/App.tsx" });
+    expect(details).toContainEqual({ label: "Right path", value: "/right/src/App.tsx" });
     expect(details).toContainEqual({
-      label: "왼쪽 항목",
+      label: "Left item",
       value: "file · 100 B · mtime 3000 · hash left-hash",
     });
-    expect(details).toContainEqual({ label: "메시지", value: "크기가 다릅니다." });
+    expect(details).toContainEqual({ label: "Message", value: "Sizes differ." });
   });
 
   it("detects directory rows and their tree depth", () => {
@@ -253,14 +253,14 @@ describe("folder entry actions", () => {
     expect(folderEntryPathActions(entry("src/App.tsx", "different", 100))).toEqual([
       {
         side: "left",
-        copyLabel: "왼쪽 경로 복사",
-        revealLabel: "왼쪽 Finder/Explorer",
+        copyLabel: "Copy left path",
+        revealLabel: "Reveal left",
         path: "/left/src/App.tsx",
       },
       {
         side: "right",
-        copyLabel: "오른쪽 경로 복사",
-        revealLabel: "오른쪽 Finder/Explorer",
+        copyLabel: "Copy right path",
+        revealLabel: "Reveal right",
         path: "/right/src/App.tsx",
       },
     ]);
@@ -273,8 +273,8 @@ describe("folder entry actions", () => {
     ).toEqual([
       {
         side: "left",
-        copyLabel: "왼쪽 경로 복사",
-        revealLabel: "왼쪽 Finder/Explorer",
+        copyLabel: "Copy left path",
+        revealLabel: "Reveal left",
         path: "/left/only-left.txt",
       },
     ]);
@@ -344,11 +344,11 @@ describe("folder sync dry-run planning", () => {
             ...entry("kind-conflict", "typeMismatch", 10),
             left: { kind: "directory", size: 0, modifiedMs: null, hash: null },
             right: { kind: "file", size: 10, modifiedMs: null, hash: null },
-            message: "종류가 다릅니다.",
+            message: "Kinds differ.",
           },
           {
             ...entry("unreadable.txt", "error", null),
-            message: "권한이 없습니다.",
+            message: "Permission denied.",
           },
         ],
       },
@@ -436,7 +436,7 @@ describe("folder sync dry-run planning", () => {
         sourcePath: "/left/../outside.txt",
         targetPath: null,
         destructive: false,
-        message: "상대 경로가 root 밖으로 나갈 수 있어 copy/sync 계획에서 제외합니다.",
+        message: "Relative path can escape the root, so it is excluded from the copy/sync plan.",
       },
     ]);
     expect(summarizeFolderSyncDryRun(plan)).toMatchObject({ blocked: 1, destructive: 0 });

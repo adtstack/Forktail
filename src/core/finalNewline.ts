@@ -1,7 +1,14 @@
+import { CORE_TEXT } from "./i18n";
+import type { AppLanguage } from "./settings";
+
 export type FinalNewlineDifference = "same" | "leftMissing" | "rightMissing";
 
-export function finalNewlineLabel(hadFinalNewline: boolean): string {
-  return hadFinalNewline ? "마지막 개행 있음" : "마지막 개행 없음";
+export function finalNewlineLabel(
+  hadFinalNewline: boolean,
+  language: AppLanguage = "en",
+): string {
+  const text = CORE_TEXT[language];
+  return hadFinalNewline ? text.finalNewline : text.noFinalNewline;
 }
 
 export function finalNewlineDifference(
@@ -12,13 +19,17 @@ export function finalNewlineDifference(
   return leftHadFinalNewline ? "rightMissing" : "leftMissing";
 }
 
-export function finalNewlineDifferenceLabel(difference: FinalNewlineDifference): string | null {
+export function finalNewlineDifferenceLabel(
+  difference: FinalNewlineDifference,
+  language: AppLanguage = "en",
+): string | null {
+  const text = CORE_TEXT[language];
   switch (difference) {
     case "same":
       return null;
     case "leftMissing":
-      return "왼쪽 파일에 마지막 개행이 없습니다.";
+      return text.leftNoFinalNewline;
     case "rightMissing":
-      return "오른쪽 파일에 마지막 개행이 없습니다.";
+      return text.rightNoFinalNewline;
   }
 }

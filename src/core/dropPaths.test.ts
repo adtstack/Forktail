@@ -47,18 +47,18 @@ describe("drop rejection messages", () => {
   it("requires exactly two paths for starting a compare session", () => {
     expect(compareDropRejectionMessage(0)).toBe(dropPathUnavailableMessage);
     expect(compareDropRejectionMessage(1)).toBe(
-      "2-way 비교에는 파일 2개를 드롭하세요. 현재 1개입니다.",
+      "Drop exactly 2 files for 2-way compare. Current count: 1.",
     );
     expect(compareDropRejectionMessage(2)).toBeNull();
     expect(compareDropRejectionMessage(3)).toBe(
-      "2-way 비교에는 파일 2개를 드롭하세요. 현재 3개입니다.",
+      "Drop exactly 2 files for 2-way compare. Current count: 3.",
     );
   });
 
   it("requires exactly one path for replacing one compare pane", () => {
     expect(paneDropRejectionMessage("left", 0)).toBe(dropPathUnavailableMessage);
     expect(paneDropRejectionMessage("right", 2)).toBe(
-      "오른쪽에는 파일 1개만 드롭할 수 있습니다. 현재 2개입니다.",
+      "Drop exactly 1 file on the right side. Current count: 2.",
     );
     expect(paneDropRejectionMessage("left", 1)).toBeNull();
   });

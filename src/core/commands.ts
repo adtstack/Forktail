@@ -44,59 +44,59 @@ interface AppCommand {
 }
 
 export const appCommands = {
-  openCompare: command("openCompare", "파일 비교 열기", [
+  openCompare: command("openCompare", "Open File Compare", [
     { key: "o", ctrl: true, aria: "Control+O" },
     { key: "o", meta: true, aria: "Meta+O" },
   ]),
-  openFolders: command("openFolders", "폴더 비교 열기", [
+  openFolders: command("openFolders", "Open Folder Diff", [
     { key: "o", ctrl: true, shift: true, aria: "Control+Shift+O" },
     { key: "o", meta: true, shift: true, aria: "Meta+Shift+O" },
   ]),
-  openMerge: command("openMerge", "3-way 열기", [
+  openMerge: command("openMerge", "Open 3-way Merge", [
     { key: "o", ctrl: true, alt: true, aria: "Control+Alt+O" },
     { key: "o", meta: true, alt: true, aria: "Meta+Alt+O" },
   ]),
-  save: command("save", "저장", [
+  save: command("save", "Save", [
     { key: "s", ctrl: true, aria: "Control+S" },
     { key: "s", meta: true, aria: "Meta+S" },
   ]),
-  saveAs: command("saveAs", "다른 이름 저장", [
+  saveAs: command("saveAs", "Save As", [
     { key: "s", ctrl: true, shift: true, aria: "Control+Shift+S" },
     { key: "s", meta: true, shift: true, aria: "Meta+Shift+S" },
   ]),
-  undo: command("undo", "실행 취소", [
+  undo: command("undo", "Undo", [
     { key: "z", ctrl: true, aria: "Control+Z" },
     { key: "z", meta: true, aria: "Meta+Z" },
   ]),
-  redo: command("redo", "다시 실행", [
+  redo: command("redo", "Redo", [
     { key: "y", ctrl: true, aria: "Control+Y" },
     { key: "y", meta: true, aria: "Meta+Y" },
     { key: "z", ctrl: true, shift: true, aria: "Control+Shift+Z" },
     { key: "z", meta: true, shift: true, aria: "Meta+Shift+Z" },
   ]),
-  nextDiff: command("nextDiff", "다음 차이", [{ key: "F7", aria: "F7" }]),
-  previousDiff: command("previousDiff", "이전 차이", [
+  nextDiff: command("nextDiff", "Next Change", [{ key: "F7", aria: "F7" }]),
+  previousDiff: command("previousDiff", "Previous Change", [
     { key: "F7", shift: true, aria: "Shift+F7" },
   ]),
-  nextConflict: command("nextConflict", "다음 충돌", [{ key: "F8", aria: "F8" }]),
-  previousConflict: command("previousConflict", "이전 충돌", [
+  nextConflict: command("nextConflict", "Next Conflict", [{ key: "F8", aria: "F8" }]),
+  previousConflict: command("previousConflict", "Previous Conflict", [
     { key: "F8", shift: true, aria: "Shift+F8" },
   ]),
-  acceptOurs: command("acceptOurs", "OURS 채택", [{ key: "1", alt: true, aria: "Alt+1" }]),
-  acceptBase: command("acceptBase", "BASE 채택", [{ key: "2", alt: true, aria: "Alt+2" }]),
-  acceptTheirs: command("acceptTheirs", "THEIRS 채택", [
+  acceptOurs: command("acceptOurs", "Accept OURS", [{ key: "1", alt: true, aria: "Alt+1" }]),
+  acceptBase: command("acceptBase", "Accept BASE", [{ key: "2", alt: true, aria: "Alt+2" }]),
+  acceptTheirs: command("acceptTheirs", "Accept THEIRS", [
     { key: "3", alt: true, aria: "Alt+3" },
   ]),
-  acceptBoth: command("acceptBoth", "BOTH 채택", [{ key: "4", alt: true, aria: "Alt+4" }]),
-  swapSides: command("swapSides", "좌우 교환", [
+  acceptBoth: command("acceptBoth", "Keep Both", [{ key: "4", alt: true, aria: "Alt+4" }]),
+  swapSides: command("swapSides", "Swap Sides", [
     { key: "x", ctrl: true, shift: true, aria: "Control+Shift+X" },
     { key: "x", meta: true, shift: true, aria: "Meta+Shift+X" },
   ]),
-  searchPath: command("searchPath", "경로 검색/필터", [
+  searchPath: command("searchPath", "Search Path", [
     { key: "f", ctrl: true, aria: "Control+F" },
     { key: "f", meta: true, aria: "Meta+F" },
   ]),
-  settings: command("settings", "설정", [
+  settings: command("settings", "Settings", [
     { key: ",", ctrl: true, aria: "Control+," },
     { key: ",", meta: true, aria: "Meta+," },
   ]),

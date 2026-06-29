@@ -1,10 +1,10 @@
 export type ConfirmLeave = (message: string) => boolean;
 
 export const unsavedMergeNavigationMessage =
-  "저장하지 않은 병합 결과가 있습니다. 변경 내용을 버리고 이동하시겠습니까?";
+  "The merge result has unsaved changes. Discard them and leave?";
 
 export const unsavedCompareNavigationMessage =
-  "저장하지 않은 비교 파일 수정이 있습니다. 변경 내용을 버리고 이동하시겠습니까?";
+  "The compare file has unsaved changes. Discard them and leave?";
 
 export function hasUnsavedCompareChanges(
   currentRightText: string,

@@ -19,7 +19,7 @@ describe("hasUnsavedCompareChanges", () => {
   });
 
   it("keeps a compare-specific navigation message", () => {
-    expect(unsavedCompareNavigationMessage).toContain("비교 파일");
+    expect(unsavedCompareNavigationMessage).toContain("compare file");
   });
 });
 

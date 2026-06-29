@@ -1,4 +1,6 @@
+import { CORE_TEXT } from "./i18n";
 import type { CompareSession, FileDocument, FileVersion } from "./models";
+import type { AppLanguage } from "./settings";
 
 export interface CompareFileChangeNotice {
   leftChanged: boolean;
@@ -19,21 +21,17 @@ export function buildCompareFileChangeNotice(
   session: CompareSession,
   leftVersion: FileVersion | null,
   rightVersion: FileVersion | null,
+  language: AppLanguage = "en",
 ): CompareFileChangeNotice | null {
   const leftChanged = fileDocumentVersionChanged(session.left, leftVersion);
   const rightChanged = fileDocumentVersionChanged(session.right, rightVersion);
   if (!leftChanged && !rightChanged) return null;
 
-  const changedSides = [
-    leftChanged ? "왼쪽" : null,
-    rightChanged ? "오른쪽" : null,
-  ].filter((side): side is string => side != null);
-
   return {
     leftChanged,
     rightChanged,
     versionKey: compareFileChangeVersionKey(leftVersion, rightVersion),
-    message: `${changedSides.join("과 ")} 파일이 열린 뒤 변경됐습니다. 다시 읽거나 현재 비교 내용을 유지하세요.`,
+    message: CORE_TEXT[language].fileChangeNotice(leftChanged, rightChanged),
   };
 }
 

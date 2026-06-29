@@ -23,7 +23,7 @@ export function isTauriRuntime(): boolean {
 
 function requireTauri(): void {
   if (!isTauriRuntime()) {
-    throw new Error("이 기능은 Tauri 데스크톱 런타임에서만 사용할 수 있습니다. 브라우저에서는 데모를 사용하세요.");
+    throw new Error("This feature is only available in the Tauri desktop runtime. Use demos in the browser.");
   }
 }
 
@@ -49,7 +49,7 @@ export async function chooseDirectory(title: string): Promise<string | null> {
 
 export async function chooseSavePath(
   defaultPath?: string,
-  title = "파일 저장",
+  title = "Save File",
 ): Promise<string | null> {
   requireTauri();
   return save({

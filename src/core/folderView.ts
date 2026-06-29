@@ -1,4 +1,5 @@
 import { matchesCommandShortcut, type KeyboardShortcutLike } from "./commands";
+import { CORE_TEXT } from "./i18n";
 import type {
   FolderCompareMode,
   FolderEntry,
@@ -7,6 +8,7 @@ import type {
   FolderScanResult,
   FsEntryMeta,
 } from "./models";
+import type { AppLanguage } from "./settings";
 
 export const FOLDER_STATUSES: FolderEntryStatus[] = [
   "different",
@@ -266,9 +268,12 @@ export function isSafeFolderRelativePath(relativePath: string): boolean {
 export function buildFolderSyncDryRunPlan(
   result: FolderScanResult,
   direction: FolderSyncDirection,
+  language: AppLanguage = "en",
 ): FolderSyncDryRunItem[] {
   return result.entries
-    .map((entry) => folderSyncDryRunItem(entry, result.leftRoot, result.rightRoot, direction))
+    .map((entry) =>
+      folderSyncDryRunItem(entry, result.leftRoot, result.rightRoot, direction, language)
+    )
     .filter((item): item is FolderSyncDryRunItem => item != null);
 }
 
@@ -296,7 +301,9 @@ function folderSyncDryRunItem(
   leftRoot: string,
   rightRoot: string,
   direction: FolderSyncDirection,
+  language: AppLanguage,
 ): FolderSyncDryRunItem | null {
+  const text = CORE_TEXT[language].folderSync;
   if (entry.status === "same") return null;
 
   const source = direction === "leftToRight" ? entry.left : entry.right;
@@ -312,12 +319,12 @@ function folderSyncDryRunItem(
       direction,
       sourcePath,
       null,
-      "상대 경로가 root 밖으로 나갈 수 있어 copy/sync 계획에서 제외합니다.",
+      text.rootEscape,
     );
   }
 
   if (entry.status === "error") {
-    return blockedFolderSyncItem(entry, direction, sourcePath, targetPath, entry.message ?? "스캔 오류가 있습니다.");
+    return blockedFolderSyncItem(entry, direction, sourcePath, targetPath, entry.message ?? text.scanError);
   }
 
   if (entry.status === "typeMismatch") {
@@ -326,7 +333,7 @@ function folderSyncDryRunItem(
       direction,
       sourcePath,
       targetPath,
-      "양쪽 항목 종류가 달라 자동 복사 계획에서 제외합니다.",
+      text.typeMismatch,
     );
   }
 
@@ -340,7 +347,7 @@ function folderSyncDryRunItem(
         sourcePath,
         targetPath,
         destructive: true,
-        message: "대상 파일을 원본 파일 내용으로 덮어씁니다.",
+        message: text.overwriteFile,
       };
     }
     return blockedFolderSyncItem(
@@ -348,7 +355,7 @@ function folderSyncDryRunItem(
       direction,
       sourcePath,
       targetPath,
-      "일반 파일끼리의 변경만 자동 덮어쓰기 계획에 포함합니다.",
+      text.fileChangeBlocked,
     );
   }
 
@@ -361,7 +368,7 @@ function folderSyncDryRunItem(
         sourcePath,
         targetPath,
         destructive: false,
-        message: "대상 쪽에 파일을 새로 복사합니다.",
+        message: text.copyFile,
       };
     }
     if (source.kind === "directory") {
@@ -372,7 +379,7 @@ function folderSyncDryRunItem(
         sourcePath,
         targetPath,
         destructive: false,
-        message: "대상 쪽에 폴더를 새로 만듭니다.",
+        message: text.createDirectory,
       };
     }
     return blockedFolderSyncItem(
@@ -380,7 +387,7 @@ function folderSyncDryRunItem(
       direction,
       sourcePath,
       targetPath,
-      "일반 파일과 폴더만 자동 복사 계획에 포함합니다.",
+      text.unsupportedKind,
     );
   }
 
@@ -416,42 +423,50 @@ function folderDisplayPath(root: string, relativePath: string): string {
   return trimmedRoot ? `${trimmedRoot}${separator}${relative}` : relative;
 }
 
-export function folderEntryDetailRows(entry: FolderEntry): FolderEntryDetailRow[] {
+export function folderEntryDetailRows(
+  entry: FolderEntry,
+  language: AppLanguage = "en",
+): FolderEntryDetailRow[] {
+  const text = CORE_TEXT[language].folderDetails;
   const rows: FolderEntryDetailRow[] = [
-    { label: "상대 경로", value: entry.relativePath },
-    { label: "상태", value: entry.status },
-    { label: "왼쪽 경로", value: entry.leftPath ?? "—" },
-    { label: "오른쪽 경로", value: entry.rightPath ?? "—" },
+    { label: text.relativePath, value: entry.relativePath },
+    { label: text.status, value: entry.status },
+    { label: text.leftPath, value: entry.leftPath ?? "—" },
+    { label: text.rightPath, value: entry.rightPath ?? "—" },
   ];
 
   if (entry.left) {
-    rows.push({ label: "왼쪽 항목", value: entryMetaSummary(entry.left) });
+    rows.push({ label: text.leftItem, value: entryMetaSummary(entry.left) });
   }
   if (entry.right) {
-    rows.push({ label: "오른쪽 항목", value: entryMetaSummary(entry.right) });
+    rows.push({ label: text.rightItem, value: entryMetaSummary(entry.right) });
   }
   if (entry.message) {
-    rows.push({ label: "메시지", value: entry.message });
+    rows.push({ label: text.message, value: entry.message });
   }
 
   return rows;
 }
 
-export function folderEntryPathActions(entry: FolderEntry): FolderEntryPathAction[] {
+export function folderEntryPathActions(
+  entry: FolderEntry,
+  language: AppLanguage = "en",
+): FolderEntryPathAction[] {
+  const text = CORE_TEXT[language].folderDetails;
   const actions: FolderEntryPathAction[] = [];
   if (entry.leftPath) {
     actions.push({
       side: "left",
-      copyLabel: "왼쪽 경로 복사",
-      revealLabel: "왼쪽 Finder/Explorer",
+      copyLabel: text.copyLeftPath,
+      revealLabel: text.revealLeft,
       path: entry.leftPath,
     });
   }
   if (entry.rightPath) {
     actions.push({
       side: "right",
-      copyLabel: "오른쪽 경로 복사",
-      revealLabel: "오른쪽 Finder/Explorer",
+      copyLabel: text.copyRightPath,
+      revealLabel: text.revealRight,
       path: entry.rightPath,
     });
   }
