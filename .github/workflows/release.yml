@@ -119,16 +119,19 @@ jobs:
             bundle: app
             output: macos
             artifact: forktail-macos-app
+            target: universal-apple-darwin
           - platform: Windows
             os: windows-2022
             bundle: nsis
             output: nsis
             artifact: forktail-windows-nsis
+            target: ""
           - platform: Linux
             os: ubuntu-22.04
             bundle: appimage
             output: appimage
             artifact: forktail-linux-appimage
+            target: ""
     steps:
       - uses: actions/checkout@v4.2.2
         with:
@@ -165,8 +168,32 @@ jobs:
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
         run: npm run release:validate
 
+      - name: Install macOS universal Rust targets
+        if: matrix.os == 'macos-14'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
       - name: Build Tauri bundle
-        run: npm run tauri build -- --bundles ${{ matrix.bundle }}
+        shell: bash
+        env:
+          BUNDLE: ${{ matrix.bundle }}
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          args=(--bundles "$BUNDLE")
+          if [ -n "$BUILD_TARGET" ]; then
+            args+=(--target "$BUILD_TARGET")
+          fi
+          npm run tauri build -- "${args[@]}"
+
+      - name: Ad-hoc sign macOS app bundle
+        if: matrix.os == 'macos-14'
+        shell: bash
+        run: |
+          set -euo pipefail
+          codesign --force --deep --sign - \
+            "src-tauri/target/release/bundle/macos/forktail.app"
+          codesign --verify --deep --strict --verbose=4 \
+            "src-tauri/target/release/bundle/macos/forktail.app"
 
       - name: Package bundle artifact
         shell: bash

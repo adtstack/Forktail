@@ -51,7 +51,7 @@ describe("release workflow policy", () => {
       "Install Tauri Linux dependencies",
       "cargo clippy --all-targets -- -D warnings",
       "Install Linux bundle dependencies",
-      "npm run tauri build -- --bundles",
+      "npm run tauri build --",
     ]);
   });
 
@@ -61,6 +61,7 @@ describe("release workflow policy", () => {
       "bundle: app",
       "output: macos",
       "forktail-macos-app",
+      "target: universal-apple-darwin",
       "os: windows-2022",
       "bundle: nsis",
       "output: nsis",
@@ -69,6 +70,12 @@ describe("release workflow policy", () => {
       "bundle: appimage",
       "output: appimage",
       "forktail-linux-appimage",
+      "Install macOS universal Rust targets",
+      "rustup target add aarch64-apple-darwin x86_64-apple-darwin",
+      "npm run tauri build --",
+      "Ad-hoc sign macOS app bundle",
+      "codesign --force --deep --sign -",
+      "codesign --verify --deep --strict",
       ".tar.gz",
       "checksums.txt",
       "gh release create",
@@ -78,6 +85,13 @@ describe("release workflow policy", () => {
     ]) {
       expect(releaseWorkflow).toContain(fragment);
     }
+
+    expectInOrder(releaseWorkflow, [
+      "Install macOS universal Rust targets",
+      "Build Tauri bundle",
+      "Ad-hoc sign macOS app bundle",
+      "Package bundle artifact",
+    ]);
   });
 
   it("requires the release tag to match package, Tauri, and Cargo versions", () => {
