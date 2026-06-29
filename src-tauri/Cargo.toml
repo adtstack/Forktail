@@ -1,6 +1,6 @@
 [package]
 name = "forktail"
-version = "0.1.0"
+version = "0.2.0"
 description = "Local-first text, folder, and three-way comparison tool"
 authors = ["forktail contributors"]
 license = "MIT"

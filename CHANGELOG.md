@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.0 - Language and release gate refresh
+
+- Added language settings with local persistence.
+- Defaulted the UI to English.
+- Hardened Linux dependencies for release and CI gates.
+
 ## 0.1.1 - Text-only scope refresh
 
 - Fixed Phase 1 scope to text-file comparison, folder comparison, and deterministic 3-way merge.
