@@ -12,6 +12,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false",
     "doctor": "node scripts/doctor.mjs",
+    "smoke:runtime:prepare": "node scripts/prepare-runtime-smoke.mjs",
     "release:validate": "node scripts/validate-release.mjs",
     "tauri": "tauri",
     "check": "npm run typecheck && npm run test && npm run build"

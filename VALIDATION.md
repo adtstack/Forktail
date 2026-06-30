@@ -4,6 +4,73 @@
 
 이 파일은 실행한 검증과 실행하지 못한 검증을 명확히 구분한다. AI 에이전트는 이 기록만으로 미실행 검증을 통과했다고 간주하면 안 된다.
 
+## RTM-001 Tauri runtime smoke 준비
+
+이 섹션은 실제 Tauri 창과 packaged app에서 반복 가능한 입력으로 수동/반자동 smoke를 실행하기 위한 기록 템플릿이다. 사용자 실제 파일 내용, private path, crash dump, home directory 전체 경로를 붙여 넣지 않는다.
+
+변경 파일:
+
+- `package.json`
+- `scripts/prepare-runtime-smoke.mjs`
+- `docs/14_PRODUCT_GAP_ROADMAP.md`
+- `VALIDATION.md`
+
+수용 기준:
+
+- 2-way compare, folder compare, 3-way merge에 사용할 fixture workspace를 반복 생성할 수 있다.
+- 같은 fixture path를 `npm run tauri dev` 또는 packaged app smoke에서 사용할 수 있다.
+- OS, 앱 버전, 실행 명령, 실패 지점을 기록할 위치가 있다.
+- 실제 사용자 파일 내용은 기록하지 않는다.
+
+실패/경계 조건:
+
+- 파일 dialog 취소는 실패가 아니다.
+- Tauri 시작 실패는 실행 명령과 행동 가능한 첫 오류만 기록하고 전체 로그 덤프를 붙이지 않는다.
+- Monaco가 렌더링되지만 console error가 있으면 짧은 오류 이름과 영향을 받은 화면을 기록한다.
+- Save/Save As 실패 시 원본 fixture 파일이 유지됐는지 확인한다.
+- 자동화하기 어려운 OS gesture는 `manual-not-run`으로 남긴다.
+
+검증 명령:
+
+```bash
+npm run smoke:runtime:prepare
+npm run doctor
+npm run check
+npm run tauri dev
+```
+
+수동 체크리스트:
+
+1. `npm run smoke:runtime:prepare`로 fixture를 생성한다.
+2. `npm run tauri dev` 또는 packaged app을 실행한다.
+3. 생성된 `two-way/left.txt`, `two-way/right.txt`를 열고 변경 hunk 탐색, 오른쪽 편집, Save As를 확인한다.
+4. 생성된 `folders/left`, `folders/right`를 열고 `same`, `different`, `leftOnly`, `rightOnly`, `typeMismatch` row와 필터 count를 확인한다.
+5. 생성된 `merge/base.txt`, `merge/ours.txt`, `merge/theirs.txt`를 열고 conflict 표시, resolution, Save As를 확인한다.
+6. 가능한 OS에서는 native menu, native reveal, drag and drop을 확인한다.
+
+결과 템플릿:
+
+```text
+Date:
+OS:
+Architecture:
+forktail version:
+Command:
+Fixture manifest:
+Build type: dev | packaged
+
+2-way compare: pass | fail | manual-not-run
+Folder compare: pass | fail | manual-not-run
+3-way merge: pass | fail | manual-not-run
+Save/Save As: pass | fail | manual-not-run
+Native menu: pass | fail | manual-not-run
+Native reveal: pass | fail | manual-not-run
+Drag and drop: pass | fail | manual-not-run
+
+Notes:
+-
+```
+
 ## 통과
 
 프로젝트 루트에서 다음 명령을 실행했다.
