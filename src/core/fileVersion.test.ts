@@ -5,6 +5,7 @@ import {
   fileDocumentVersionChanged,
 } from "./fileVersion";
 import type { FileDocument, FileVersion } from "./models";
+import { virtualMissingFileDocument } from "./virtualDocument";
 
 function document(path: string, size: number, modifiedMs: number | null): FileDocument {
   return {
@@ -33,6 +34,11 @@ describe("fileDocumentVersionChanged", () => {
     expect(fileDocumentVersionChanged(opened, version("/work/left.txt", 11, 1000))).toBe(true);
     expect(fileDocumentVersionChanged(opened, version("/work/left.txt", 10, 2000))).toBe(true);
     expect(fileDocumentVersionChanged(opened, null)).toBe(true);
+  });
+
+  it("does not report virtual missing documents as externally changed", () => {
+    expect(fileDocumentVersionChanged(virtualMissingFileDocument("/work/missing.txt"), null))
+      .toBe(false);
   });
 });
 
@@ -76,6 +82,17 @@ describe("buildCompareFileChangeNotice", () => {
       rightChanged: true,
       message: "Left and Right file changed after it was opened. Reload or keep the current compare content.",
     });
+  });
+
+  it("ignores virtual missing sides when building change notices", () => {
+    const session = {
+      left: virtualMissingFileDocument("/work/left.txt"),
+      right: document("/work/right.txt", 20, 2000),
+    };
+
+    expect(
+      buildCompareFileChangeNotice(session, null, version("/work/right.txt", 20, 2000)),
+    ).toBeNull();
   });
 });
 

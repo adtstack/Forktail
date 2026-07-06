@@ -193,12 +193,15 @@ export function nextFolderSelectionIndex(
 }
 
 export function canCompareFolderEntry(entry: FolderEntry): boolean {
-  return Boolean(
-    entry.leftPath &&
-      entry.rightPath &&
-      entry.left?.kind === "file" &&
-      entry.right?.kind === "file",
-  );
+  if (entry.status === "error" || entry.status === "typeMismatch") return false;
+
+  const hasLeftFile = entry.leftPath != null && entry.left?.kind === "file";
+  const hasRightFile = entry.rightPath != null && entry.right?.kind === "file";
+  const hasNonFileEntry =
+    (entry.left != null && entry.left.kind !== "file") ||
+    (entry.right != null && entry.right.kind !== "file");
+
+  return !hasNonFileEntry && (hasLeftFile || hasRightFile);
 }
 
 export function folderEntryPrimaryAction(

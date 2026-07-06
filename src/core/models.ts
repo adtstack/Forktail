@@ -34,6 +34,9 @@ export interface FileDocument {
   modifiedMs: number | null;
   isBinary: boolean;
   decodeHadErrors: boolean;
+  virtual?: {
+    kind: "missing";
+  };
 }
 
 export interface FileVersion {

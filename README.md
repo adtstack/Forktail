@@ -155,6 +155,7 @@ npm run doctor
 13. `docs/11_AI_PHASE2.md` — 2차 AI 기능의 경계
 14. `docs/12_DEFINITION_OF_DONE.md` — 완료 기준
 15. `docs/13_FIRST_SPRINT.md` — 첫 sprint 실행 순서
+16. `docs/14_PRODUCT_GAP_ROADMAP.md` — 실사용 제품 갭과 추가 기능 후보
 
 ## 디렉터리 구조
 

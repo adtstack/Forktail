@@ -1,6 +1,7 @@
 import { CORE_TEXT } from "./i18n";
 import type { CompareSession, FileDocument, FileVersion } from "./models";
 import type { AppLanguage } from "./settings";
+import { isVirtualFileDocument } from "./virtualDocument";
 
 export interface CompareFileChangeNotice {
   leftChanged: boolean;
@@ -13,6 +14,7 @@ export function fileDocumentVersionChanged(
   document: FileDocument,
   version: FileVersion | null,
 ): boolean {
+  if (isVirtualFileDocument(document)) return false;
   if (!version) return true;
   return document.size !== version.size || document.modifiedMs !== version.modifiedMs;
 }

@@ -2,6 +2,7 @@ import { CORE_TEXT } from "./i18n";
 import type { CompareSession, FileDocument, LineEnding, WriteResult } from "./models";
 import type { AppLanguage } from "./settings";
 import type { WritePrecondition } from "./mergeSave";
+import { isVirtualFileDocument } from "./virtualDocument";
 
 export type CompareSide = "left" | "right";
 
@@ -34,12 +35,16 @@ export function compareSavePreconditionForPath(
   side: CompareSide = "right",
 ): WritePrecondition | null {
   const target = session[side];
+  if (isVirtualFileDocument(target)) return null;
+
   if (target.path === outputPath) {
     return savedOutputVersion ?? writePreconditionFromDocument(target);
   }
 
   const otherSide = side === "left" ? "right" : "left";
   const otherDocument = session[otherSide];
+  if (isVirtualFileDocument(otherDocument)) return null;
+
   if (otherDocument.path === outputPath) {
     return writePreconditionFromDocument(otherDocument);
   }
@@ -126,6 +131,8 @@ export function compareSaveEncodingWarnings(
 ): CompareSaveEncodingWarning[] {
   const text = CORE_TEXT[language];
   return (["left", "right"] as const).flatMap((side) => {
+    if (isVirtualFileDocument(session[side])) return [];
+
     const message = saveEncodingWarningForDocument(session[side], "preserve", language);
     if (!message) return [];
     return [{

@@ -1,4 +1,4 @@
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   APP_COMMAND_EVENT,
   commandAriaKeyshortcuts,
@@ -316,6 +316,27 @@ export function FolderCompareView({
     }
   };
 
+  const handleRowClick = (
+    event: MouseEvent<HTMLTableRowElement>,
+    entry: FolderEntry,
+    index: number,
+  ) => {
+    selectRow(index);
+    if (event.detail !== 1) return;
+
+    const action = folderEntryPrimaryAction(entry, preparedEntries);
+    if (action.kind === "compare") {
+      onOpenEntry(entry);
+    }
+  };
+
+  const handleRowDoubleClick = (entry: FolderEntry) => {
+    const action = folderEntryPrimaryAction(entry, preparedEntries);
+    if (action.kind !== "compare") {
+      runPrimaryAction(entry);
+    }
+  };
+
   const copyPath = async (side: FolderEntryPathAction["side"], path: string) => {
     try {
       await writeClipboardText(path);
@@ -502,8 +523,8 @@ export function FolderCompareView({
                   aria-label={`${entry.relativePath}, ${statusLabels[entry.status]}, ${rowTitle}`}
                   className={`status-${entry.status} ${selectedIndex === index ? "selected-row" : ""}`}
                   onFocus={() => selectRow(index)}
-                  onClick={() => selectRow(index)}
-                  onDoubleClick={() => runPrimaryAction(entry)}
+                  onClick={(event) => handleRowClick(event, entry, index)}
+                  onDoubleClick={() => handleRowDoubleClick(entry)}
                   onKeyDown={(event) => handleRowKeyDown(event, entry, index)}
                   title={entry.message ?? rowTitle}
                 >
@@ -691,10 +712,14 @@ function formatDryRunSummary(
 }
 
 function formatEntrySize(entry: FolderEntry): string {
-  const left = entry.left?.kind === "file" ? formatBytes(entry.left.size) : "—";
-  const right = entry.right?.kind === "file" ? formatBytes(entry.right.size) : "—";
-  if (left === right) return left;
-  return `${left} / ${right}`;
+  const sizes = [
+    entry.left?.kind === "file" ? formatBytes(entry.left.size) : null,
+    entry.right?.kind === "file" ? formatBytes(entry.right.size) : null,
+  ].filter((size): size is string => size != null);
+
+  if (sizes.length === 0) return "—";
+  if (sizes.length === 1 || sizes[0] === sizes[1]) return sizes[0];
+  return `${sizes[0]} / ${sizes[1]}`;
 }
 
 function formatModified(modifiedMs: number | null, languageMode: AppLanguage): string {

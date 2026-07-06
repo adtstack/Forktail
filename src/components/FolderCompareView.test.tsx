@@ -77,12 +77,55 @@ describe("FolderCompareView", () => {
     expect(markup).not.toContain("Apply sync");
   });
 
-  it("labels row primary actions for compare and one-sided reveal", () => {
+  it("labels row primary actions for two-sided and one-sided file compare", () => {
     const markup = renderFolderView(null);
 
-    expect(markup).toContain("Enter or double-click to compare files");
-    expect(markup).toContain("Enter or double-click to reveal the left file");
-    expect(markup).toContain("Enter or double-click to reveal the right file");
+    expect(markup).toContain("Click or Enter to compare this file row");
+    expect(markup).not.toContain("Enter or double-click to reveal the left file");
+    expect(markup).not.toContain("Enter or double-click to reveal the right file");
+  });
+
+  it("renders one-sided file sizes without a missing-side placeholder", () => {
+    const result: FolderScanResult = {
+      leftRoot: "/left",
+      rightRoot: "/right",
+      durationMs: 5,
+      stats: {
+        different: 0,
+        leftOnly: 1,
+        rightOnly: 1,
+        typeMismatch: 0,
+        errors: 0,
+        same: 0,
+      },
+      entries: [
+        {
+          relativePath: "docs/guide.md",
+          leftPath: "/left/docs/guide.md",
+          rightPath: null,
+          left: { kind: "file", size: 10000, modifiedMs: 1, hash: null },
+          right: null,
+          status: "leftOnly",
+          message: null,
+        },
+        {
+          relativePath: "config/prod.yml",
+          leftPath: null,
+          rightPath: "/right/config/prod.yml",
+          left: null,
+          right: { kind: "file", size: 12000, modifiedMs: 2, hash: null },
+          status: "rightOnly",
+          message: null,
+        },
+      ],
+    };
+
+    const markup = renderFolderViewWithResult(result, DEFAULT_FOLDER_SCAN_OPTIONS, null);
+
+    expect(markup).toContain(">9.8 KB<");
+    expect(markup).toContain(">11.7 KB<");
+    expect(markup).not.toContain("— / 9.8 KB");
+    expect(markup).not.toContain("11.7 KB / —");
   });
 
   it("renders folder tree expand controls for directory rows with visible children", () => {

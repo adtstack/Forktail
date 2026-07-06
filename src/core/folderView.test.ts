@@ -194,11 +194,18 @@ describe("folder keyboard selection", () => {
 });
 
 describe("folder entry actions", () => {
-  it("allows 2-way compare only for entries with regular files on both sides", () => {
+  it("allows 2-way compare for regular files even when one side is missing", () => {
     expect(canCompareFolderEntry(entry("src/App.tsx", "different", 100))).toBe(true);
-    expect(canCompareFolderEntry({ ...entry("left-only.txt", "leftOnly", 100), rightPath: null, right: null })).toBe(
-      false,
-    );
+    expect(canCompareFolderEntry({
+      ...entry("left-only.txt", "leftOnly", 100),
+      rightPath: null,
+      right: null,
+    })).toBe(true);
+    expect(canCompareFolderEntry({
+      ...entry("right-only.txt", "rightOnly", 100),
+      leftPath: null,
+      left: null,
+    })).toBe(true);
     expect(
       canCompareFolderEntry({
         ...entry("kind-conflict", "typeMismatch", 100),
@@ -228,16 +235,8 @@ describe("folder entry actions", () => {
     const tree = [directory, twoSidedFile, leftOnlyFile, rightOnlyFile, typeMismatch];
 
     expect(folderEntryPrimaryAction(twoSidedFile, tree)).toEqual({ kind: "compare" });
-    expect(folderEntryPrimaryAction(leftOnlyFile, tree)).toEqual({
-      kind: "reveal",
-      side: "left",
-      path: "/left/docs/guide.md",
-    });
-    expect(folderEntryPrimaryAction(rightOnlyFile, tree)).toEqual({
-      kind: "reveal",
-      side: "right",
-      path: "/right/config/prod.yml",
-    });
+    expect(folderEntryPrimaryAction(leftOnlyFile, tree)).toEqual({ kind: "compare" });
+    expect(folderEntryPrimaryAction(rightOnlyFile, tree)).toEqual({ kind: "compare" });
     expect(folderEntryPrimaryAction(directory, tree)).toEqual({ kind: "toggle", path: "src" });
     expect(folderEntryPrimaryAction(typeMismatch, tree)).toEqual({ kind: "none" });
   });

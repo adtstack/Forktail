@@ -41,7 +41,7 @@
 | FOL-007 | 가상 스크롤 | 100k row에서 DOM row 수 제한, 키보드 이동 | FOL-006 |
 | FOL-008 | hash 병렬화 | bounded worker pool, UI responsive, cancellation 반영 | FOL-006 |
 | FOL-009 | scan cache | size+mtime key cache, 옵션 변경 시 올바른 invalidation | FOL-008 |
-| FOL-010 | 폴더 행 행동 | 양쪽 파일 compare, 한쪽 파일 reveal, 폴더 expand/collapse | TXT-001 |
+| FOL-010 | 폴더 행 행동 | 일반 파일 compare(한쪽-only는 missing 가상 빈 문서), reveal/copy path, 폴더 expand/collapse | TXT-001 |
 | FOL-011 | copy/sync dry-run | 복사 계획만 생성·표시, 실제 적용은 별도 confirmation | SAV-003, FOL-010 |
 
 ## Three-way merge

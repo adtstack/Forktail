@@ -10,6 +10,7 @@ import {
   writePreconditionFromDocument,
 } from "./compareSave";
 import type { CompareSession, FileDocument } from "./models";
+import { virtualMissingFileDocument } from "./virtualDocument";
 
 describe("compareSavePreconditionForPath", () => {
   it("uses the saved right version when saving over the current right file", () => {
@@ -57,6 +58,16 @@ describe("compareSavePreconditionForPath", () => {
       expectedSize: 6,
       expectedModifiedMs: 1001,
     });
+  });
+
+  it("does not create save preconditions for virtual missing documents", () => {
+    const session = {
+      ...compareSession(),
+      right: virtualMissingFileDocument("/repo/right.txt"),
+    };
+
+    expect(compareSavePreconditionForPath(session, "/repo/right.txt", null)).toBeNull();
+    expect(compareSavePreconditionForPath(session, "/repo/right.txt", null, "left")).toBeNull();
   });
 });
 
@@ -249,6 +260,21 @@ describe("compareSaveEncodingWarnings", () => {
 
     expect(warnings).toMatchObject([
       { side: "left", label: "Left" },
+      { side: "right", label: "Right" },
+    ]);
+  });
+
+  it("skips virtual missing documents", () => {
+    const session = {
+      ...compareSession(),
+      left: virtualMissingFileDocument("/repo/left.txt"),
+      right: {
+        ...compareSession().right,
+        encoding: "windows-1252",
+      },
+    };
+
+    expect(compareSaveEncodingWarnings(session)).toMatchObject([
       { side: "right", label: "Right" },
     ]);
   });

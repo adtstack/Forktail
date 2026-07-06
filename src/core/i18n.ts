@@ -135,9 +135,9 @@ export const APP_TEXT = {
     chooseTheirsFile: "Choose THEIRS File",
     leftFileReplacedFromDrop: "Left file replaced from drop.",
     rightFileReplacedFromDrop: "Right file replaced from drop.",
-    folderEntryNeedsBoth: "Only files present on both sides can open in 2-way compare.",
+    folderEntryNeedsRegularFile: "Only regular file rows can open in 2-way compare.",
     regularFilesOnly: "Only regular files can be opened right now.",
-    regularFilesBoth: "Only regular files on both sides can open in 2-way compare.",
+    virtualCompareSaveDisabled: "The missing side is virtual. Replace it with a file before saving.",
     openedInFileManager: "Opened item in the file manager.",
     folderResults: "Folder Results",
     recentSessionFailure: (message: string) =>
@@ -202,9 +202,9 @@ export const APP_TEXT = {
     chooseTheirsFile: "THEIRS 파일 선택",
     leftFileReplacedFromDrop: "왼쪽 파일을 드롭한 파일로 바꿨습니다.",
     rightFileReplacedFromDrop: "오른쪽 파일을 드롭한 파일로 바꿨습니다.",
-    folderEntryNeedsBoth: "양쪽에 모두 존재하는 파일만 2-way 비교할 수 있습니다.",
+    folderEntryNeedsRegularFile: "일반 파일 행만 2-way 비교로 열 수 있습니다.",
     regularFilesOnly: "현재는 일반 파일만 열 수 있습니다.",
-    regularFilesBoth: "양쪽 일반 파일만 2-way 비교할 수 있습니다.",
+    virtualCompareSaveDisabled: "없는 쪽은 비교용 가상 문서입니다. 저장하려면 먼저 파일로 바꾸세요.",
     openedInFileManager: "파일 관리자에서 항목을 열었습니다.",
     folderResults: "폴더 결과",
     recentSessionFailure: (message: string) =>
@@ -425,6 +425,9 @@ export const FILE_COMPARE_TEXT = {
     left: "Left",
     right: "Right",
     noEditableSide: "No editable side",
+    missingFile: "Missing",
+    missingSideNote:
+      "One side is missing and is shown as an empty virtual file for review. Save and backups are disabled for that side.",
     sideDirtyAria: (side: string) => `${side} file has unsaved changes`,
     sideSavedAria: (side: string) => `${side} file saved`,
     dirty: "Dirty",
@@ -489,6 +492,9 @@ export const FILE_COMPARE_TEXT = {
     left: "왼쪽",
     right: "오른쪽",
     noEditableSide: "편집 대상 없음",
+    missingFile: "없음",
+    missingSideNote:
+      "한쪽에 없는 파일은 검토용 빈 가상 문서로 표시합니다. 해당 쪽 저장과 백업은 비활성화됩니다.",
     sideDirtyAria: (side: string) => `${side} 파일 저장 안 됨`,
     sideSavedAria: (side: string) => `${side} 파일 저장됨`,
     dirty: "저장 안 됨",
@@ -579,7 +585,7 @@ export const FOLDER_COMPARE_TEXT = {
     size: "Size",
     modified: "Modified",
     kind: "Kind",
-    rowActionCompare: "Enter or double-click to compare files",
+    rowActionCompare: "Click or Enter to compare this file row",
     rowActionRevealLeft: "Enter or double-click to reveal the left file",
     rowActionRevealRight: "Enter or double-click to reveal the right file",
     rowActionToggle: "Enter or double-click to expand or collapse this folder",
@@ -591,7 +597,7 @@ export const FOLDER_COMPARE_TEXT = {
     detailsAria: "Selected item details",
     selected: "SELECTED",
     compare: "Compare",
-    compareUnavailable: "Only regular files present on both sides can open in 2-way compare.",
+    compareUnavailable: "Only regular file rows can open in 2-way compare.",
     shownTotal: (shown: number, total: number) =>
       `${shown.toLocaleString()} shown / ${total.toLocaleString()} total`,
     selectedStatus: (path: string, action: string) =>
@@ -645,7 +651,7 @@ export const FOLDER_COMPARE_TEXT = {
     size: "크기",
     modified: "수정 시각",
     kind: "종류",
-    rowActionCompare: "Enter 또는 더블 클릭으로 파일 비교",
+    rowActionCompare: "클릭 또는 Enter로 이 파일 행 비교",
     rowActionRevealLeft: "Enter 또는 더블 클릭으로 왼쪽 파일 위치 열기",
     rowActionRevealRight: "Enter 또는 더블 클릭으로 오른쪽 파일 위치 열기",
     rowActionToggle: "Enter 또는 더블 클릭으로 폴더 펼침/접기",
@@ -657,7 +663,7 @@ export const FOLDER_COMPARE_TEXT = {
     detailsAria: "선택 항목 세부 정보",
     selected: "선택됨",
     compare: "2-way 비교",
-    compareUnavailable: "양쪽에 있는 일반 파일만 2-way 비교로 열 수 있습니다.",
+    compareUnavailable: "일반 파일 행만 2-way 비교로 열 수 있습니다.",
     shownTotal: (shown: number, total: number) =>
       `${shown.toLocaleString()}개 표시 / ${total.toLocaleString()}개 전체`,
     selectedStatus: (path: string, action: string) =>

@@ -20,12 +20,17 @@ describe("demoFolderEntryCompareSession", () => {
     expect(session?.left.text).toContain("calculateTotal");
   });
 
-  it("does not create a compare session for one-sided entries", () => {
+  it("creates a compare session with a virtual missing side for one-sided entries", () => {
     const folder = demoFolderScanResult();
     const entry = folder.entries.find((item) => item.relativePath === "docs/guide.md");
 
     expect(entry).toBeDefined();
-    expect(demoFolderEntryCompareSession(entry!)).toBeNull();
+    const session = demoFolderEntryCompareSession(entry!);
+
+    expect(session?.left.text).toBe("left/docs/guide.md\n");
+    expect(session?.right.text).toBe("");
+    expect(session?.right.virtual).toEqual({ kind: "missing" });
+    expect(session?.right.path).toBe("/demo/right/docs/guide.md");
   });
 });
 
