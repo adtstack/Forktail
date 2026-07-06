@@ -62,6 +62,12 @@ import {
   isDemoMergePaths,
 } from "./core/samples";
 import {
+  compareSessionHasVirtualDocument,
+  folderExpectedPath,
+  isVirtualFileDocument,
+  virtualMissingFileDocument,
+} from "./core/virtualDocument";
+import {
   loadAppearanceSettings,
   loadActiveSession,
   loadFolderScanOptions,
@@ -218,8 +224,8 @@ export default function App() {
     setCompareSession(session);
     setSavedCompareText({ left: session.left.text, right: session.right.text });
     setCompareOutputVersion({
-      left: writePreconditionFromDocument(session.left),
-      right: writePreconditionFromDocument(session.right),
+      left: isVirtualFileDocument(session.left) ? null : writePreconditionFromDocument(session.left),
+      right: isVirtualFileDocument(session.right) ? null : writePreconditionFromDocument(session.right),
     });
     setCompareModelRevision((current) => current + 1);
   }, []);
@@ -237,6 +243,7 @@ export default function App() {
   const updateCompareSideText = useCallback((side: CompareSide, text: string) => {
     setCompareSession((current) => {
       if (!current || current[side].text === text) return current;
+      if (isVirtualFileDocument(current[side])) return current;
       return {
         ...current,
         [side]: fileDocumentWithText(current[side], text),
@@ -277,10 +284,12 @@ export default function App() {
       hasUnsavedCompareChanges(compareSession.right.text, savedCompareText.right));
   const compareDirtySides = {
     left: mode === "compare" && compareSession != null
-      ? hasUnsavedCompareChanges(compareSession.left.text, savedCompareText.left)
+      ? !isVirtualFileDocument(compareSession.left) &&
+        hasUnsavedCompareChanges(compareSession.left.text, savedCompareText.left)
       : false,
     right: mode === "compare" && compareSession != null
-      ? hasUnsavedCompareChanges(compareSession.right.text, savedCompareText.right)
+      ? !isVirtualFileDocument(compareSession.right) &&
+        hasUnsavedCompareChanges(compareSession.right.text, savedCompareText.right)
       : false,
   };
   const mergeHasUnsavedChanges =
@@ -301,8 +310,12 @@ export default function App() {
   const checkCompareFileVersions = useCallback(async (session = compareSession) => {
     if (!session || !isTauriRuntime()) return;
     const [leftResult, rightResult] = await Promise.allSettled([
-      statTextFileVersion(session.left.path),
-      statTextFileVersion(session.right.path),
+      isVirtualFileDocument(session.left)
+        ? Promise.resolve(null)
+        : statTextFileVersion(session.left.path),
+      isVirtualFileDocument(session.right)
+        ? Promise.resolve(null)
+        : statTextFileVersion(session.right.path),
     ]);
     const baselineSession = {
       ...session,
@@ -344,10 +357,10 @@ export default function App() {
   const reloadChangedCompareFiles = useCallback(() => run(async () => {
     if (!compareSession || !compareFileChangeNotice) return;
     const [left, right] = await Promise.all([
-      compareFileChangeNotice.leftChanged
+      compareFileChangeNotice.leftChanged && !isVirtualFileDocument(compareSession.left)
         ? readTextFile(compareSession.left.path)
         : Promise.resolve(compareSession.left),
-      compareFileChangeNotice.rightChanged
+      compareFileChangeNotice.rightChanged && !isVirtualFileDocument(compareSession.right)
         ? readTextFile(compareSession.right.path)
         : Promise.resolve(compareSession.right),
     ]);
@@ -586,6 +599,11 @@ export default function App() {
     if (!activeSessionStorageReady) return;
 
     if (mode === "compare" && compareSession) {
+      if (compareSessionHasVirtualDocument(compareSession)) {
+        saveActiveSession(null);
+        return;
+      }
+
       saveActiveSession({
         kind: "compare",
         leftPath: compareSession.left.path,
@@ -776,29 +794,60 @@ export default function App() {
   };
 
   const openFolderEntry = (entry: FolderEntry) => run(async () => {
-    if (!entry.leftPath || !entry.rightPath) {
-      throw new Error(appText.folderEntryNeedsBoth);
+    if (entry.status === "error" || entry.status === "typeMismatch") {
+      throw new Error(appText.folderEntryNeedsRegularFile);
     }
-    if (entry.left?.kind !== "file" || entry.right?.kind !== "file") {
+
+    const hasLeftFile = entry.leftPath != null && entry.left?.kind === "file";
+    const hasRightFile = entry.rightPath != null && entry.right?.kind === "file";
+    const hasNonFileEntry =
+      (entry.left != null && entry.left.kind !== "file") ||
+      (entry.right != null && entry.right.kind !== "file");
+
+    if (hasNonFileEntry || (!hasLeftFile && !hasRightFile)) {
       throw new Error(appText.regularFilesOnly);
     }
+
     if (folderResult && isDemoFolderRoots(folderResult.leftRoot, folderResult.rightRoot)) {
       const demoSession = demoFolderEntryCompareSession(entry);
       if (!demoSession) {
-        throw new Error(appText.regularFilesBoth);
+        throw new Error(appText.folderEntryNeedsRegularFile);
       }
       setCleanCompareSession(demoSession);
       setCompareBackTarget("folders");
       setMode("compare");
       return;
     }
+
+    if (!folderResult) {
+      throw new Error(appText.folderEntryNeedsRegularFile);
+    }
+
+    const leftPath = hasLeftFile ? entry.leftPath : null;
+    const rightPath = hasRightFile ? entry.rightPath : null;
+
     const [left, right] = await Promise.all([
-      readTextFile(entry.leftPath),
-      readTextFile(entry.rightPath),
+      leftPath
+        ? readTextFile(leftPath)
+        : Promise.resolve(
+            virtualMissingFileDocument(
+              folderExpectedPath(folderResult.leftRoot, entry.relativePath),
+            ),
+          ),
+      rightPath
+        ? readTextFile(rightPath)
+        : Promise.resolve(
+            virtualMissingFileDocument(
+              folderExpectedPath(folderResult.rightRoot, entry.relativePath),
+            ),
+          ),
     ]);
-    setCleanCompareSession({ left, right });
+    const session = { left, right };
+    setCleanCompareSession(session);
     setCompareBackTarget("folders");
-    rememberRecentSession({ kind: "compare", leftPath: entry.leftPath, rightPath: entry.rightPath });
+    if (!compareSessionHasVirtualDocument(session)) {
+      rememberRecentSession({ kind: "compare", leftPath: left.path, rightPath: right.path });
+    }
     setMode("compare");
   });
 
@@ -901,6 +950,10 @@ export default function App() {
   ) => run(async () => {
     if (!compareSession) return;
     const target = compareSession[side];
+    if (isVirtualFileDocument(target)) {
+      throw new Error(appText.virtualCompareSaveDisabled);
+    }
+
     let outputPath = forceSaveAs ? null : target.path;
     if (!outputPath) {
       outputPath = await chooseSavePath(target.path, appText.saveSideFile(side));
@@ -927,11 +980,13 @@ export default function App() {
     setCompareOutputVersion((current) => ({ ...current, [side]: saved.outputVersion }));
     setCompareFileChangeNotice(null);
     setSuppressedCompareFileChangeKey(null);
-    rememberRecentSession({
-      kind: "compare",
-      leftPath: saved.session.left.path,
-      rightPath: saved.session.right.path,
-    });
+    if (!compareSessionHasVirtualDocument(saved.session)) {
+      rememberRecentSession({
+        kind: "compare",
+        leftPath: saved.session.left.path,
+        rightPath: saved.session.right.path,
+      });
+    }
     setMessage(appText.sideSaved(side, written.backupPath));
   }), [appText, compareOutputVersion, compareSession, rememberRecentSession, run]);
 
@@ -950,6 +1005,10 @@ export default function App() {
   const showCompareBackups = useCallback((side: CompareSide) => run(async () => {
     if (!compareSession) return;
     const target = compareSession[side];
+    if (isVirtualFileDocument(target)) {
+      throw new Error(appText.virtualCompareSaveDisabled);
+    }
+
     const backups = await listFileBackups(target.path);
     setBackupDialog({
       kind: "compare",

@@ -46,6 +46,7 @@ import {
   writeClipboardText,
 } from "../core/pathCopy";
 import { loadCompareViewSettings, saveCompareViewSettings, type AppLanguage } from "../core/settings";
+import { isVirtualFileDocument } from "../core/virtualDocument";
 
 interface FileCompareViewProps {
   session: CompareSession;
@@ -138,12 +139,18 @@ export function FileCompareView({
 
   const binary = session.left.isBinary || session.right.isBinary;
   const navigation = diffNavigationState(activeHunk, hunkCount);
-  const activeDirty = editableSide === "none" ? false : dirtySides[editableSide];
-  const anyDirty = dirtySides.left || dirtySides.right;
+  const virtualSides = useMemo(() => ({
+    left: isVirtualFileDocument(session.left),
+    right: isVirtualFileDocument(session.right),
+  }), [session.left, session.right]);
+  const hasVirtualSide = virtualSides.left || virtualSides.right;
+  const activeVirtual = editableSide !== "none" && virtualSides[editableSide];
+  const activeDirty = editableSide === "none" || activeVirtual ? false : dirtySides[editableSide];
+  const anyDirty = (!virtualSides.left && dirtySides.left) || (!virtualSides.right && dirtySides.right);
   const activeSideLabel = editableSide === "left"
-    ? text.left
+    ? virtualSides.left ? `${text.left} (${text.missingFile})` : text.left
     : editableSide === "right"
-      ? text.right
+      ? virtualSides.right ? `${text.right} (${text.missingFile})` : text.right
       : text.readOnly;
   const newlineDifference = finalNewlineDifference(
     session.left.hadFinalNewline,
@@ -155,11 +162,14 @@ export function FileCompareView({
     [languageMode, session],
   );
   const activeChangedSide = activeChangedCompareSide(fileChangeNotice, editableSide);
-  const canApplyLeftToRight = !busy && !binary && editableSide === "right" && navigation.canMove;
-  const canApplyRightToLeft = !busy && !binary && editableSide === "left" && navigation.canMove;
+  const canApplyLeftToRight =
+    !busy && !binary && !hasVirtualSide && editableSide === "right" && navigation.canMove;
+  const canApplyRightToLeft =
+    !busy && !binary && !hasVirtualSide && editableSide === "left" && navigation.canMove;
   const canUndoHunkCopy =
     !busy &&
     !binary &&
+    !hasVirtualSide &&
     editableSide !== "none" &&
     hunkCopyUndo?.side === editableSide &&
     hunkCopyUndo.after === session[editableSide].text;
@@ -282,11 +292,13 @@ export function FileCompareView({
       return;
     }
     if (commandId === "saveAs") {
-      if (editableSide !== "none") onSaveSideAs(editableSide, viewSettings.saveLineEnding);
+      if (editableSide !== "none" && !virtualSides[editableSide]) {
+        onSaveSideAs(editableSide, viewSettings.saveLineEnding);
+      }
       return;
     }
     if (commandId === "save") {
-      if (editableSide !== "none" && dirtySides[editableSide]) {
+      if (editableSide !== "none" && !virtualSides[editableSide] && dirtySides[editableSide]) {
         onSaveSide(editableSide, viewSettings.saveLineEnding);
       }
       return;
@@ -306,6 +318,7 @@ export function FileCompareView({
     onSaveSide,
     onSaveSideAs,
     onSwap,
+    virtualSides,
     viewSettings.saveLineEnding,
   ]);
 
@@ -358,6 +371,12 @@ export function FileCompareView({
   useEffect(() => {
     editableSideRef.current = editableSide;
   }, [editableSide]);
+
+  useEffect(() => {
+    if (editableSide !== "none" && virtualSides[editableSide]) {
+      setEditableSide("none");
+    }
+  }, [editableSide, virtualSides]);
 
   useEffect(() => {
     onTextChangeRef.current = onTextChange;
@@ -550,8 +569,12 @@ export function FileCompareView({
               onChange={(event) => setEditableSide(event.target.value as CompareSide | "none")}
             >
               <option value="none">{text.readOnly}</option>
-              <option value="left">{text.left}</option>
-              <option value="right">{text.right}</option>
+              <option value="left" disabled={virtualSides.left}>
+                {virtualSides.left ? `${text.left} (${text.missingFile})` : text.left}
+              </option>
+              <option value="right" disabled={virtualSides.right}>
+                {virtualSides.right ? `${text.right} (${text.missingFile})` : text.right}
+              </option>
             </select>
           </label>
           <span
@@ -576,7 +599,7 @@ export function FileCompareView({
             onClick={() => {
               if (editableSide !== "none") onSaveSide(editableSide, viewSettings.saveLineEnding);
             }}
-            disabled={busy || binary || editableSide === "none" || !activeDirty}
+            disabled={busy || binary || editableSide === "none" || activeVirtual || !activeDirty}
             aria-keyshortcuts={commandAriaKeyshortcuts("save")}
           >
             {text.save}
@@ -586,7 +609,7 @@ export function FileCompareView({
             onClick={() => {
               if (editableSide !== "none") onSaveSideAs(editableSide, viewSettings.saveLineEnding);
             }}
-            disabled={busy || binary || editableSide === "none"}
+            disabled={busy || binary || editableSide === "none" || activeVirtual}
             aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
           >
             {text.saveAs}
@@ -596,7 +619,7 @@ export function FileCompareView({
             onClick={() => {
               if (editableSide !== "none") onShowBackups(editableSide);
             }}
-            disabled={busy || binary || editableSide === "none"}
+            disabled={busy || binary || editableSide === "none" || activeVirtual}
           >
             {text.backups}
           </button>
@@ -809,6 +832,11 @@ export function FileCompareView({
           {newlineDifferenceLabel}
         </div>
       )}
+      {hasVirtualSide && (
+        <div className="metadata-warning" role="status">
+          {text.missingSideNote}
+        </div>
+      )}
       {saveEncodingWarnings.length > 0 && (
         <div className="metadata-warning" role="status">
           {saveEncodingWarnings.map((warning) => (
@@ -864,16 +892,18 @@ export function FileCompareView({
 
       <footer className="status-bar">
         <span>
-          {session.left.encoding} · {session.left.lineEnding.toUpperCase()} ·{" "}
-          {finalNewlineLabel(session.left.hadFinalNewline, languageMode)} · {formatBytes(session.left.size)}
+          {formatFileStatus(session.left, text, languageMode)}
           {editableSide === "left" && <strong className="status-editing">{text.editing}</strong>}
-          {dirtySides.left && <strong className="status-dirty">{text.dirtyStatus}</strong>}
+          {!virtualSides.left && dirtySides.left && (
+            <strong className="status-dirty">{text.dirtyStatus}</strong>
+          )}
         </span>
         <span>
-          {session.right.encoding} · {session.right.lineEnding.toUpperCase()} ·{" "}
-          {finalNewlineLabel(session.right.hadFinalNewline, languageMode)} · {formatBytes(session.right.size)}
+          {formatFileStatus(session.right, text, languageMode)}
           {editableSide === "right" && <strong className="status-editing">{text.editing}</strong>}
-          {dirtySides.right && <strong className="status-dirty">{text.dirtyStatus}</strong>}
+          {!virtualSides.right && dirtySides.right && (
+            <strong className="status-dirty">{text.dirtyStatus}</strong>
+          )}
         </span>
       </footer>
     </main>
@@ -907,6 +937,8 @@ export function FileHeading({
   onDragLeave: (side: CompareDropSide, event: DragEvent<HTMLElement>) => void;
   onDrop: (side: CompareDropSide, event: DragEvent<HTMLElement>) => void;
 }) {
+  const missing = isVirtualFileDocument(document);
+
   return (
     <div
       className={`file-heading${dropActive ? " drop-active" : ""}`}
@@ -924,8 +956,9 @@ export function FileHeading({
         {text.copyPath}
       </button>
       <small>{path}</small>
-      {document.decodeHadErrors && <span className="warning-badge">{text.decodeLoss}</span>}
-      {!document.hadFinalNewline && <span className="warning-badge">{text.noFinalNewline}</span>}
+      {missing && <span className="warning-badge">{text.missingFile}</span>}
+      {!missing && document.decodeHadErrors && <span className="warning-badge">{text.decodeLoss}</span>}
+      {!missing && !document.hadFinalNewline && <span className="warning-badge">{text.noFinalNewline}</span>}
     </div>
   );
 }
@@ -945,6 +978,21 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function formatFileStatus(
+  document: CompareSession["left"],
+  text: (typeof FILE_COMPARE_TEXT)[AppLanguage],
+  languageMode: AppLanguage,
+): string {
+  if (isVirtualFileDocument(document)) {
+    return `${text.missingFile} · ${formatBytes(document.size)}`;
+  }
+
+  return `${document.encoding} · ${document.lineEnding.toUpperCase()} · ${finalNewlineLabel(
+    document.hadFinalNewline,
+    languageMode,
+  )} · ${formatBytes(document.size)}`;
 }
 
 function modelPath(

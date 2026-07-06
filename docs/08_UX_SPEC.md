@@ -45,8 +45,9 @@
 
 ### 행 행동
 
-- single click: 선택
-- Enter/double click: 양쪽 파일이면 compare
+- single click: 일반 파일이면 compare. 한쪽-only 파일은 반대쪽을 missing 가상 빈 문서로 열기
+- Enter: 선택된 일반 파일이면 compare
+- double click: 폴더이면 expand/collapse
 - Space: preview/action panel
 - context menu: compare, reveal, copy path, hash details
 

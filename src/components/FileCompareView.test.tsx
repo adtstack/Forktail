@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { CompareFileChangeNotice } from "../core/fileVersion";
 import { FILE_COMPARE_TEXT } from "../core/i18n";
 import type { CompareSession, FileDocument } from "../core/models";
+import { virtualMissingFileDocument } from "../core/virtualDocument";
 import { activeChangedCompareSide, FileCompareView, FileHeading } from "./FileCompareView";
 
 vi.mock("../monaco", () => ({
@@ -143,6 +144,18 @@ describe("FileCompareView TXT controls", () => {
     }, null, "Folder Results");
 
     expect(markup).toContain(">Folder Results</button>");
+  });
+
+  it("shows a virtual missing side without making it editable", () => {
+    const markup = renderCompareView({
+      left: { ...document, path: "demo/left.ts", name: "left.ts", text: "left\n" },
+      right: virtualMissingFileDocument("/demo/right/left.ts"),
+    });
+
+    expect(markup).toContain("Missing");
+    expect(markup).toContain("empty virtual file");
+    expect(markup).toContain("<option value=\"right\" disabled=\"\">Right (Missing)</option>");
+    expect(markup).toContain("Missing · 0 B");
   });
 
   it("shows final-newline and external-change recovery actions", () => {

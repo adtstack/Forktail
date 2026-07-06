@@ -6,6 +6,7 @@ import type {
   FsEntryMeta,
   MergeSession,
 } from "./models";
+import { folderExpectedPath, virtualMissingFileDocument } from "./virtualDocument";
 
 export const DEMO_FOLDER_LEFT_ROOT = "/demo/left";
 export const DEMO_FOLDER_RIGHT_ROOT = "/demo/right";
@@ -45,24 +46,38 @@ export function isDemoComparePaths(leftPath: string, rightPath: string): boolean
 }
 
 export function demoFolderEntryCompareSession(entry: FolderEntry): CompareSession | null {
-  if (!entry.leftPath || !entry.rightPath) return null;
-  if (entry.left?.kind !== "file" || entry.right?.kind !== "file") return null;
+  if (entry.status === "error" || entry.status === "typeMismatch") return null;
+
+  const hasLeftFile = entry.leftPath != null && entry.left?.kind === "file";
+  const hasRightFile = entry.rightPath != null && entry.right?.kind === "file";
+  const hasNonFileEntry =
+    (entry.left != null && entry.left.kind !== "file") ||
+    (entry.right != null && entry.right.kind !== "file");
+
+  if (hasNonFileEntry || (!hasLeftFile && !hasRightFile)) return null;
 
   if (entry.relativePath === "src/App.tsx") {
     return demoCompareSession();
   }
 
-  if (entry.relativePath === "README.md") {
+  const leftPath = hasLeftFile ? entry.leftPath : null;
+  const rightPath = hasRightFile ? entry.rightPath : null;
+
+  if (entry.relativePath === "README.md" && leftPath && rightPath) {
     const text = `# forktail\n\nLocal-first text and folder comparison.\n`;
     return {
-      left: document(entry.leftPath, text),
-      right: document(entry.rightPath, text),
+      left: document(leftPath, text),
+      right: document(rightPath, text),
     };
   }
 
   return {
-    left: document(entry.leftPath, `left/${entry.relativePath}\n`),
-    right: document(entry.rightPath, `right/${entry.relativePath}\n`),
+    left: leftPath
+      ? document(leftPath, `left/${entry.relativePath}\n`)
+      : virtualMissingFileDocument(folderExpectedPath(DEMO_FOLDER_LEFT_ROOT, entry.relativePath)),
+    right: rightPath
+      ? document(rightPath, `right/${entry.relativePath}\n`)
+      : virtualMissingFileDocument(folderExpectedPath(DEMO_FOLDER_RIGHT_ROOT, entry.relativePath)),
   };
 }
 
