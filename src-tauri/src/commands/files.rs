@@ -274,13 +274,7 @@ fn write_bytes_file_atomic_inner(
     };
 
     before_step(SaveStep::Replace)?;
-    temporary.persist(&target).map_err(|error| {
-        CommandError::io(
-            AppErrorCode::WriteFailed,
-            "최종 파일로 교체하지 못했습니다",
-            error.error,
-        )
-    })?;
+    replace_target(temporary, &target)?;
     before_step(SaveStep::ParentSync)?;
     let _ = sync_parent_directory(parent);
 
@@ -354,6 +348,156 @@ fn sync_parent_directory(parent: &Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn sync_parent_directory(_parent: &Path) -> std::io::Result<()> {
     Ok(())
+}
+
+/// Replace `target` with the prepared `temporary` file.
+///
+/// On Unix this delegates to `tempfile`'s `persist`, which is a single `rename(2)`
+/// and is atomic on the same filesystem.
+///
+/// On Windows the situation is different: `rename` cannot overwrite an existing
+/// file, so `tempfile`'s `persist` falls back to `MoveFileExW` with
+/// `MOVEFILE_REPLACE_EXISTING`. That works in the common case but can fail when
+/// the target is read-only, or when another process holds an exclusive handle
+/// (editor, antivirus, indexer). When the target exists and is read-only we
+/// temporarily clear the read-only attribute before the replace and restore the
+/// original attribute on the new file afterwards, so the user never loses data
+/// to a Windows permission quirk and the file's read-only intent is preserved.
+/// A locked file still surfaces as `WRITE_FAILED` — that is the safe outcome,
+/// because the original bytes are left untouched.
+fn replace_target(temporary: NamedTempFile, target: &Path) -> CommandResult<()> {
+    #[cfg(windows)]
+    {
+        return replace_target_windows(temporary, target);
+    }
+
+    #[cfg(not(windows))]
+    {
+        temporary.persist(target).map_err(|error| {
+            CommandError::io(
+                AppErrorCode::WriteFailed,
+                "최종 파일로 교체하지 못했습니다",
+                error.error,
+            )
+        })?;
+        Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn replace_target_windows(temporary: NamedTempFile, target: &Path) -> CommandResult<()> {
+    // Snapshot the read-only flag before replacing so we can restore it on the
+    // new file. If the target does not exist or attributes cannot be read we
+    // treat it as not read-only and proceed with the normal replace.
+    let was_readonly = target_exists_and_is_readonly(target);
+
+    if was_readonly {
+        // Clear read-only on the existing target so the replace can succeed.
+        // The temp file already inherits the target's permissions earlier in
+        // the pipeline, so we only need to flip this one attribute.
+        if let Some(code) = clear_readonly_attribute(target) {
+            return Err(CommandError::new(
+                AppErrorCode::PermissionDenied,
+                format!("파일이 읽기 전용입니다. 속성을 확인한 뒤 다시 저장하세요. (code {code})"),
+            ));
+        }
+    }
+
+    let persist_result = temporary.persist(target);
+    let outcome = persist_result.map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "최종 파일로 교체하지 못했습니다. 파일이 다른 프로그램에서 사용 중일 수 있습니다.",
+            error.error,
+        )
+    });
+
+    if was_readonly && outcome.is_ok() {
+        // Restore read-only on the freshly replaced file so the user's intent
+        // (a read-only file) is preserved across the save.
+        let _ = set_readonly_attribute(target);
+    }
+
+    outcome?;
+
+    Ok(())
+}
+
+#[cfg(windows)]
+fn target_exists_and_is_readonly(target: &Path) -> bool {
+    use windows::Win32::Storage::FileSystem::{FILE_ATTRIBUTE_READONLY, GetFileAttributesW};
+
+    let Some(wide) = to_wide_path(target) else {
+        return false;
+    };
+    // SAFETY: GetFileAttributesW reads file metadata. The wide string is a
+    // valid null-terminated UTF-16 path built from the target Path.
+    let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(wide.as_ptr())) };
+    if attrs == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES.0 {
+        return false;
+    }
+    (attrs & FILE_ATTRIBUTE_READONLY.0) != 0
+}
+
+#[cfg(windows)]
+fn clear_readonly_attribute(target: &Path) -> Option<u32> {
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_READONLY, GetFileAttributesW, SetFileAttributesW,
+    };
+
+    let Some(wide) = to_wide_path(target) else {
+        return Some(0);
+    };
+    let ptr = windows::core::PCWSTR(wide.as_ptr());
+    // SAFETY: GetFileAttributesW / SetFileAttributesW read/modify file
+    // metadata only; no memory aliasing concerns. The path is null-terminated.
+    let current = unsafe { GetFileAttributesW(ptr) };
+    if current == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES.0 {
+        return Some(0);
+    }
+    let cleared = current & !FILE_ATTRIBUTE_READONLY.0;
+    // SAFETY: as above.
+    let ok = unsafe {
+        SetFileAttributesW(
+            ptr,
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(cleared),
+        )
+    };
+    ok.is_err().then_some(cleared)
+}
+
+#[cfg(windows)]
+fn set_readonly_attribute(target: &Path) -> Option<u32> {
+    use windows::Win32::Storage::FileSystem::{
+        FILE_ATTRIBUTE_READONLY, GetFileAttributesW, SetFileAttributesW,
+    };
+
+    let Some(wide) = to_wide_path(target) else {
+        return Some(0);
+    };
+    let ptr = windows::core::PCWSTR(wide.as_ptr());
+    // SAFETY: same rationale as clear_readonly_attribute.
+    let current = unsafe { GetFileAttributesW(ptr) };
+    if current == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES.0 {
+        return Some(0);
+    }
+    let with_readonly = current | FILE_ATTRIBUTE_READONLY.0;
+    // SAFETY: as above.
+    let ok = unsafe {
+        SetFileAttributesW(
+            ptr,
+            windows::Win32::Storage::FileSystem::FILE_FLAGS_AND_ATTRIBUTES(with_readonly),
+        )
+    };
+    ok.is_err().then_some(with_readonly)
+}
+
+#[cfg(windows)]
+fn to_wide_path(path: &Path) -> Option<Vec<u16>> {
+    use std::os::windows::ffi::OsStrExt;
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.push(0);
+    Some(wide)
 }
 
 fn check_write_precondition(
@@ -1029,5 +1173,270 @@ mod tests {
         );
         assert_eq!(result.bytes_written, 6);
         assert_eq!(result.size, 6);
+    }
+
+    // ---------------------------------------------------------------------------
+    // SAV-007: Windows atomic replace safety.
+    //
+    // These tests only compile and run on Windows. They are executed in the
+    // GitHub Actions windows-2022 runner (see ci.yml). macOS/Linux cannot
+    // validate the Windows ReplaceFile/MoveFileEx path that forktail ships to
+    // Windows users, and the backlog explicitly forbids closing SAV-007 from a
+    // non-Windows run.
+    // ---------------------------------------------------------------------------
+
+    #[cfg(windows)]
+    #[test]
+    fn replaces_target_atomically_on_windows() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("windows-replace.txt");
+        fs::write(&target, "original").expect("write original");
+
+        write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "replacement".to_string(),
+            false,
+            None,
+            None,
+            None,
+        )
+        .expect("write succeeds");
+
+        assert_eq!(
+            fs::read_to_string(&target).expect("read written"),
+            "replacement"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn preserves_target_when_locked_by_another_handle_on_windows() {
+        // Open the target with a sharing mode that denies write, mimicking an
+        // editor or antivirus handle. The replace must fail and the original
+        // bytes must survive untouched.
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("locked.txt");
+        fs::write(&target, "original").expect("write original");
+
+        let _deny_write_handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ.0)
+            .open(&target)
+            .expect("open read-only handle that denies write");
+
+        let error = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "replacement".to_string(),
+            false,
+            None,
+            None,
+            None,
+        )
+        .expect_err("replace on locked file should fail");
+
+        assert!(
+            error.code == AppErrorCode::WriteFailed,
+            "expected WRITE_FAILED for locked file, got {:?}",
+            error.code
+        );
+        assert_eq!(
+            fs::read_to_string(&target).expect("read preserved target"),
+            "original",
+            "locked target must not be modified"
+        );
+        // _deny_write_handle dropped here, releasing the lock.
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn maps_locked_file_to_actionable_error_on_windows() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("locked-actionable.txt");
+        fs::write(&target, "original").expect("write original");
+
+        let _handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ.0)
+            .open(&target)
+            .expect("open handle");
+
+        let error = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "replacement".to_string(),
+            false,
+            None,
+            None,
+            None,
+        )
+        .expect_err("locked file should produce an error");
+
+        // The error message must point the user at "another program" rather
+        // than emitting a raw OS code.
+        assert!(
+            error.message.contains("다른 프로그램") || error.message.contains("사용 중"),
+            "expected actionable message about another program, got: {}",
+            error.message
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn rejects_readonly_target_with_clear_error_on_windows() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("readonly.txt");
+        fs::write(&target, "original").expect("write original");
+
+        // Mark the file read-only, then try to save. forktail should clear the
+        // attribute for the duration of the replace and restore it afterwards,
+        // so this save actually succeeds and the file remains read-only.
+        let mut perms = fs::metadata(&target).expect("metadata").permissions();
+        perms.set_readonly(true);
+        fs::set_permissions(&target, perms).expect("set readonly");
+
+        let result = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "replacement".to_string(),
+            false,
+            None,
+            None,
+            None,
+        );
+
+        // Two acceptable outcomes:
+        //  1. The save succeeds AND the target is read-only again afterwards
+        //     (forktail cleared + restored the attribute) — preferred path.
+        //  2. The save fails with PermissionDenied AND the target is untouched.
+        match result {
+            Ok(result) => {
+                assert_eq!(
+                    fs::read_to_string(&target).expect("read written"),
+                    "replacement"
+                );
+                assert!(
+                    fs::metadata(&target)
+                        .expect("metadata")
+                        .permissions()
+                        .readonly(),
+                    "read-only flag should be restored after a successful save"
+                );
+                let _ = result;
+            }
+            Err(error) => {
+                assert!(
+                    error.code == AppErrorCode::PermissionDenied
+                        || error.code == AppErrorCode::WriteFailed,
+                    "expected PERMISSION_DENIED or WRITE_FAILED for read-only target, got {:?}",
+                    error.code
+                );
+                assert_eq!(
+                    fs::read_to_string(&target).expect("read preserved target"),
+                    "original",
+                    "read-only target must not be modified on failure"
+                );
+            }
+        }
+
+        // Restore writability so tempdir cleanup works.
+        let mut perms = fs::metadata(&target).expect("metadata").permissions();
+        perms.set_readonly(false);
+        let _ = fs::set_permissions(&target, perms);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn keeps_backup_and_target_consistent_when_replace_fails_on_windows() {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows::Win32::Storage::FileSystem::FILE_SHARE_READ;
+
+        let directory = tempfile::tempdir().expect("temp dir");
+        let target = directory.path().join("backup-consistency.txt");
+        fs::write(&target, "original").expect("write original");
+
+        // Lock the target so the replace step fails AFTER the backup is created.
+        let _deny_write_handle = std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ.0)
+            .open(&target)
+            .expect("open deny-write handle");
+
+        let error = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "replacement".to_string(),
+            true, // create_backup = true
+            None,
+            None,
+            None,
+        )
+        .expect_err("replace should fail on locked file");
+
+        assert!(
+            error.code == AppErrorCode::WriteFailed,
+            "expected WRITE_FAILED, got {:?}",
+            error.code
+        );
+
+        // The original target must be byte-identical to what we started with.
+        assert_eq!(
+            fs::read_to_string(&target).expect("read preserved target"),
+            "original",
+            "target must be unchanged when replace fails"
+        );
+
+        // A backup must exist (created before the replace attempt) and contain
+        // the pre-save original bytes. This is the documented SAV-007 policy:
+        // a backup made before a failed replace is retained so the user can
+        // recover, while the live file is never corrupted.
+        let parent = target.parent().expect("parent dir");
+        let backup_prefix = "backup-consistency.txt.bak.";
+        let backups: Vec<_> = fs::read_dir(parent)
+            .expect("read dir")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.starts_with(backup_prefix))
+            .collect();
+        assert!(
+            !backups.is_empty(),
+            "a backup should have been created before the failed replace"
+        );
+        for backup_name in &backups {
+            let backup_bytes = fs::read_to_string(parent.join(backup_name)).expect("read backup");
+            assert_eq!(
+                backup_bytes, "original",
+                "backup must contain the pre-save original bytes"
+            );
+        }
+
+        // Restore writability for tempdir cleanup.
+        drop(_deny_write_handle);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn preserves_unicode_path_target_on_windows() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        // CJK + combining marks exercise UTF-16 path handling on Windows.
+        let target = directory.path().join("비교-ファイル.txt");
+        fs::write(&target, "원본").expect("write original");
+
+        write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "새 내용".to_string(),
+            false,
+            None,
+            None,
+            None,
+        )
+        .expect("write succeeds");
+
+        assert_eq!(
+            fs::read_to_string(&target).expect("read written"),
+            "새 내용"
+        );
     }
 }

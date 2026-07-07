@@ -22,6 +22,8 @@ describe("release workflow policy", () => {
     expect(actionRefs).toEqual([
       "actions/checkout@v4.2.2",
       "actions/setup-node@v4.4.0",
+      // SBOM/NOTICE upload in the validate job (REL-007).
+      "actions/upload-artifact@v4.6.2",
       "actions/checkout@v4.2.2",
       "actions/setup-node@v4.4.0",
       "actions/upload-artifact@v4.6.2",
