@@ -71,6 +71,86 @@ Notes:
 -
 ```
 
+## RTM-001 Results
+
+이 섹션은 실제 OS에서 RTM-001 runtime smoke를 실행한 결과를 기록하는 곳이다. 아래 템플릿을 각 OS별로 복사해서 채운다. 채워지지 않은 항목은 아직 해당 OS에서 smoke를 실행하지 않은 것이다.
+
+검증 순서:
+
+1. `npm run smoke:runtime:prepare` 로 fixture와 체크리스트를 생성한다.
+2. 출력된 fixture root의 `RUNTIME_SMOKE_CHECKLIST.md`를 따라 `npm run tauri dev` 또는 packaged app에서 단계를 수행한다.
+3. Save/Save As 후 `npm run smoke:runtime:verify -- <savedPath>` (또는 `--expect-changed-from <originalPath>`)로 파일이 디스크에 실제로 쓰였는지 확인한다.
+4. 아래 템플릿에 결과를 기록한다.
+
+### macOS
+
+```text
+Date:
+OS:            macOS
+Architecture:
+forktail version:
+Command:       npm run tauri dev | packaged .app
+Fixture manifest:
+
+2-way compare:    pass | fail | manual-not-run
+Folder compare:   pass | fail | manual-not-run
+3-way merge:      pass | fail | manual-not-run
+Save/Save As:     pass | fail | manual-not-run
+Backup on save:   pass | fail | manual-not-run
+Native menu:      pass | fail | manual-not-run
+Native reveal:    pass | fail | manual-not-run
+Drag and drop:    pass | fail | manual-not-run
+
+Notes:
+-
+```
+
+### Windows (CI 검증 또는 별도 환경)
+
+```text
+Date:
+OS:            Windows
+Architecture:
+forktail version:
+Build:         NSIS .exe
+Fixture manifest:
+
+2-way compare:    pass | fail | manual-not-run
+Folder compare:   pass | fail | manual-not-run
+3-way merge:      pass | fail | manual-not-run
+Save/Save As:     pass | fail | manual-not-run
+Backup on save:   pass | fail | manual-not-run
+Native menu:      pass | fail | manual-not-run
+Native reveal:    pass | fail | manual-not-run
+Drag and drop:    pass | fail | manual-not-run
+
+Notes:
+-
+```
+
+### Linux (CI 검증 또는 별도 환경)
+
+```text
+Date:
+OS:            Linux
+Architecture:
+forktail version:
+Build:         AppImage
+Fixture manifest:
+
+2-way compare:    pass | fail | manual-not-run
+Folder compare:   pass | fail | manual-not-run
+3-way merge:      pass | fail | manual-not-run
+Save/Save As:     pass | fail | manual-not-run
+Backup on save:   pass | fail | manual-not-run
+Native menu:      pass | fail | manual-not-run
+Native reveal:    pass | fail | manual-not-run
+Drag and drop:    pass | fail | manual-not-run
+
+Notes:
+-
+```
+
 ## 통과
 
 프로젝트 루트에서 다음 명령을 실행했다.

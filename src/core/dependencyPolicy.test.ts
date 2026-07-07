@@ -10,6 +10,7 @@ interface PackageManifest {
   private?: unknown;
   version?: unknown;
   license?: unknown;
+  scripts?: Record<string, string>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
 }
@@ -102,5 +103,24 @@ describe("JavaScript dependency policy", () => {
     }
 
     expect(failures).toEqual([]);
+  });
+
+  it("wires SBOM/NOTICE generation into the release pipeline (REL-007)", () => {
+    // The release workflow must generate and publish SBOM + NOTICE so that
+    // every published release carries a reproducible dependency inventory.
+    expect(npmPackage.scripts?.["sbom:generate"]).toBe(
+      "node scripts/generate-sbom.mjs",
+    );
+
+    // The release workflow references the SBOM step and uploads the artifacts.
+    const releaseWorkflow = readFileSync(
+      new URL("../../.github/workflows/release.yml", import.meta.url),
+      "utf8",
+    );
+    expect(releaseWorkflow).toContain("Generate SBOM and NOTICE artifacts (REL-007)");
+    expect(releaseWorkflow).toContain("npm run sbom:generate");
+    expect(releaseWorkflow).toContain("Upload SBOM artifacts");
+    // The draft release notes must disclose the SBOM/NOTICE files.
+    expect(releaseWorkflow).toContain("SBOM and NOTICE (REL-007)");
   });
 });

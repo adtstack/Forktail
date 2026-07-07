@@ -30,15 +30,27 @@ jobs:
       - run: npm run build
 
   rust:
-    name: Rust
-    runs-on: ubuntu-22.04
+    # SAV-007 requires the Windows atomic-replace path to be validated on
+    # Windows. macOS alone cannot close that gap. We keep a small matrix so the
+    # existing Ubuntu gate still runs and the Windows-only #[cfg(windows)]
+    # tests execute on a real Windows filesystem. fail-fast is disabled so a
+    # failure on one OS still surfaces results from the other.
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-22.04
+          - os: windows-2022
     defaults:
       run:
         working-directory: src-tauri
     steps:
       - uses: actions/checkout@v4
       - name: Install Tauri Linux dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \

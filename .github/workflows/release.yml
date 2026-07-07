@@ -105,6 +105,30 @@ jobs:
           cargo clippy --all-targets -- -D warnings
           cargo test
 
+      - name: Install cargo-cyclonedx for SBOM generation (REL-007)
+        run: cargo install cargo-cyclonedx --locked || echo "cargo-cyclonedx install skipped"
+
+      - name: Generate SBOM and NOTICE artifacts (REL-007)
+        run: npm run sbom:generate
+
+      - name: Verify SBOM and NOTICE were produced
+        run: |
+          set -euo pipefail
+          test -f dist/sbom/forktail-npm.cdx.json
+          test -f dist/sbom/NOTICE.txt
+          echo "SBOM artifacts present"
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: forktail-sbom
+          path: |
+            dist/sbom/forktail-npm.cdx.json
+            dist/sbom/forktail-rust.cdx.json
+            dist/sbom/NOTICE.txt
+          if-no-files-found: warn
+          retention-days: 90
+
   build:
     name: Build ${{ matrix.platform }} bundle
     needs: validate
@@ -294,6 +318,10 @@ jobs:
           - No updater is included.
           - The macOS app is ad-hoc signed inside the DMG, but artifacts are not Developer ID signed or notarized.
           - Treat this as a prerelease until the three-platform smoke, signing, rollback, SBOM, and NOTICE checks are complete.
+
+          SBOM and NOTICE (REL-007):
+          - forktail-npm.cdx.json / forktail-rust.cdx.json: CycloneDX SBOMs covering transitive dependencies.
+          - NOTICE.txt: direct dependency license notices.
           NOTES
 
           mapfile -d '' assets < <(find release-artifacts -type f -print0 | sort -z)

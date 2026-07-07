@@ -111,7 +111,7 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
-GitHub Actions는 frontend/Rust 검증을 먼저 실행한 뒤 macOS `.app`, Windows NSIS, Linux AppImage bundle을 플랫폼별 `.tar.gz` artifact로 묶고 `checksums.txt`와 함께 unsigned draft prerelease에 첨부한다. 코드 서명, notarization, SBOM/NOTICE, 세 OS clean smoke가 끝나기 전에는 stable release로 승격하지 않는다.
+GitHub Actions는 frontend/Rust 검증과 SBOM/NOTICE 생성을 먼저 실행한 뒤 macOS `.dmg`, Windows NSIS `.exe`, Linux `.AppImage` 산출물을 각 OS별로 빌드해 `checksums.txt`와 함께 unsigned draft prerelease에 첨부한다. 산출물은 Developer ID 서명이나 notarization을 거치지 않았으므로, macOS는 Gatekeeper, Windows는 SmartScreen 경고가 표시된다. 코드 서명, notarization, 세 OS clean smoke가 끝나기 전에는 stable release로 승격하지 않는다. 서명 상태와 공개 배포 시 필요한 추가 단계는 `docs/RELEASE_SIGNING_POLICY.md`를, M5 beta 배포 종료 조건은 `docs/BETA_CHECKLIST.md`를 참고한다.
 
 ## 검증 명령
 

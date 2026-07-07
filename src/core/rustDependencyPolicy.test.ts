@@ -19,6 +19,9 @@ const rustDependencyPolicy = {
   "tauri-plugin-dialog": "Apache-2.0 OR MIT",
   "tempfile": "MIT OR Apache-2.0",
   "thiserror": "MIT OR Apache-2.0",
+  // Windows-only target dependency used by the SAV-007 atomic-replace path.
+  // The `windows` crate is MIT OR Apache-2.0 and only compiled on cfg(windows).
+  "windows": "MIT OR Apache-2.0",
 } as const;
 
 const allowedLicenseExpressions = new Set<string>([
@@ -63,19 +66,22 @@ describe("Rust dependency policy", () => {
 });
 
 function directRustDependencyNames(text: string): string[] {
-  return [
-    ...sectionDependencyNames(text, "dependencies"),
-    ...sectionDependencyNames(text, "build-dependencies"),
-  ].sort();
+  const names = new Set<string>();
+  for (const found of text.matchAll(/^\[(?:[^\]]+\.)?(dependencies|build-dependencies)\]$/gm)) {
+    const section = found[1];
+    const header = found[0];
+    const start = found.index + header.length;
+    const rest = text.slice(start);
+    const end = rest.search(/^\[/m);
+    const body = end === -1 ? rest : rest.slice(0, end);
+    for (const name of sectionDependencyNamesFromBody(body)) {
+      names.add(name);
+    }
+  }
+  return [...names].sort();
 }
 
-function sectionDependencyNames(text: string, section: string): string[] {
-  const start = text.indexOf(`[${section}]`);
-  if (start === -1) return [];
-  const rest = text.slice(start + section.length + 2);
-  const end = rest.search(/^\[/m);
-  const body = end === -1 ? rest : rest.slice(0, end);
-
+function sectionDependencyNamesFromBody(body: string): string[] {
   return body
     .split("\n")
     .map((line) => line.trim())
