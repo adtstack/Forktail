@@ -11,8 +11,10 @@ pub use domain::git::{
     GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
     GitPathIdentity, GitRefKind, GitRefList, GitRepositoryIdentity, GitRepositoryRef,
     GitRepositorySummary, GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
-    GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason, GitTextMetadata,
-    GitTreeEntry, GitTreeEntryKind, GitTreeList,
+    GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason, GitStatusBranch,
+    GitStatusBranchState, GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot,
+    GitSubmoduleStatus, GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList,
+    GitUnmergedStatusEntry,
 };
 pub use domain::models::LineEnding;
 
@@ -40,6 +42,7 @@ pub fn run() {
             git_commands::list_git_refs,
             git_commands::list_git_tree,
             git_commands::list_git_changed_files,
+            git_commands::read_git_status,
             git_commands::read_git_blob,
             git_commands::open_git_revision_compare,
             git_commands::cancel_git_job,

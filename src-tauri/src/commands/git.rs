@@ -9,6 +9,7 @@ use crate::git::refs::{GitRefError, list_refs};
 use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
 use crate::git::revision::{GitRevisionError, resolve_revision};
 use crate::git::session::{GitSessionError, open_revision_compare};
+use crate::git::status::{GitStatusError, read_status};
 use crate::git::tree::{GitTreeError, list_tree};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -33,6 +34,13 @@ pub struct GitTreePathRequest {
 pub struct GitChangedFilesRequest {
     pub left_commit: crate::GitObjectId,
     pub right_commit: crate::GitObjectId,
+    pub hard_limit: usize,
+    pub request_generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatusRequest {
     pub hard_limit: usize,
     pub request_generation: u64,
 }
@@ -164,6 +172,30 @@ pub async fn list_git_changed_files(
             request.hard_limit,
             lease.cancellation(),
         )
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn read_git_status(
+    repository_session_id: String,
+    request: GitStatusRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitStatusSnapshot> {
+    let _ = request.request_generation;
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        read_status(&session, request.hard_limit, lease.cancellation())
     })
     .await
     .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
@@ -378,6 +410,32 @@ impl From<GitChangedFilesError> for CommandError {
             | GitChangedFilesError::DuplicatePath
             | GitChangedFilesError::StaleGeneration
             | GitChangedFilesError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
+impl From<GitStatusError> for CommandError {
+    fn from(error: GitStatusError) -> Self {
+        match error {
+            GitStatusError::Runner(error) => error.into(),
+            GitStatusError::OutputTooLarge => Self::git(AppErrorCode::GitOutputTooLarge),
+            GitStatusError::InvalidLimit
+            | GitStatusError::CommandFailed
+            | GitStatusError::TruncatedOutput
+            | GitStatusError::MissingBranch
+            | GitStatusError::DuplicateHeader
+            | GitStatusError::InvalidHeader
+            | GitStatusError::InvalidBranch
+            | GitStatusError::InvalidRecord
+            | GitStatusError::InvalidStatus
+            | GitStatusError::InvalidSubmodule
+            | GitStatusError::InvalidMode
+            | GitStatusError::InvalidObjectId
+            | GitStatusError::InvalidScore
+            | GitStatusError::MissingPath
+            | GitStatusError::InvalidPath
+            | GitStatusError::StateUnavailable
+            | GitStatusError::StaleGeneration => Self::git(AppErrorCode::GitCommandFailed),
         }
     }
 }
@@ -617,6 +675,31 @@ mod tests {
             let error = CommandError::from(source);
             assert_eq!(error.code, expected);
             assert!(!error.message.contains("R100"));
+            assert!(!error.message.contains("path bytes"));
+        }
+    }
+
+    #[test]
+    fn maps_status_failures_without_branch_or_path_details() {
+        let cases = [
+            (
+                GitStatusError::OutputTooLarge,
+                AppErrorCode::GitOutputTooLarge,
+            ),
+            (
+                GitStatusError::InvalidBranch,
+                AppErrorCode::GitCommandFailed,
+            ),
+            (GitStatusError::InvalidPath, AppErrorCode::GitCommandFailed),
+            (
+                GitStatusError::Runner(RunnerError::Cancelled),
+                AppErrorCode::GitCommandCancelled,
+            ),
+        ];
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("feature/private"));
             assert!(!error.message.contains("path bytes"));
         }
     }

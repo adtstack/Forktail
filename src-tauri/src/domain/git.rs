@@ -245,6 +245,97 @@ pub struct GitChangedFileList {
     pub generation: u64,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GitStatusBranchState {
+    Unborn {
+        display_name: String,
+    },
+    Detached {
+        object_id: GitObjectId,
+    },
+    Branch {
+        display_name: String,
+        object_id: GitObjectId,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatusBranch {
+    pub state: GitStatusBranchState,
+    pub upstream: Option<String>,
+    pub ahead: Option<u64>,
+    pub behind: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitStatusChangeKind {
+    Modified,
+    TypeChanged,
+    Added,
+    Deleted,
+    Renamed,
+    Copied,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitSubmoduleStatus {
+    pub is_submodule: bool,
+    pub commit_changed: bool,
+    pub tracked_changes: bool,
+    pub untracked_changes: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatusEntry {
+    pub change: GitStatusChangeKind,
+    pub path: GitPathIdentity,
+    pub original_path: Option<GitPathIdentity>,
+    pub similarity_score: Option<u8>,
+    pub submodule: GitSubmoduleStatus,
+    pub head_mode: Option<String>,
+    pub index_mode: Option<String>,
+    pub worktree_mode: Option<String>,
+    pub head_object_id: Option<GitObjectId>,
+    pub index_object_id: Option<GitObjectId>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitUnmergedStatusEntry {
+    pub conflict_code: String,
+    pub path: GitPathIdentity,
+    pub submodule: GitSubmoduleStatus,
+    pub stage1_mode: Option<String>,
+    pub stage2_mode: Option<String>,
+    pub stage3_mode: Option<String>,
+    pub worktree_mode: Option<String>,
+    pub stage1_object_id: Option<GitObjectId>,
+    pub stage2_object_id: Option<GitObjectId>,
+    pub stage3_object_id: Option<GitObjectId>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitStatusSnapshot {
+    pub branch: GitStatusBranch,
+    pub staged: Vec<GitStatusEntry>,
+    pub unstaged: Vec<GitStatusEntry>,
+    pub untracked: Vec<GitPathIdentity>,
+    pub unmerged: Vec<GitUnmergedStatusEntry>,
+    pub truncated: bool,
+    pub total_entries: u64,
+    pub generation: u64,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GitSnapshotOrigin {
@@ -608,8 +699,9 @@ mod tests {
         GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
         GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
         GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
-        GitSnapshotDocument, GitSnapshotOrigin, GitTextMetadata, GitTreeEntry, GitTreeEntryKind,
-        GitTreeList,
+        GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState,
+        GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus,
+        GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry,
     };
     use serde_json::json;
 
@@ -848,6 +940,135 @@ mod tests {
                 },
                 "truncated": false,
                 "generation": 3,
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_status_with_separate_index_worktree_and_unmerged_states() {
+        let clean_submodule = GitSubmoduleStatus {
+            is_submodule: false,
+            commit_changed: false,
+            tracked_changes: false,
+            untracked_changes: false,
+        };
+        let snapshot = GitStatusSnapshot {
+            branch: GitStatusBranch {
+                state: GitStatusBranchState::Branch {
+                    display_name: "main".to_string(),
+                    object_id: sha1('a'),
+                },
+                upstream: Some("origin/main".to_string()),
+                ahead: Some(2),
+                behind: Some(1),
+            },
+            staged: vec![GitStatusEntry {
+                change: GitStatusChangeKind::Renamed,
+                path: GitPathIdentity::new(
+                    "repository-session-1:path:4:1",
+                    "new.txt",
+                    Some("new.txt"),
+                ),
+                original_path: Some(GitPathIdentity::new(
+                    "repository-session-1:path:4:2",
+                    "old.txt",
+                    Some("old.txt"),
+                )),
+                similarity_score: Some(100),
+                submodule: clean_submodule,
+                head_mode: Some("100644".to_string()),
+                index_mode: Some("100644".to_string()),
+                worktree_mode: Some("100644".to_string()),
+                head_object_id: Some(sha1('b')),
+                index_object_id: Some(sha1('b')),
+            }],
+            unstaged: vec![],
+            untracked: vec![],
+            unmerged: vec![GitUnmergedStatusEntry {
+                conflict_code: "UU".to_string(),
+                path: GitPathIdentity::new(
+                    "repository-session-1:path:4:3",
+                    "conflict.txt",
+                    Some("conflict.txt"),
+                ),
+                submodule: clean_submodule,
+                stage1_mode: Some("100644".to_string()),
+                stage2_mode: Some("100644".to_string()),
+                stage3_mode: Some("100644".to_string()),
+                worktree_mode: Some("100644".to_string()),
+                stage1_object_id: Some(sha1('c')),
+                stage2_object_id: Some(sha1('d')),
+                stage3_object_id: Some(sha1('e')),
+            }],
+            truncated: false,
+            total_entries: 2,
+            generation: 4,
+        };
+
+        assert_eq!(
+            serde_json::to_value(snapshot).expect("serialize status snapshot"),
+            json!({
+                "branch": {
+                    "state": {
+                        "kind": "branch",
+                        "displayName": "main",
+                        "objectId": { "algorithm": "sha1", "hex": "a".repeat(40) },
+                    },
+                    "upstream": "origin/main",
+                    "ahead": 2,
+                    "behind": 1,
+                },
+                "staged": [{
+                    "change": "renamed",
+                    "path": {
+                        "opaqueId": "repository-session-1:path:4:1",
+                        "displayPath": "new.txt",
+                        "utf8Path": "new.txt",
+                    },
+                    "originalPath": {
+                        "opaqueId": "repository-session-1:path:4:2",
+                        "displayPath": "old.txt",
+                        "utf8Path": "old.txt",
+                    },
+                    "similarityScore": 100,
+                    "submodule": {
+                        "isSubmodule": false,
+                        "commitChanged": false,
+                        "trackedChanges": false,
+                        "untrackedChanges": false,
+                    },
+                    "headMode": "100644",
+                    "indexMode": "100644",
+                    "worktreeMode": "100644",
+                    "headObjectId": { "algorithm": "sha1", "hex": "b".repeat(40) },
+                    "indexObjectId": { "algorithm": "sha1", "hex": "b".repeat(40) },
+                }],
+                "unstaged": [],
+                "untracked": [],
+                "unmerged": [{
+                    "conflictCode": "UU",
+                    "path": {
+                        "opaqueId": "repository-session-1:path:4:3",
+                        "displayPath": "conflict.txt",
+                        "utf8Path": "conflict.txt",
+                    },
+                    "submodule": {
+                        "isSubmodule": false,
+                        "commitChanged": false,
+                        "trackedChanges": false,
+                        "untrackedChanges": false,
+                    },
+                    "stage1Mode": "100644",
+                    "stage2Mode": "100644",
+                    "stage3Mode": "100644",
+                    "worktreeMode": "100644",
+                    "stage1ObjectId": { "algorithm": "sha1", "hex": "c".repeat(40) },
+                    "stage2ObjectId": { "algorithm": "sha1", "hex": "d".repeat(40) },
+                    "stage3ObjectId": { "algorithm": "sha1", "hex": "e".repeat(40) },
+                }],
+                "truncated": false,
+                "totalEntries": 2,
+                "generation": 4,
             })
         );
     }

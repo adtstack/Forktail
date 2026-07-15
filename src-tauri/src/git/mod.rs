@@ -8,6 +8,7 @@ pub mod repository;
 pub mod revision;
 pub mod runner;
 pub mod session;
+pub mod status;
 pub mod tree;
 
 #[cfg(test)]

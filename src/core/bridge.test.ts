@@ -16,6 +16,7 @@ import {
   listGitChangedFiles,
   listGitRefs,
   openGitRevisionCompare,
+  readGitStatus,
   resolveGitRevision,
 } from "./bridge";
 import type { GitRevisionCompareRequest } from "./gitModels";
@@ -233,6 +234,38 @@ describe("Git changed-file bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 91,
+    });
+  });
+});
+
+describe("Git working-tree status bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("reads one bounded status snapshot with a stale-response generation", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({
+      staged: [],
+      unstaged: [],
+      untracked: [],
+      unmerged: [],
+      truncated: false,
+      totalEntries: 0,
+      generation: 5,
+    });
+    const request = { hardLimit: 10_000, requestGeneration: 22 };
+
+    await readGitStatus("repository-session-1", request, 92);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("read_git_status", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 92,
     });
   });
 });

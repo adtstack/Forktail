@@ -19,6 +19,8 @@ import type {
   GitRepositorySummary,
   GitRevision,
   GitRevisionCompareRequest,
+  GitStatusRequest,
+  GitStatusSnapshot,
 } from "./gitModels";
 
 declare global {
@@ -144,6 +146,19 @@ export async function listGitChangedFiles(
 ): Promise<GitChangedFileList> {
   requireTauri();
   return invoke<GitChangedFileList>("list_git_changed_files", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
+}
+
+export async function readGitStatus(
+  repositorySessionId: string,
+  request: GitStatusRequest,
+  jobId: number,
+): Promise<GitStatusSnapshot> {
+  requireTauri();
+  return invoke<GitStatusSnapshot>("read_git_status", {
     repositorySessionId,
     request,
     jobId,

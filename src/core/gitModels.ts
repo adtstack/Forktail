@@ -127,6 +127,75 @@ export interface GitChangedFilesRequest {
   requestGeneration: number;
 }
 
+export type GitStatusBranchState =
+  | { kind: "unborn"; displayName: string }
+  | { kind: "detached"; objectId: GitObjectId }
+  | { kind: "branch"; displayName: string; objectId: GitObjectId };
+
+export interface GitStatusBranch {
+  state: GitStatusBranchState;
+  upstream: string | null;
+  ahead: number | null;
+  behind: number | null;
+}
+
+export type GitStatusChangeKind =
+  | "modified"
+  | "typeChanged"
+  | "added"
+  | "deleted"
+  | "renamed"
+  | "copied";
+
+export interface GitSubmoduleStatus {
+  isSubmodule: boolean;
+  commitChanged: boolean;
+  trackedChanges: boolean;
+  untrackedChanges: boolean;
+}
+
+export interface GitStatusEntry {
+  change: GitStatusChangeKind;
+  path: GitPathIdentity;
+  originalPath: GitPathIdentity | null;
+  similarityScore: number | null;
+  submodule: GitSubmoduleStatus;
+  headMode: string | null;
+  indexMode: string | null;
+  worktreeMode: string | null;
+  headObjectId: GitObjectId | null;
+  indexObjectId: GitObjectId | null;
+}
+
+export interface GitUnmergedStatusEntry {
+  conflictCode: string;
+  path: GitPathIdentity;
+  submodule: GitSubmoduleStatus;
+  stage1Mode: string | null;
+  stage2Mode: string | null;
+  stage3Mode: string | null;
+  worktreeMode: string | null;
+  stage1ObjectId: GitObjectId | null;
+  stage2ObjectId: GitObjectId | null;
+  stage3ObjectId: GitObjectId | null;
+}
+
+export interface GitStatusSnapshot {
+  branch: GitStatusBranch;
+  staged: GitStatusEntry[];
+  unstaged: GitStatusEntry[];
+  untracked: GitPathIdentity[];
+  unmerged: GitUnmergedStatusEntry[];
+  truncated: boolean;
+  totalEntries: number;
+  generation: number;
+}
+
+export interface GitStatusRequest {
+  hardLimit: number;
+  requestGeneration: number;
+}
+
 export type GitSnapshotOrigin = "committedBlob" | "missing";
 export type GitSnapshotUnavailableReason = "objectMissingLocal";
 
