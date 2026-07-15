@@ -3,7 +3,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, Hash, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum GitObjectAlgorithm {
     Sha1,
@@ -24,7 +24,7 @@ pub enum GitObjectIdError {
     InvalidHex,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitObjectId {
     pub algorithm: GitObjectAlgorithm,
@@ -186,6 +186,10 @@ pub enum GitBlobContent {
     },
     Binary,
     TooLarge,
+    LfsPointer {
+        oid_sha256: String,
+        referenced_size: u64,
+    },
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -685,6 +689,24 @@ mod tests {
             .expect("serialize non-text blob");
             assert_eq!(value["content"]["kind"], kind);
         }
+
+        let lfs = serde_json::to_value(GitBlobDocument {
+            object_id: sha1('c'),
+            size: 127,
+            content: GitBlobContent::LfsPointer {
+                oid_sha256: "d".repeat(64),
+                referenced_size: 123_456,
+            },
+        })
+        .expect("serialize LFS pointer metadata");
+        assert_eq!(
+            lfs["content"],
+            json!({
+                "kind": "lfsPointer",
+                "oidSha256": "d".repeat(64),
+                "referencedSize": 123_456,
+            })
+        );
     }
 
     #[test]

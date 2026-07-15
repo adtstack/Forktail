@@ -5,6 +5,11 @@ import { extname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 import packageJson from "../../package.json";
 
+const gitRunnerSource = readFileSync(
+  new URL("../../src-tauri/src/git/runner.rs", import.meta.url),
+  "utf8",
+);
+
 interface PackageManifest {
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
@@ -76,6 +81,19 @@ describe("network and AI policy", () => {
 
     expect(runtimeText).not.toMatch(/\b(telemetry|analytics|Sentry|PostHog)\b/i);
     expect(runtimeText).not.toMatch(/\b(AI merge|LLM|prompt injection)\b/i);
+  });
+
+  it("keeps every raw Git blob read local and helper-free", () => {
+    expect(gitRunnerSource).toContain('"--no-lazy-fetch"');
+    expect(gitRunnerSource).toContain('(\"GIT_NO_LAZY_FETCH\", \"1\")');
+
+    const blobQueryStart = gitRunnerSource.indexOf("impl BlobQuery");
+    const blobQueryEnd = gitRunnerSource.indexOf("pub enum RefNamespace", blobQueryStart);
+    expect(blobQueryStart).toBeGreaterThanOrEqual(0);
+    expect(blobQueryEnd).toBeGreaterThan(blobQueryStart);
+    const blobQuerySource = gitRunnerSource.slice(blobQueryStart, blobQueryEnd);
+    expect(blobQuerySource).toContain('Self::Content => "blob"');
+    expect(blobQuerySource).not.toMatch(/--filters|--textconv|smudge|git-lfs|\blfs\b/i);
   });
 });
 

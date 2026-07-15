@@ -273,9 +273,9 @@ impl From<GitBlobError> for CommandError {
             GitBlobError::ObjectTypeUnsupported => {
                 Self::git(AppErrorCode::GitObjectTypeUnsupported)
             }
-            GitBlobError::InvalidOutput | GitBlobError::SizeMismatch { .. } => {
-                Self::git(AppErrorCode::GitCommandFailed)
-            }
+            GitBlobError::InvalidOutput
+            | GitBlobError::SizeMismatch { .. }
+            | GitBlobError::CacheUnavailable => Self::git(AppErrorCode::GitCommandFailed),
         }
     }
 }
@@ -457,6 +457,10 @@ mod tests {
                     expected: 4,
                     actual: 3,
                 },
+                AppErrorCode::GitCommandFailed,
+            ),
+            (
+                GitBlobError::CacheUnavailable,
                 AppErrorCode::GitCommandFailed,
             ),
         ];

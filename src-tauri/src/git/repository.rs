@@ -2,6 +2,7 @@ use crate::domain::git::{
     GitHeadState, GitObjectAlgorithm, GitObjectId, GitPathRegistry, GitRepositoryIdentity,
     GitRepositorySummary,
 };
+use crate::git::blob::GitBlobCache;
 use crate::git::executable::{GitExecutableError, ValidatedGitExecutable};
 use crate::git::runner::{
     CancellationToken, GitOperation, RepositoryQuery, RunnerError, RunnerOutput,
@@ -30,6 +31,7 @@ pub struct GitRepositorySession {
     identity: GitRepositoryIdentity,
     executable: ValidatedGitExecutable,
     paths: Mutex<GitPathRegistry>,
+    blob_cache: Mutex<GitBlobCache>,
 }
 
 impl GitRepositorySession {
@@ -73,6 +75,7 @@ impl GitRepositorySession {
             identity,
             executable,
             paths: Mutex::new(paths),
+            blob_cache: Mutex::new(GitBlobCache::default()),
         })
     }
 
@@ -90,6 +93,10 @@ impl GitRepositorySession {
 
     pub fn paths(&self) -> &Mutex<GitPathRegistry> {
         &self.paths
+    }
+
+    pub(crate) fn blob_cache(&self) -> &Mutex<GitBlobCache> {
+        &self.blob_cache
     }
 }
 

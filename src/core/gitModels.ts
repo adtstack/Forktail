@@ -71,7 +71,12 @@ export type GitBlobContent =
       decodeHadErrors: boolean;
     }
   | { kind: "binary" }
-  | { kind: "tooLarge" };
+  | { kind: "tooLarge" }
+  | {
+      kind: "lfsPointer";
+      oidSha256: string;
+      referencedSize: number;
+    };
 
 export interface GitBlobDocument {
   objectId: GitObjectId;

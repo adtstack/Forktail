@@ -160,12 +160,22 @@ describe("Git DTO contract", () => {
         size: 64 * 1024 * 1024 + 1,
         content: { kind: "tooLarge" },
       },
+      {
+        objectId: { algorithm: "sha1", hex: "d".repeat(40) },
+        size: 127,
+        content: {
+          kind: "lfsPointer",
+          oidSha256: "e".repeat(64),
+          referencedSize: 123456,
+        },
+      },
     ];
 
     expect(documents.map((document) => document.content.kind)).toEqual([
       "text",
       "binary",
       "tooLarge",
+      "lfsPointer",
     ]);
   });
 
