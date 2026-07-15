@@ -351,7 +351,7 @@ describe("FileCompareView TXT controls", () => {
     const markup = renderCompareView(session, null, "Repository review");
 
     expect(markup).toContain("GIT SNAPSHOT");
-    expect(markup).toContain("Committed snapshots are read-only");
+    expect(markup).toContain("Git snapshot inputs are read-only");
     expect(markup).toContain("main~1 (aaaaaaaaaaaa) · src/feature.ts");
     expect(markup).toContain(">Repository review</button>");
     expect(markup).toContain('data-original-editable="false"');
@@ -359,7 +359,7 @@ describe("FileCompareView TXT controls", () => {
     for (const label of ["Swap", "L -&gt; R", "R -&gt; L", "Undo hunk", "Save", "Save As", "Backups"]) {
       expect(buttonMarkup(markup, label)).toContain("disabled");
     }
-    expect(buttonMarkup(markup, "Export")).not.toContain("disabled");
+    expect(buttonMarkup(markup, "Save patch as")).not.toContain("disabled");
     expect(isFileCompareCommandAllowed(session, "save")).toBe(false);
     expect(isFileCompareCommandAllowed(session, "swapSides")).toBe(false);
   });

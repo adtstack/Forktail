@@ -1,4 +1,4 @@
-use crate::commands::files::{SaveStep, write_text_path_atomic_inner};
+use crate::commands::files::{AtomicTextWriteOptions, SaveStep, write_text_path_atomic_inner};
 use crate::domain::git::{
     GitConflictEncodingPolicy, GitConflictEntry, GitConflictLineEndingPolicy, GitConflictList,
     GitConflictOperation, GitConflictResultFingerprint, GitConflictResultKind,
@@ -181,10 +181,12 @@ where
     let written = write_text_path_atomic_inner(
         target.clone(),
         text,
-        input.create_backup,
-        expected_size,
-        expected_modified_ms,
-        encoding,
+        AtomicTextWriteOptions::new(
+            input.create_backup,
+            expected_size,
+            expected_modified_ms,
+            encoding,
+        ),
         |step| {
             let validation_step = match step {
                 SaveStep::BackupCopy => Some(ConflictSaveStep::BeforeBackupValidation),

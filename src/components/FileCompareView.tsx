@@ -21,6 +21,7 @@ import {
   type WhitespaceCompareMode,
 } from "../core/diffOptions";
 import { compareSessionCapabilities } from "../core/difftoolSession";
+import { gitSnapshotPatchAvailability } from "../core/gitSession";
 import {
   droppedFilePaths,
   paneDropRejectionMessage,
@@ -111,6 +112,9 @@ export function FileCompareView({
   const capabilities = compareSessionCapabilities(session);
   const difftoolSession = session.origin === "difftool";
   const gitSnapshotSession = session.origin === "git";
+  const exportAvailable = gitSnapshotSession
+    ? gitSnapshotPatchAvailability(session.snapshot).kind === "ready"
+    : capabilities.exportReport;
   const [viewSettings, setViewSettings] = useState(() => loadCompareViewSettings());
   const [editableSide, setEditableSide] = useState<CompareSide | "none">("none");
   const activeEditableSide = capabilities.edit ? editableSide : "none";
@@ -704,11 +708,11 @@ export function FileCompareView({
           <button
             className="command-button"
             onClick={() => {
-              if (capabilities.exportReport) onExportReport(viewSettings.diffOptions);
+              if (exportAvailable) onExportReport(viewSettings.diffOptions);
             }}
-            disabled={!capabilities.exportReport || busy || binary}
+            disabled={!exportAvailable || busy || binary}
           >
-            {text.export}
+            {gitSnapshotSession ? text.exportPatch : text.export}
           </button>
         </div>
         {difftoolSession && (

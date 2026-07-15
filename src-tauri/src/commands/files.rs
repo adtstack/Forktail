@@ -98,6 +98,33 @@ pub fn stat_text_file_version(path: String) -> CommandResult<FileVersion> {
 }
 
 #[tauri::command]
+pub fn stat_optional_text_file_version(path: String) -> CommandResult<Option<FileVersion>> {
+    let path_buf = PathBuf::from(&path);
+    let metadata = match fs::symlink_metadata(&path_buf) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => {
+            return Err(CommandError::io(
+                AppErrorCode::PathConflict,
+                "저장 대상 메타데이터를 확인하지 못했습니다",
+                error,
+            ));
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CommandError::new(
+            AppErrorCode::PathConflict,
+            "저장 대상이 일반 파일이 아닙니다. 다른 경로를 선택하세요.",
+        ));
+    }
+    Ok(Some(FileVersion {
+        path: path_buf.to_string_lossy().into_owned(),
+        size: metadata.len(),
+        modified_ms: modified_ms(&metadata),
+    }))
+}
+
+#[tauri::command]
 pub fn list_file_backups(path: String) -> CommandResult<Vec<FileBackup>> {
     let target = PathBuf::from(&path);
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
@@ -140,6 +167,7 @@ pub fn restore_text_file_backup(
         true,
         expected_size,
         expected_modified_ms,
+        false,
         |_| Ok(()),
     )
 }
@@ -156,50 +184,88 @@ pub fn write_text_file_atomic(
     write_text_file_atomic_inner(
         path,
         text,
-        create_backup,
-        expected_size,
-        expected_modified_ms,
-        encoding,
+        AtomicTextWriteOptions::new(create_backup, expected_size, expected_modified_ms, encoding),
         |_| Ok(()),
     )
 }
 
-pub(crate) fn write_text_file_atomic_inner(
+#[tauri::command]
+pub fn write_text_file_atomic_guarded(
     path: String,
     text: String,
     create_backup: bool,
     expected_size: Option<u64>,
     expected_modified_ms: Option<u64>,
     encoding: Option<String>,
+    expected_absent: bool,
+) -> CommandResult<WriteResult> {
+    let options =
+        AtomicTextWriteOptions::new(create_backup, expected_size, expected_modified_ms, encoding);
+    write_text_file_atomic_inner(
+        path,
+        text,
+        if expected_absent {
+            options.expect_absent()
+        } else {
+            options
+        },
+        |_| Ok(()),
+    )
+}
+
+pub(crate) struct AtomicTextWriteOptions {
+    create_backup: bool,
+    expected_size: Option<u64>,
+    expected_modified_ms: Option<u64>,
+    encoding: Option<String>,
+    expected_absent: bool,
+}
+
+impl AtomicTextWriteOptions {
+    pub(crate) fn new(
+        create_backup: bool,
+        expected_size: Option<u64>,
+        expected_modified_ms: Option<u64>,
+        encoding: Option<String>,
+    ) -> Self {
+        Self {
+            create_backup,
+            expected_size,
+            expected_modified_ms,
+            encoding,
+            expected_absent: false,
+        }
+    }
+
+    fn expect_absent(mut self) -> Self {
+        self.expected_absent = true;
+        self
+    }
+}
+
+pub(crate) fn write_text_file_atomic_inner(
+    path: String,
+    text: String,
+    options: AtomicTextWriteOptions,
     before_step: impl FnMut(SaveStep) -> CommandResult<()>,
 ) -> CommandResult<WriteResult> {
-    write_text_path_atomic_inner(
-        PathBuf::from(path),
-        text,
-        create_backup,
-        expected_size,
-        expected_modified_ms,
-        encoding,
-        before_step,
-    )
+    write_text_path_atomic_inner(PathBuf::from(path), text, options, before_step)
 }
 
 pub(crate) fn write_text_path_atomic_inner(
     path: PathBuf,
     text: String,
-    create_backup: bool,
-    expected_size: Option<u64>,
-    expected_modified_ms: Option<u64>,
-    encoding: Option<String>,
+    options: AtomicTextWriteOptions,
     before_step: impl FnMut(SaveStep) -> CommandResult<()>,
 ) -> CommandResult<WriteResult> {
-    let encoded_text = encode_text_for_save(&text, encoding.as_deref());
+    let encoded_text = encode_text_for_save(&text, options.encoding.as_deref());
     write_bytes_file_atomic_inner(
         path,
         &encoded_text,
-        create_backup,
-        expected_size,
-        expected_modified_ms,
+        options.create_backup,
+        options.expected_size,
+        options.expected_modified_ms,
+        options.expected_absent,
         before_step,
     )
 }
@@ -210,6 +276,7 @@ fn write_bytes_file_atomic_inner(
     create_backup: bool,
     expected_size: Option<u64>,
     expected_modified_ms: Option<u64>,
+    expected_absent: bool,
     mut before_step: impl FnMut(SaveStep) -> CommandResult<()>,
 ) -> CommandResult<WriteResult> {
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
@@ -220,7 +287,12 @@ fn write_bytes_file_atomic_inner(
         ));
     }
 
-    check_write_precondition(&target, expected_size, expected_modified_ms)?;
+    check_write_precondition(
+        &target,
+        expected_size,
+        expected_modified_ms,
+        expected_absent,
+    )?;
 
     before_step(SaveStep::TempCreate)?;
     let mut temporary = NamedTempFile::new_in(parent).map_err(|error| {
@@ -276,6 +348,13 @@ fn write_bytes_file_atomic_inner(
         )
     })?;
 
+    check_write_precondition(
+        &target,
+        expected_size,
+        expected_modified_ms,
+        expected_absent,
+    )?;
+
     let backup_path = if create_backup && target.exists() {
         let backup = next_backup_path(&target)?;
         before_step(SaveStep::BackupCopy)?;
@@ -287,7 +366,28 @@ fn write_bytes_file_atomic_inner(
     };
 
     before_step(SaveStep::Replace)?;
-    replace_target(temporary, &target)?;
+    check_write_precondition(
+        &target,
+        expected_size,
+        expected_modified_ms,
+        expected_absent,
+    )?;
+    if expected_absent {
+        temporary.persist_noclobber(&target).map_err(|error| {
+            let target_was_created = fs::symlink_metadata(&target).is_ok();
+            CommandError::io(
+                if target_was_created || error.error.kind() == std::io::ErrorKind::AlreadyExists {
+                    AppErrorCode::FileChanged
+                } else {
+                    AppErrorCode::WriteFailed
+                },
+                "새 저장 대상이 외부에서 생성되어 덮어쓰지 않았습니다",
+                error.error,
+            )
+        })?;
+    } else {
+        replace_target(temporary, &target)?;
+    }
     before_step(SaveStep::ParentSync)?;
     let _ = sync_parent_directory(parent);
 
@@ -517,11 +617,18 @@ fn check_write_precondition(
     target: &Path,
     expected_size: Option<u64>,
     expected_modified_ms: Option<u64>,
+    expected_absent: bool,
 ) -> CommandResult<()> {
+    if expected_absent && (expected_size.is_some() || expected_modified_ms.is_some()) {
+        return Err(CommandError::new(
+            AppErrorCode::PathConflict,
+            "존재하지 않는 저장 대상과 기존 파일 조건을 함께 사용할 수 없습니다.",
+        ));
+    }
     let metadata = match fs::symlink_metadata(target) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            if expected_size.is_none() && expected_modified_ms.is_none() {
+            if expected_absent || (expected_size.is_none() && expected_modified_ms.is_none()) {
                 return Ok(());
             }
             return Err(CommandError::new(
@@ -537,6 +644,12 @@ fn check_write_precondition(
             ));
         }
     };
+    if expected_absent {
+        return Err(CommandError::new(
+            AppErrorCode::FileChanged,
+            "다른 프로그램이 저장 대상을 만들었습니다. 다시 저장하세요.",
+        ));
+    }
     if metadata.file_type().is_symlink() || !metadata.is_file() {
         return Err(CommandError::new(
             if expected_size.is_none() && expected_modified_ms.is_none() {
@@ -967,10 +1080,7 @@ mod tests {
         let result = write_text_file_atomic_inner(
             target.to_string_lossy().into_owned(),
             "new file\n".to_string(),
-            true,
-            None,
-            None,
-            None,
+            AtomicTextWriteOptions::new(true, None, None, None),
             |step| {
                 if step == SaveStep::ParentSync {
                     parent_sync_attempted = true;
@@ -1042,10 +1152,7 @@ mod tests {
             let error = write_text_file_atomic_inner(
                 target.to_string_lossy().into_owned(),
                 "replacement".to_string(),
-                true,
-                None,
-                None,
-                None,
+                AtomicTextWriteOptions::new(true, None, None, None),
                 |step| {
                     if step == fault_step {
                         Err(CommandError::new(
@@ -1066,6 +1173,101 @@ mod tests {
                 "target changed after injected fault at {fault_step:?}"
             );
         }
+    }
+
+    #[test]
+    fn patch_save_as_guards_absence_and_never_changes_repository_sources() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let repository = directory.path().join("repository");
+        let git_dir = repository.join(".git");
+        fs::create_dir_all(&git_dir).expect("create repository fixture");
+        fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("write HEAD");
+        fs::write(git_dir.join("index"), b"index snapshot").expect("write index");
+        fs::write(git_dir.join("config"), "[core]\n\tbare = false\n").expect("write config");
+        fs::write(repository.join("tracked.txt"), "tracked source\n").expect("write tracked");
+        let source_before = [
+            fs::read(git_dir.join("HEAD")).expect("read HEAD"),
+            fs::read(git_dir.join("index")).expect("read index"),
+            fs::read(git_dir.join("config")).expect("read config"),
+            fs::read(repository.join("tracked.txt")).expect("read tracked"),
+        ];
+        let output = directory.path().join("review.patch");
+
+        assert!(
+            stat_optional_text_file_version(output.to_string_lossy().into_owned())
+                .expect("missing output is valid")
+                .is_none()
+        );
+        fs::write(&output, "created outside").expect("race creates target");
+        let error = write_text_file_atomic_guarded(
+            output.to_string_lossy().into_owned(),
+            "patch output".to_string(),
+            true,
+            None,
+            None,
+            Some("UTF-8".to_string()),
+            true,
+        )
+        .expect_err("newly created target must fail the absent precondition");
+
+        assert_eq!(error.code, AppErrorCode::FileChanged);
+        assert_eq!(
+            fs::read_to_string(&output).expect("read output"),
+            "created outside"
+        );
+        assert_eq!(
+            source_before,
+            [
+                fs::read(git_dir.join("HEAD")).expect("read HEAD after"),
+                fs::read(git_dir.join("index")).expect("read index after"),
+                fs::read(git_dir.join("config")).expect("read config after"),
+                fs::read(repository.join("tracked.txt")).expect("read tracked after"),
+            ]
+        );
+    }
+
+    #[test]
+    fn patch_save_as_fault_preserves_existing_output_and_repository_sources() {
+        let directory = tempfile::tempdir().expect("temp dir");
+        let repository_source = directory.path().join("tracked.txt");
+        let output = directory.path().join("review.patch");
+        fs::write(&repository_source, "repository bytes").expect("write repository source");
+        fs::write(&output, "previous patch").expect("write previous output");
+        let version = stat_optional_text_file_version(output.to_string_lossy().into_owned())
+            .expect("stat output")
+            .expect("output exists");
+
+        let error = write_text_file_atomic_inner(
+            output.to_string_lossy().into_owned(),
+            "replacement patch".to_string(),
+            AtomicTextWriteOptions::new(
+                true,
+                Some(version.size),
+                version.modified_ms,
+                Some("UTF-8".to_string()),
+            ),
+            |step| {
+                if step == SaveStep::Replace {
+                    Err(CommandError::new(
+                        AppErrorCode::WriteFailed,
+                        "injected patch output fault",
+                    ))
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .expect_err("injected patch output fault should fail");
+
+        assert_eq!(error.code, AppErrorCode::WriteFailed);
+        assert_eq!(
+            fs::read_to_string(&output).expect("read output"),
+            "previous patch"
+        );
+        assert_eq!(
+            fs::read_to_string(&repository_source).expect("read repository source"),
+            "repository bytes"
+        );
     }
 
     #[test]

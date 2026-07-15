@@ -156,6 +156,8 @@ export const APP_TEXT = {
       `${side === "left" ? "Left" : "Right"} ${backupPath ? `Saved · backup: ${backupPath}` : "Saved"}`,
     saveDiffReport: "Save Diff Report",
     reportSaved: (path: string) => `Report saved: ${path}`,
+    saveGitPatch: "Save Git Snapshot Patch",
+    gitPatchSaved: (path: string) => `Git snapshot patch saved: ${path}`,
     sideFileBackups: (side: CompareSide) =>
       `${side === "left" ? "Left" : "Right"} File Backups`,
     saveMergeResult: "Save Merge Result",
@@ -224,6 +226,8 @@ export const APP_TEXT = {
       `${side === "left" ? "왼쪽" : "오른쪽"} ${backupPath ? `저장 완료 · 백업: ${backupPath}` : "저장 완료"}`,
     saveDiffReport: "Diff 리포트 저장",
     reportSaved: (path: string) => `리포트 저장 완료: ${path}`,
+    saveGitPatch: "Git snapshot patch 저장",
+    gitPatchSaved: (path: string) => `Git snapshot patch 저장 완료: ${path}`,
     sideFileBackups: (side: CompareSide) =>
       `${side === "left" ? "왼쪽" : "오른쪽"} 파일 백업`,
     saveMergeResult: "병합 결과 저장",
@@ -495,9 +499,9 @@ export const FILE_COMPARE_TEXT = {
     difftoolReadOnlyNote:
       "Git difftool inputs are temporary read-only snapshots. Export is available; editing, saving, swapping, and replacing inputs are disabled.",
     gitSnapshot: "GIT SNAPSHOT",
-    gitSnapshotSessionAria: "Committed Git snapshot compare",
+    gitSnapshotSessionAria: "Read-only Git snapshot compare",
     gitSnapshotReadOnlyNote:
-      "Committed snapshots are read-only. Export is available; editing, saving, swapping, and replacing inputs are disabled.",
+      "Git snapshot inputs are read-only. Patch Save As exports exact snapshot text as UTF-8 and does not change the repository; editing, saving, swapping, and replacing inputs are disabled.",
     swap: "Swap",
     changeNavigationAria: "Change navigation",
     previousChange: "Prev",
@@ -531,6 +535,7 @@ export const FILE_COMPARE_TEXT = {
     saveAs: "Save As",
     backups: "Backups",
     export: "Export",
+    exportPatch: "Save patch as",
     languageAria: (language: string) => `Language: ${language}`,
     compareOptionsAria: "Compare options",
     sideBySide: "Side by side",
@@ -571,9 +576,9 @@ export const FILE_COMPARE_TEXT = {
     difftoolReadOnlyNote:
       "Git difftool 입력은 임시 읽기 전용 snapshot입니다. 리포트 저장만 가능하며 편집, 저장, 좌우 교환, 입력 교체는 비활성화됩니다.",
     gitSnapshot: "GIT SNAPSHOT",
-    gitSnapshotSessionAria: "commit된 Git snapshot 비교",
+    gitSnapshotSessionAria: "읽기 전용 Git snapshot 비교",
     gitSnapshotReadOnlyNote:
-      "Commit된 snapshot은 읽기 전용입니다. 리포트 저장만 가능하며 편집, 저장, 좌우 교환, 입력 교체는 비활성화됩니다.",
+      "Git snapshot 입력은 읽기 전용입니다. patch 다른 이름으로 저장은 정확한 snapshot 텍스트를 UTF-8로 내보내며 저장소를 변경하지 않습니다. 편집, 저장, 좌우 교환, 입력 교체는 비활성화됩니다.",
     swap: "좌우 교환",
     changeNavigationAria: "변경 탐색",
     previousChange: "이전 변경",
@@ -607,6 +612,7 @@ export const FILE_COMPARE_TEXT = {
     saveAs: "다른 이름으로 저장",
     backups: "백업 복원",
     export: "리포트 저장",
+    exportPatch: "patch 다른 이름으로 저장",
     languageAria: (language: string) => `언어: ${language}`,
     compareOptionsAria: "비교 옵션",
     sideBySide: "나란히",

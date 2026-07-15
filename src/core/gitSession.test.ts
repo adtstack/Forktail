@@ -14,6 +14,7 @@ import {
   adaptGitCompareSession,
   adaptGitConflictSession,
   adaptGitMergePreview,
+  gitSnapshotPatchAvailability,
   keepsGitRepositorySession,
 } from "./gitSession";
 import { persistentCompareSessionInput } from "./settings";
@@ -303,6 +304,27 @@ describe("Git compare session adapter", () => {
       "left",
     )).toBeNull();
     expect(fileDocumentVersionChanged(adapted.session.left, null)).toBe(false);
+  });
+
+  it("enables patch export only for immutable text-or-missing snapshot contracts", () => {
+    const ready = gitSession(
+      snapshot({ kind: "text", text: "left" }, "left"),
+      snapshot({ kind: "missing" }, "right"),
+    );
+    expect(gitSnapshotPatchAvailability(ready)).toEqual({ kind: "ready" });
+
+    expect(gitSnapshotPatchAvailability({
+      ...ready,
+      left: { ...ready.left, readOnly: false },
+    })).toEqual({ kind: "blocked", reason: "mutableContract" });
+    expect(gitSnapshotPatchAvailability({
+      ...ready,
+      capabilities: { ...ready.capabilities, exportPatch: false },
+    })).toEqual({ kind: "blocked", reason: "backendDisabled" });
+    expect(gitSnapshotPatchAvailability({
+      ...ready,
+      right: snapshot({ kind: "binary" }, "right"),
+    })).toEqual({ kind: "blocked", reason: "unsupportedContent" });
   });
 });
 

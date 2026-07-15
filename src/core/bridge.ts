@@ -292,6 +292,11 @@ export async function statTextFileVersion(path: string): Promise<FileVersion> {
   return invoke<FileVersion>("stat_text_file_version", { path });
 }
 
+export async function statOptionalTextFileVersion(path: string): Promise<FileVersion | null> {
+  requireTauri();
+  return invoke<FileVersion | null>("stat_optional_text_file_version", { path });
+}
+
 export async function listFileBackups(path: string): Promise<FileBackup[]> {
   requireTauri();
   return invoke<FileBackup[]>("list_file_backups", { path });
@@ -357,14 +362,19 @@ export async function writeTextFileAtomic(
   createBackup = true,
   precondition: WritePrecondition | null = null,
   encoding: string | null = null,
+  expectedAbsent = false,
 ): Promise<WriteResult> {
   requireTauri();
-  return invoke<WriteResult>("write_text_file_atomic", {
-    path,
-    text,
-    createBackup,
-    expectedSize: precondition?.expectedSize ?? null,
-    expectedModifiedMs: precondition?.expectedModifiedMs ?? null,
-    encoding,
-  });
+  return invoke<WriteResult>(
+    expectedAbsent ? "write_text_file_atomic_guarded" : "write_text_file_atomic",
+    {
+      path,
+      text,
+      createBackup,
+      expectedSize: precondition?.expectedSize ?? null,
+      expectedModifiedMs: precondition?.expectedModifiedMs ?? null,
+      encoding,
+      ...(expectedAbsent ? { expectedAbsent: true } : {}),
+    },
+  );
 }

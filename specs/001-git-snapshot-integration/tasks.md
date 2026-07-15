@@ -168,13 +168,13 @@
 
 - [X] T060 [US5] GIT-606 10k/100k tree virtualization, fuzzy search, different-path, opaque identity, cancel/stale와 10k 입력의 100ms UI stall budget benchmark를 `src/components/GitTreePicker.test.tsx`와 `src-tauri/src/git/tree.rs`에 먼저 추가한다
 - [X] T061 [P] [US5] GIT-607 viewed reducer/filter-count/revision-reset/next-unviewed/privacy retention 테스트를 `src/core/gitReview.test.ts`와 `src/core/settings.test.ts`에 먼저 추가한다
-- [ ] T062 [US5] GIT-608 modified/added/deleted/rename/no-final-newline exact patch와 Save As fault/cancel/mutation 테스트를 `src/core/diffReport.test.ts`, `src/core/gitSession.test.ts`, `src-tauri/src/commands/files.rs`에 먼저 추가한다
+- [X] T062 [US5] GIT-608 modified/added/deleted/rename/no-final-newline exact patch와 Save As fault/cancel/mutation 테스트를 `src/core/diffReport.test.ts`, `src/core/gitSession.test.ts`, `src-tauri/src/commands/files.rs`에 먼저 추가한다
 
 ### Implementation for User Story 5
 
 - [X] T063 [US5] GIT-606 lazy/batched tracked-tree picker와 different-path session mapping을 `src/components/GitTreePicker.tsx`, `src/components/GitCompareView.tsx`, `src-tauri/src/git/tree.rs`에 구현한다
 - [X] T064 [US5] GIT-607 session-local viewed queue와 keyboard next-unviewed를 `src/core/gitReview.ts`, `src/components/GitChangedFiles.tsx`, `src/components/GitCompareView.tsx`에 구현한다
-- [ ] T065 [US5] GIT-608 immutable snapshot unified patch Save As를 `src/core/diffReport.ts`, `src/core/gitSession.ts`, `src/components/GitCompareView.tsx`, `src/core/bridge.ts`에 구현한다
+- [X] T065 [US5] GIT-608 immutable snapshot unified patch Save As를 `src/core/diffReport.ts`, `src/core/gitSession.ts`, `src/components/FileCompareView.tsx`, `src/core/bridge.ts`에 구현한다
 
 **Checkpoint**: review state는 metadata-only이며 patch output 외 source state는 바뀌지 않는다.
 

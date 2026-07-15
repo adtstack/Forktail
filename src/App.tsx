@@ -36,6 +36,7 @@ import {
   saveGitConflictResult,
   scanDirectories,
   statTextFileVersion,
+  statOptionalTextFileVersion,
   startupArgs,
   writeTextFileAtomic,
 } from "./core/bridge";
@@ -91,7 +92,11 @@ import {
   markGitReviewViewed,
   scopeGitReviewState,
 } from "./core/gitReview";
-import { buildDiffReport, compareReportDefaultPath } from "./core/diffReport";
+import {
+  buildDiffReport,
+  compareReportDefaultPath,
+  saveGitSnapshotPatchAs,
+} from "./core/diffReport";
 import type { CompareDropSide } from "./core/dropPaths";
 import {
   APP_COMMAND_EVENT,
@@ -2347,6 +2352,24 @@ export default function App() {
 
   const exportCompareReport = useCallback((options: TextDiffOptions) => run(async () => {
     if (!compareSession) return;
+    if (compareSession.origin === "git") {
+      const result = await saveGitSnapshotPatchAs(compareSession, {
+        chooseOutputPath: (defaultPath) => chooseSavePath(defaultPath, appText.saveGitPatch),
+        inspectOutput: statOptionalTextFileVersion,
+        writeOutput: ({ path, text, precondition, expectedAbsent }) => writeTextFileAtomic(
+          path,
+          text,
+          true,
+          precondition,
+          "UTF-8",
+          expectedAbsent,
+        ),
+      });
+      if (result.kind === "saved") {
+        setMessage(appText.gitPatchSaved(result.writeResult.path));
+      }
+      return;
+    }
     const outputPath = await chooseSavePath(
       compareReportDefaultPath(compareSession),
       appText.saveDiffReport,

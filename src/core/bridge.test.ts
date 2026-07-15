@@ -26,6 +26,8 @@ import {
   readGitStatus,
   resolveGitRevision,
   saveGitConflictResult,
+  statOptionalTextFileVersion,
+  writeTextFileAtomic,
 } from "./bridge";
 import type { GitRevisionCompareRequest } from "./gitModels";
 
@@ -128,6 +130,44 @@ describe("Git revision compare bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 73,
+    });
+  });
+});
+
+describe("guarded patch output bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("inspects an optional output and requests no-clobber creation when it was absent", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValueOnce(null).mockResolvedValueOnce({ path: "/exports/review.patch" });
+
+    await expect(statOptionalTextFileVersion("/exports/review.patch")).resolves.toBeNull();
+    await writeTextFileAtomic(
+      "/exports/review.patch",
+      "patch\n",
+      true,
+      null,
+      "UTF-8",
+      true,
+    );
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "stat_optional_text_file_version", {
+      path: "/exports/review.patch",
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "write_text_file_atomic_guarded", {
+      path: "/exports/review.patch",
+      text: "patch\n",
+      createBackup: true,
+      expectedSize: null,
+      expectedModifiedMs: null,
+      encoding: "UTF-8",
+      expectedAbsent: true,
     });
   });
 });

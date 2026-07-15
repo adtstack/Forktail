@@ -509,15 +509,41 @@ export type GitCompareViewState =
       unavailableReasons: GitSnapshotUnavailableReason[];
     };
 
+export type GitSnapshotPatchAvailability =
+  | { kind: "ready" }
+  | {
+      kind: "blocked";
+      reason: "mutableContract" | "backendDisabled" | "unsupportedContent";
+    };
+
+export function gitSnapshotPatchAvailability(
+  session: GitCompareSession,
+): GitSnapshotPatchAvailability {
+  if (
+    !session.left.readOnly
+    || !session.right.readOnly
+    || session.capabilities.edit
+    || session.capabilities.save
+    || session.capabilities.hunkCopy
+  ) {
+    return { kind: "blocked", reason: "mutableContract" };
+  }
+  if (!session.capabilities.exportPatch) {
+    return { kind: "blocked", reason: "backendDisabled" };
+  }
+  const supported = [session.left, session.right].every((document) =>
+    document.contentState.kind === "missing"
+      ? document.origin === "missing"
+      : document.contentState.kind === "text" && document.textMetadata !== null);
+  return supported
+    ? { kind: "ready" }
+    : { kind: "blocked", reason: "unsupportedContent" };
+}
+
 export function adaptGitCompareSession(session: GitCompareSession): GitCompareViewState {
   const left = gitSnapshotFileDocument(session.left);
   const right = gitSnapshotFileDocument(session.right);
-  const validReadOnlyContract = session.left.readOnly
-    && session.right.readOnly
-    && !session.capabilities.edit
-    && !session.capabilities.save
-    && !session.capabilities.hunkCopy
-    && session.capabilities.exportPatch;
+  const validReadOnlyContract = gitSnapshotPatchAvailability(session).kind === "ready";
 
   if (!left || !right || !validReadOnlyContract) {
     return {
