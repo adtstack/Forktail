@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   GitHeadState,
   GitBlobDocument,
+  GitChangedFileList,
   GitObjectId,
   GitPathIdentity,
   GitRefList,
@@ -177,6 +178,54 @@ describe("Git DTO contract", () => {
       "tooLarge",
       "lfsPointer",
     ]);
+  });
+
+  it("keeps changed-file status, one-sided paths, scores, counts, and generation explicit", () => {
+    const changedFiles: GitChangedFileList = {
+      entries: [
+        {
+          status: "renamed",
+          oldPath: {
+            opaqueId: "repository-session-1:path:4:1",
+            displayPath: "old name.ts",
+            utf8Path: "old name.ts",
+          },
+          newPath: {
+            opaqueId: "repository-session-1:path:4:2",
+            displayPath: "new name.ts",
+            utf8Path: "new name.ts",
+          },
+          similarityScore: 87,
+        },
+        {
+          status: "added",
+          oldPath: null,
+          newPath: {
+            opaqueId: "repository-session-1:path:4:3",
+            displayPath: "added.ts",
+            utf8Path: "added.ts",
+          },
+          similarityScore: null,
+        },
+      ],
+      counts: {
+        added: 1,
+        deleted: 0,
+        modified: 0,
+        typeChanged: 0,
+        renamed: 1,
+        copied: 0,
+        unmerged: 0,
+        unknown: 0,
+        total: 2,
+      },
+      truncated: false,
+      generation: 4,
+    };
+
+    expect(changedFiles.entries[0]?.similarityScore).toBe(87);
+    expect(changedFiles.entries[1]?.oldPath).toBeNull();
+    expect(changedFiles.counts.total).toBe(2);
   });
 
   it("keeps every head-state variant explicit", () => {

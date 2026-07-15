@@ -6,10 +6,11 @@ mod menu;
 mod text;
 
 pub use domain::git::{
-    GitBlobContent, GitBlobDocument, GitHeadState, GitObjectAlgorithm, GitObjectId,
-    GitObjectIdError, GitObjectType, GitPathIdentity, GitRefKind, GitRefList,
-    GitRepositoryIdentity, GitRepositoryRef, GitRepositorySummary, GitRevision, GitRevisionKind,
-    GitTreeEntry, GitTreeEntryKind, GitTreeList,
+    GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
+    GitChangedFileStatus, GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError,
+    GitObjectType, GitPathIdentity, GitRefKind, GitRefList, GitRepositoryIdentity,
+    GitRepositoryRef, GitRepositorySummary, GitRevision, GitRevisionKind, GitTreeEntry,
+    GitTreeEntryKind, GitTreeList,
 };
 pub use domain::models::LineEnding;
 
@@ -36,6 +37,7 @@ pub fn run() {
             git_commands::close_git_repository,
             git_commands::list_git_refs,
             git_commands::list_git_tree,
+            git_commands::list_git_changed_files,
             git_commands::read_git_blob,
             git_commands::cancel_git_job,
             git_commands::resolve_git_revision,

@@ -1,4 +1,5 @@
 pub mod blob;
+pub mod changed_files;
 pub mod executable;
 pub mod jobs;
 pub mod parsers;

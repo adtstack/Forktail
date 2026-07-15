@@ -1,5 +1,6 @@
 use crate::error::{AppErrorCode, CommandError, CommandResult};
 use crate::git::blob::{GitBlobError, read_blob};
+use crate::git::changed_files::{GitChangedFilesError, list_changed_files};
 use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
@@ -24,6 +25,15 @@ pub struct GitRuntimeStatus {
 pub struct GitTreePathRequest {
     pub opaque_id: String,
     pub generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitChangedFilesRequest {
+    pub left_commit: crate::GitObjectId,
+    pub right_commit: crate::GitObjectId,
+    pub hard_limit: usize,
+    pub request_generation: u64,
 }
 
 #[tauri::command]
@@ -112,6 +122,36 @@ pub async fn list_git_tree(
             &commit,
             path_prefix,
             hard_limit,
+            lease.cancellation(),
+        )
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_git_changed_files(
+    repository_session_id: String,
+    request: GitChangedFilesRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitChangedFileList> {
+    let _ = request.request_generation;
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        list_changed_files(
+            &session,
+            &request.left_commit,
+            &request.right_commit,
+            request.hard_limit,
             lease.cancellation(),
         )
     })
@@ -276,6 +316,28 @@ impl From<GitBlobError> for CommandError {
             GitBlobError::InvalidOutput
             | GitBlobError::SizeMismatch { .. }
             | GitBlobError::CacheUnavailable => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
+impl From<GitChangedFilesError> for CommandError {
+    fn from(error: GitChangedFilesError) -> Self {
+        match error {
+            GitChangedFilesError::Runner(error) => error.into(),
+            GitChangedFilesError::InvalidObjectId => Self::git(AppErrorCode::GitInvalidRevision),
+            GitChangedFilesError::ObjectMissingLocal => {
+                Self::git(AppErrorCode::GitObjectMissingLocal)
+            }
+            GitChangedFilesError::OutputTooLarge => Self::git(AppErrorCode::GitOutputTooLarge),
+            GitChangedFilesError::InvalidLimit
+            | GitChangedFilesError::TruncatedOutput
+            | GitChangedFilesError::InvalidStatus
+            | GitChangedFilesError::InvalidScore
+            | GitChangedFilesError::MissingPath
+            | GitChangedFilesError::InvalidPath
+            | GitChangedFilesError::DuplicatePath
+            | GitChangedFilesError::StaleGeneration
+            | GitChangedFilesError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
         }
     }
 }
@@ -469,6 +531,34 @@ mod tests {
             assert_eq!(error.code, expected);
             assert!(!error.message.contains("expected"));
             assert!(!error.message.contains("actual"));
+        }
+    }
+
+    #[test]
+    fn maps_changed_file_failures_without_status_or_path_details() {
+        let cases = [
+            (
+                GitChangedFilesError::InvalidObjectId,
+                AppErrorCode::GitInvalidRevision,
+            ),
+            (
+                GitChangedFilesError::ObjectMissingLocal,
+                AppErrorCode::GitObjectMissingLocal,
+            ),
+            (
+                GitChangedFilesError::OutputTooLarge,
+                AppErrorCode::GitOutputTooLarge,
+            ),
+            (
+                GitChangedFilesError::DuplicatePath,
+                AppErrorCode::GitCommandFailed,
+            ),
+        ];
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("R100"));
+            assert!(!error.message.contains("path bytes"));
         }
     }
 }

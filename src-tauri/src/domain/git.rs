@@ -200,6 +200,51 @@ pub struct GitBlobDocument {
     pub content: GitBlobContent,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, Hash, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitChangedFileStatus {
+    Added,
+    Deleted,
+    Modified,
+    TypeChanged,
+    Renamed,
+    Copied,
+    Unmerged,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitChangedFile {
+    pub status: GitChangedFileStatus,
+    pub old_path: Option<GitPathIdentity>,
+    pub new_path: Option<GitPathIdentity>,
+    pub similarity_score: Option<u8>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitChangedFileCounts {
+    pub added: u64,
+    pub deleted: u64,
+    pub modified: u64,
+    pub type_changed: u64,
+    pub renamed: u64,
+    pub copied: u64,
+    pub unmerged: u64,
+    pub unknown: u64,
+    pub total: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitChangedFileList {
+    pub entries: Vec<GitChangedFile>,
+    pub counts: GitChangedFileCounts,
+    pub truncated: bool,
+    pub generation: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPathIdentity {
@@ -454,8 +499,9 @@ pub struct GitRepositoryIdentity {
 #[cfg(test)]
 mod tests {
     use super::{
-        GitBlobContent, GitBlobDocument, GitHeadState, GitObjectAlgorithm, GitObjectId,
-        GitObjectIdError, GitObjectType, GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef,
+        GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
+        GitChangedFileStatus, GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError,
+        GitObjectType, GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef,
         GitRepositorySummary, GitRevision, GitRevisionKind, GitTreeEntry, GitTreeEntryKind,
         GitTreeList,
     };
@@ -644,6 +690,58 @@ mod tests {
                 }],
                 "truncated": false,
                 "generation": 0,
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_changed_files_with_one_sided_paths_counts_and_generation() {
+        let changed = GitChangedFileList {
+            entries: vec![GitChangedFile {
+                status: GitChangedFileStatus::Added,
+                old_path: None,
+                new_path: Some(GitPathIdentity::new(
+                    "repository-session-1:path:3:1",
+                    "new file.txt",
+                    Some("new file.txt"),
+                )),
+                similarity_score: None,
+            }],
+            counts: GitChangedFileCounts {
+                added: 1,
+                total: 1,
+                ..GitChangedFileCounts::default()
+            },
+            truncated: false,
+            generation: 3,
+        };
+
+        assert_eq!(
+            serde_json::to_value(changed).expect("serialize changed files"),
+            json!({
+                "entries": [{
+                    "status": "added",
+                    "oldPath": null,
+                    "newPath": {
+                        "opaqueId": "repository-session-1:path:3:1",
+                        "displayPath": "new file.txt",
+                        "utf8Path": "new file.txt",
+                    },
+                    "similarityScore": null,
+                }],
+                "counts": {
+                    "added": 1,
+                    "deleted": 0,
+                    "modified": 0,
+                    "typeChanged": 0,
+                    "renamed": 0,
+                    "copied": 0,
+                    "unmerged": 0,
+                    "unknown": 0,
+                    "total": 1,
+                },
+                "truncated": false,
+                "generation": 3,
             })
         );
     }

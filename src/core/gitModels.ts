@@ -84,6 +84,42 @@ export interface GitBlobDocument {
   content: GitBlobContent;
 }
 
+export type GitChangedFileStatus =
+  | "added"
+  | "deleted"
+  | "modified"
+  | "typeChanged"
+  | "renamed"
+  | "copied"
+  | "unmerged"
+  | "unknown";
+
+export interface GitChangedFile {
+  status: GitChangedFileStatus;
+  oldPath: GitPathIdentity | null;
+  newPath: GitPathIdentity | null;
+  similarityScore: number | null;
+}
+
+export interface GitChangedFileCounts {
+  added: number;
+  deleted: number;
+  modified: number;
+  typeChanged: number;
+  renamed: number;
+  copied: number;
+  unmerged: number;
+  unknown: number;
+  total: number;
+}
+
+export interface GitChangedFileList {
+  entries: GitChangedFile[];
+  counts: GitChangedFileCounts;
+  truncated: boolean;
+  generation: number;
+}
+
 export interface GitPathIdentity {
   opaqueId: string;
   displayPath: string;
