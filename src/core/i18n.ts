@@ -780,6 +780,7 @@ export const MERGE_VIEW_TEXT = {
   en: {
     home: "Home",
     closeMergetool: "Close Forktail",
+    repositoryReview: "Repository review",
     conflictNavigationAria: "Conflict navigation",
     previousConflict: "Prev",
     nextConflict: "Next",
@@ -807,6 +808,11 @@ export const MERGE_VIEW_TEXT = {
     mergetoolMode: "Git mergetool",
     mergetoolFixedOutput: (path: string) =>
       `Fixed $MERGED output: ${path}. Save writes only to this file. Depending on Git backup settings, Git .orig and Forktail .bak.<timestamp> files can both remain.`,
+    gitConflictMode: "Git conflict Result",
+    gitConflictScope: (operation: string, path: string) =>
+      `${operation} · ${path}. Save writes only the Result file. Forktail does not run git add or continue.`,
+    gitConflictNextStep: (operation: string) =>
+      `Run git add and continue the ${operation} outside Forktail.`,
     missingSource: (label: string) => `${label} (missing)`,
     draftWarning: "An unsaved merge draft is available. Original file contents were not cached.",
     restoreDraft: "Restore draft",
@@ -834,6 +840,7 @@ export const MERGE_VIEW_TEXT = {
   ko: {
     home: "홈",
     closeMergetool: "Forktail 닫기",
+    repositoryReview: "저장소 검토",
     conflictNavigationAria: "충돌 탐색",
     previousConflict: "이전 충돌",
     nextConflict: "다음 충돌",
@@ -861,6 +868,11 @@ export const MERGE_VIEW_TEXT = {
     mergetoolMode: "Git mergetool",
     mergetoolFixedOutput: (path: string) =>
       `고정 $MERGED 출력: ${path}. 저장은 이 파일에만 기록합니다. Git 백업 설정에 따라 Git .orig와 Forktail .bak.<timestamp> 파일이 함께 남을 수 있습니다.`,
+    gitConflictMode: "Git 충돌 Result",
+    gitConflictScope: (operation: string, path: string) =>
+      `${operation} · ${path}. 저장은 Result 파일에만 기록합니다. Forktail은 git add나 continue를 실행하지 않습니다.`,
+    gitConflictNextStep: (operation: string) =>
+      `Forktail 밖에서 git add를 실행하고 ${operation} 작업을 계속하세요.`,
     missingSource: (label: string) => `${label} (없음)`,
     draftWarning: "이전에 저장하지 못한 병합 결과 draft가 있습니다. 원본 파일 내용은 별도 캐시하지 않았습니다.",
     restoreDraft: "draft 복구",

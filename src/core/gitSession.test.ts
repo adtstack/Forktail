@@ -9,9 +9,23 @@ import type {
   GitConflictSession,
   GitSnapshotDocument,
 } from "./gitModels";
-import { adaptGitCompareSession, adaptGitConflictSession } from "./gitSession";
+import {
+  adaptGitCompareSession,
+  adaptGitConflictSession,
+  keepsGitRepositorySession,
+} from "./gitSession";
 import { persistentCompareSessionInput } from "./settings";
 import { isMissingFileDocument, isVirtualFileDocument } from "./virtualDocument";
+
+describe("Git repository session lifecycle", () => {
+  it("keeps the repository open for snapshot compare and conflict Result review only", () => {
+    expect(keepsGitRepositorySession("git", null, null)).toBe(true);
+    expect(keepsGitRepositorySession("compare", "git", null)).toBe(true);
+    expect(keepsGitRepositorySession("merge", null, "gitConflict")).toBe(true);
+    expect(keepsGitRepositorySession("merge", null, "files")).toBe(false);
+    expect(keepsGitRepositorySession("home", null, null)).toBe(false);
+  });
+});
 
 function snapshot(
   contentState: GitSnapshotDocument["contentState"],

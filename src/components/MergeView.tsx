@@ -95,6 +95,7 @@ export function MergeView({
   const conflicts = useMemo(() => parseConflictBlocks(resultText), [resultText]);
   const capabilities = useMemo(() => mergetoolSessionCapabilities(session), [session.origin]);
   const isMergetool = session.origin === "mergetool";
+  const isGitConflict = session.origin === "gitConflict";
   const baseMissing = isMissingFileDocument(session.base);
   const resultEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
   const activeDecorationIds = useRef<string[]>([]);
@@ -388,7 +389,11 @@ export function MergeView({
       <header className="toolbar command-toolbar merge-command-toolbar">
         <div className="command-group">
           <button className="command-button" onClick={onBack} disabled={busy}>
-            {isMergetool ? text.closeMergetool : text.home}
+            {isMergetool
+              ? text.closeMergetool
+              : isGitConflict
+                ? text.repositoryReview
+                : text.home}
           </button>
         </div>
         <div className="command-group command-group-primary" aria-label={text.conflictNavigationAria}>
@@ -531,6 +536,17 @@ export function MergeView({
         <div className="metadata-warning mergetool-output-notice" role="status">
           <strong>{text.mergetoolMode}</strong>
           <span>{text.mergetoolFixedOutput(session.outputPath ?? text.noOutputPath)}</span>
+        </div>
+      )}
+
+      {isGitConflict && (
+        <div className="metadata-warning git-conflict-output-notice" role="status">
+          <strong>{text.gitConflictMode}</strong>
+          <span>{text.gitConflictScope(
+            conflictOperationLabel(session.conflict.operation),
+            session.conflict.path.displayPath,
+          )}</span>
+          <span>{text.gitConflictNextStep(session.conflict.operation)}</span>
         </div>
       )}
 
@@ -854,4 +870,12 @@ function SourceEditor({
       />
     </div>
   );
+}
+
+function conflictOperationLabel(
+  operation: "merge" | "rebase" | "cherryPick" | "revert" | "unknown",
+): string {
+  if (operation === "cherryPick") return "Cherry-pick";
+  if (operation === "unknown") return "Git operation";
+  return `${operation.slice(0, 1).toUpperCase()}${operation.slice(1)}`;
 }

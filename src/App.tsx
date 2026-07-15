@@ -19,8 +19,10 @@ import {
   isTauriRuntime,
   listFileBackups,
   listGitChangedFiles,
+  listGitConflicts,
   listGitRefs,
   mergeTexts,
+  openGitConflict,
   openGitRevisionCompare,
   openGitIndexCompare,
   readTextFile,
@@ -28,6 +30,7 @@ import {
   revealPath,
   restoreTextFileBackup,
   resolveGitRevision,
+  saveGitConflictResult,
   scanDirectories,
   statTextFileVersion,
   startupArgs,
@@ -35,21 +38,27 @@ import {
 } from "./core/bridge";
 import {
   adaptGitCompareSession,
+  adaptGitConflictSession,
   applyGitRevisionValidationResult,
   beginGitRevisionValidation,
   emptyGitRevisionField,
   gitRevisionFieldWithInput,
   gitRevisionFromRepositoryHead,
   gitChangedFileKey,
+  gitConflictEntryKey,
   gitWorkingTreeRowKey,
   gitWorkingTreeRows,
   isCurrentGitRequest,
+  keepsGitRepositorySession,
   sameResolvedGitRevisions,
   selectedGitChangedFileKeyAfterRefresh,
+  selectedGitConflictEntryKeyAfterRefresh,
   selectedGitWorkingTreeRowKeyAfterRefresh,
   type GitChangedFileFilter,
   type GitChangedFileLoadState,
   type GitChangedFileStatusFilter,
+  type GitConflictLoadState,
+  type GitConflictOpenState,
   type GitRefLoadState,
   type GitRevisionFieldState,
   type GitRevisionSide,
@@ -61,6 +70,7 @@ import {
 } from "./core/gitSession";
 import type {
   GitChangedFile,
+  GitConflictEntry,
   GitIndexComparison,
   GitRepositorySummary,
 } from "./core/gitModels";
@@ -90,6 +100,7 @@ import {
   type CompareFileChangeNotice,
 } from "./core/fileVersion";
 import {
+  gitConflictSaveRequest,
   mergeSavePreconditionForPath,
   mergeResultOriginalLineEnding,
   mergeSaveStateAfterWrite,
@@ -142,7 +153,7 @@ import {
   hasUnsavedMergeChanges,
   markBeforeUnloadIfUnsaved,
 } from "./core/unsaved";
-import { APP_TEXT, MERGE_VIEW_TEXT, localeForLanguage } from "./core/i18n";
+import { APP_TEXT, CORE_TEXT, MERGE_VIEW_TEXT, localeForLanguage } from "./core/i18n";
 import {
   parseStartupSessionArgs,
   type DifftoolStartupSession,
@@ -244,6 +255,11 @@ export default function App() {
     useState<string | null>(null);
   const [gitWorkingTreeSnapshotState, setGitWorkingTreeSnapshotState] =
     useState<GitSnapshotSelectionState>({ kind: "idle" });
+  const [gitConflictState, setGitConflictState] =
+    useState<GitConflictLoadState>({ kind: "idle" });
+  const [selectedGitConflictKey, setSelectedGitConflictKey] = useState<string | null>(null);
+  const [gitConflictOpenState, setGitConflictOpenState] =
+    useState<GitConflictOpenState>({ kind: "idle" });
   const [savedMergeResult, setSavedMergeResult] = useState<string | null>(null);
   const [mergeOutputVersion, setMergeOutputVersion] = useState<WritePrecondition | null>(null);
   const [mergeRecoveryDraft, setMergeRecoveryDraft] = useState<MergeRecoveryDraft | null>(null);
@@ -285,6 +301,15 @@ export default function App() {
   const activeGitChangedFilesRequestId = useRef(0);
   const activeGitWorkingTreeRequestId = useRef(0);
   const activeGitWorkingTreeJob = useRef<{ repositorySessionId: string; jobId: number } | null>(null);
+  const activeGitConflictListRequestId = useRef(0);
+  const activeGitConflictListJob =
+    useRef<{ repositorySessionId: string; jobId: number } | null>(null);
+  const activeGitConflictOpenRequestId = useRef(0);
+  const activeGitConflictOpenJob =
+    useRef<{ repositorySessionId: string; jobId: number } | null>(null);
+  const activeGitConflictSaveRequestId = useRef(0);
+  const activeGitConflictSaveJob =
+    useRef<{ repositorySessionId: string; jobId: number } | null>(null);
   const activeGitSnapshotRequestId = useRef(0);
   const activeGitSnapshotJob = useRef<{ repositorySessionId: string; jobId: number } | null>(null);
   const attemptedActiveSessionRestore = useRef(false);
@@ -829,7 +854,7 @@ export default function App() {
 
   useEffect(() => {
     if (mode !== "merge" || !mergeSession) return;
-    if (mergeSession.origin === "mergetool") {
+    if (mergeSession.origin !== "files") {
       setMergeRecoveryDraft(null);
       return;
     }
@@ -860,11 +885,41 @@ export default function App() {
     }
   }, []);
 
+  const cancelActiveGitConflictList = useCallback(() => {
+    activeGitConflictListRequestId.current += 1;
+    const activeJob = activeGitConflictListJob.current;
+    activeGitConflictListJob.current = null;
+    if (activeJob) {
+      void cancelGitJob(activeJob.repositorySessionId, activeJob.jobId).catch(() => {});
+    }
+  }, []);
+
+  const cancelActiveGitConflictOpen = useCallback(() => {
+    activeGitConflictOpenRequestId.current += 1;
+    const activeJob = activeGitConflictOpenJob.current;
+    activeGitConflictOpenJob.current = null;
+    if (activeJob) {
+      void cancelGitJob(activeJob.repositorySessionId, activeJob.jobId).catch(() => {});
+    }
+  }, []);
+
+  const cancelActiveGitConflictSave = useCallback(() => {
+    activeGitConflictSaveRequestId.current += 1;
+    const activeJob = activeGitConflictSaveJob.current;
+    activeGitConflictSaveJob.current = null;
+    if (activeJob) {
+      void cancelGitJob(activeJob.repositorySessionId, activeJob.jobId).catch(() => {});
+    }
+  }, []);
+
   const resetGitRevisionReview = useCallback((
     repository: GitRepositorySummary | null,
   ) => {
     cancelActiveGitSnapshot();
     cancelActiveGitWorkingTreeStatus();
+    cancelActiveGitConflictList();
+    cancelActiveGitConflictOpen();
+    cancelActiveGitConflictSave();
     activeGitRefRequestId.current += 1;
     activeGitChangedFilesRequestId.current += 1;
     const requestGeneration = nextGitRevisionValidationId.current + 1;
@@ -880,16 +935,29 @@ export default function App() {
     setGitWorkingTreeComparison("headToWorkingTree");
     setSelectedGitWorkingTreeKey(null);
     setGitWorkingTreeSnapshotState({ kind: "idle" });
+    setGitConflictState({ kind: "idle" });
+    setSelectedGitConflictKey(null);
+    setGitConflictOpenState({ kind: "idle" });
     setGitRevisionFields({
       left: emptyGitRevisionField(requestGeneration),
       right: repository
         ? gitRevisionFromRepositoryHead(repository, requestGeneration)
         : emptyGitRevisionField(requestGeneration),
     });
-  }, [cancelActiveGitSnapshot, cancelActiveGitWorkingTreeStatus]);
+  }, [
+    cancelActiveGitConflictList,
+    cancelActiveGitConflictOpen,
+    cancelActiveGitConflictSave,
+    cancelActiveGitSnapshot,
+    cancelActiveGitWorkingTreeStatus,
+  ]);
 
   useEffect(() => {
-    if (mode === "git" || (mode === "compare" && compareSession?.origin === "git")) return;
+    if (keepsGitRepositorySession(
+      mode,
+      compareSession?.origin ?? null,
+      mergeSession?.origin ?? null,
+    )) return;
     const state = gitRepositoryStateRef.current;
     if (!state) return;
 
@@ -905,7 +973,7 @@ export default function App() {
     }
     resetGitRevisionReview(null);
     setGitRepositoryState(null);
-  }, [compareSession?.origin, endBusy, mode, resetGitRevisionReview]);
+  }, [compareSession?.origin, endBusy, mergeSession?.origin, mode, resetGitRevisionReview]);
 
   useEffect(() => {
     if (mode !== "git" || gitRepositoryState?.kind !== "ready") return;
@@ -953,6 +1021,58 @@ export default function App() {
       void cancelGitJob(repository.sessionId, jobId).catch(() => {});
     };
   }, [gitRepositoryState, languageMode, mode]);
+
+  const refreshGitConflicts = useCallback(() => {
+    const currentRepository = gitRepositoryStateRef.current;
+    if (
+      currentRepository?.kind !== "ready"
+      || currentRepository.repository.head.kind === "unborn"
+    ) return;
+    const repositorySessionId = currentRepository.repository.sessionId;
+    cancelActiveGitConflictList();
+    cancelActiveGitConflictOpen();
+    const requestGeneration = activeGitConflictListRequestId.current + 1;
+    activeGitConflictListRequestId.current = requestGeneration;
+    const jobId = nextGitJobId.current + 1;
+    nextGitJobId.current = jobId;
+    activeGitConflictListJob.current = { repositorySessionId, jobId };
+    setGitConflictState({ kind: "loading", requestGeneration });
+    setGitConflictOpenState({ kind: "idle" });
+
+    void listGitConflicts(repositorySessionId, {
+      hardLimit: 10_000,
+      requestGeneration,
+    }, jobId).then((list) => {
+      const repository = gitRepositoryStateRef.current;
+      if (
+        !isCurrentGitRequest(activeGitConflictListRequestId.current, requestGeneration)
+        || repository?.kind !== "ready"
+        || repository.repository.sessionId !== repositorySessionId
+      ) return;
+      setGitConflictState({ kind: "ready", requestGeneration, list });
+      setSelectedGitConflictKey((current) =>
+        selectedGitConflictEntryKeyAfterRefresh(current, list));
+    }).catch((caught) => {
+      const repository = gitRepositoryStateRef.current;
+      if (
+        !isCurrentGitRequest(activeGitConflictListRequestId.current, requestGeneration)
+        || repository?.kind !== "ready"
+        || repository.repository.sessionId !== repositorySessionId
+      ) return;
+      setGitConflictState({
+        kind: "error",
+        requestGeneration,
+        message: errorMessage(caught, languageMode),
+      });
+    }).finally(() => {
+      if (
+        activeGitConflictListJob.current?.repositorySessionId === repositorySessionId
+        && activeGitConflictListJob.current.jobId === jobId
+      ) {
+        activeGitConflictListJob.current = null;
+      }
+    });
+  }, [cancelActiveGitConflictList, cancelActiveGitConflictOpen, languageMode]);
 
   const refreshGitWorkingTree = useCallback(() => {
     const currentRepository = gitRepositoryStateRef.current;
@@ -1015,19 +1135,30 @@ export default function App() {
     languageMode,
   ]);
 
+  const refreshGitRepositoryStatus = useCallback(() => {
+    refreshGitWorkingTree();
+    refreshGitConflicts();
+  }, [refreshGitConflicts, refreshGitWorkingTree]);
+
   useEffect(() => {
     if (
       mode !== "git"
       || gitRepositoryState?.kind !== "ready"
       || gitRepositoryState.repository.head.kind === "unborn"
     ) return;
-    refreshGitWorkingTree();
-    return cancelActiveGitWorkingTreeStatus;
+    refreshGitRepositoryStatus();
+    return () => {
+      cancelActiveGitWorkingTreeStatus();
+      cancelActiveGitConflictList();
+      cancelActiveGitConflictOpen();
+    };
   }, [
+    cancelActiveGitConflictList,
+    cancelActiveGitConflictOpen,
     cancelActiveGitWorkingTreeStatus,
     gitRepositoryState,
     mode,
-    refreshGitWorkingTree,
+    refreshGitRepositoryStatus,
   ]);
 
   useEffect(() => {
@@ -1345,6 +1476,72 @@ export default function App() {
     setCleanCompareSession,
   ]);
 
+  const selectGitConflict = useCallback((entry: GitConflictEntry) => {
+    const repository = gitRepositoryStateRef.current;
+    if (repository?.kind !== "ready" || gitConflictState.kind !== "ready") return;
+
+    cancelActiveGitConflictOpen();
+    const requestGeneration = activeGitConflictOpenRequestId.current + 1;
+    activeGitConflictOpenRequestId.current = requestGeneration;
+    const jobId = nextGitJobId.current + 1;
+    nextGitJobId.current = jobId;
+    const repositorySessionId = repository.repository.sessionId;
+    const entryKey = gitConflictEntryKey(entry);
+    activeGitConflictOpenJob.current = { repositorySessionId, jobId };
+    setSelectedGitConflictKey(entryKey);
+    setGitConflictOpenState({ kind: "loading", entryKey });
+
+    void openGitConflict(repositorySessionId, {
+      opaquePathId: entry.path.opaqueId,
+      generation: gitConflictState.list.generation,
+    }, jobId).then((conflictSession) => {
+      const currentRepository = gitRepositoryStateRef.current;
+      if (
+        !isCurrentGitRequest(activeGitConflictOpenRequestId.current, requestGeneration)
+        || currentRepository?.kind !== "ready"
+        || currentRepository.repository.sessionId !== repositorySessionId
+      ) return;
+
+      const view = adaptGitConflictSession(conflictSession);
+      if (view.kind === "notice") {
+        setGitConflictOpenState({
+          kind: "notice",
+          entryKey,
+          contentStates: view.contentStates,
+        });
+        return;
+      }
+
+      setGitConflictOpenState({ kind: "idle" });
+      setCleanMergeSession(view.session, view.outputVersion);
+      setMode("merge");
+    }).catch((caught) => {
+      const currentRepository = gitRepositoryStateRef.current;
+      if (
+        !isCurrentGitRequest(activeGitConflictOpenRequestId.current, requestGeneration)
+        || currentRepository?.kind !== "ready"
+        || currentRepository.repository.sessionId !== repositorySessionId
+      ) return;
+      setGitConflictOpenState({
+        kind: "error",
+        entryKey,
+        message: errorMessage(caught, languageMode),
+      });
+    }).finally(() => {
+      if (
+        activeGitConflictOpenJob.current?.repositorySessionId === repositorySessionId
+        && activeGitConflictOpenJob.current.jobId === jobId
+      ) {
+        activeGitConflictOpenJob.current = null;
+      }
+    });
+  }, [
+    cancelActiveGitConflictOpen,
+    gitConflictState,
+    languageMode,
+    setCleanMergeSession,
+  ]);
+
   const requestLeaveActiveSession = useCallback((leave: () => void) => {
     if (!activeUnsavedMessage) {
       leave();
@@ -1514,6 +1711,18 @@ export default function App() {
       }
       setMode(nextMode);
       setCompareBackTarget("home");
+      setMessage(null);
+      setError(null);
+    });
+  };
+
+  const backFromGitConflict = () => {
+    requestLeaveActiveSession(() => {
+      cancelActiveGitConflictSave();
+      setMergeSession(null);
+      setSavedMergeResult(null);
+      setMergeOutputVersion(null);
+      setMode("git");
       setMessage(null);
       setError(null);
     });
@@ -1843,7 +2052,69 @@ export default function App() {
     lineEndingMode: SaveLineEndingMode = "original",
   ) => run(async () => {
     if (!mergeSession) return;
-    if (mergeSession.origin === "gitConflict") return;
+    if (mergeSession.origin === "gitConflict") {
+      const repositorySessionId = mergeSession.conflict.repositoryId;
+      const repository = gitRepositoryStateRef.current;
+      if (
+        repository?.kind !== "ready"
+        || repository.repository.sessionId !== repositorySessionId
+      ) return;
+
+      cancelActiveGitConflictSave();
+      const requestGeneration = activeGitConflictSaveRequestId.current + 1;
+      activeGitConflictSaveRequestId.current = requestGeneration;
+      const saveJobId = nextGitJobId.current + 1;
+      nextGitJobId.current = saveJobId;
+      let currentJobId = saveJobId;
+      activeGitConflictSaveJob.current = { repositorySessionId, jobId: saveJobId };
+
+      try {
+        const written = await saveGitConflictResult(
+          repositorySessionId,
+          gitConflictSaveRequest(mergeSession, mergeSession.result, lineEndingMode),
+          saveJobId,
+        );
+        if (
+          !isCurrentGitRequest(activeGitConflictSaveRequestId.current, requestGeneration)
+          || written.action !== "CONFLICT_SAVED"
+        ) return;
+
+        setSavedMergeResult(mergeSession.result);
+        setMessage(CORE_TEXT[languageMode].gitConflictSaved);
+
+        const reopenJobId = nextGitJobId.current + 1;
+        nextGitJobId.current = reopenJobId;
+        currentJobId = reopenJobId;
+        activeGitConflictSaveJob.current = { repositorySessionId, jobId: reopenJobId };
+        try {
+          const reopened = await openGitConflict(repositorySessionId, {
+            opaquePathId: mergeSession.conflict.path.opaqueId,
+            generation: mergeSession.conflict.generation,
+          }, reopenJobId);
+          if (!isCurrentGitRequest(
+            activeGitConflictSaveRequestId.current,
+            requestGeneration,
+          )) return;
+          const view = adaptGitConflictSession(reopened);
+          if (view.kind === "merge") {
+            setCleanMergeSession(view.session, view.outputVersion);
+          }
+        } catch {
+          // The Result save already succeeded. A status refresh below exposes any
+          // external stage transition without reporting the completed write as failed.
+        }
+        refreshGitRepositoryStatus();
+        return;
+      } finally {
+        const activeJob = activeGitConflictSaveJob.current;
+        if (
+          activeJob?.repositorySessionId === repositorySessionId
+          && activeJob.jobId === currentJobId
+        ) {
+          activeGitConflictSaveJob.current = null;
+        }
+      }
+    }
     const capabilities = mergetoolSessionCapabilities(mergeSession);
     if (forceSaveAs && !capabilities.saveAs) return;
 
@@ -1938,7 +2209,17 @@ export default function App() {
     });
     if (persistentSession) rememberRecentSession(persistentSession);
     setMessage(appText.saved(written.backupPath));
-  }), [appText, mergeOutputVersion, mergeSession, rememberRecentSession, run]);
+  }), [
+    appText,
+    cancelActiveGitConflictSave,
+    mergeOutputVersion,
+    mergeSession,
+    languageMode,
+    refreshGitRepositoryStatus,
+    rememberRecentSession,
+    run,
+    setCleanMergeSession,
+  ]);
 
   const showMergeBackups = useCallback(() => run(async () => {
     if (!mergeSession?.outputPath || mergeSession.origin === "gitConflict") return;
@@ -2290,6 +2571,11 @@ export default function App() {
               selectedKey: selectedGitWorkingTreeKey,
               snapshotState: gitWorkingTreeSnapshotState,
             }}
+            conflictReview={{
+              state: gitConflictState,
+              selectedKey: selectedGitConflictKey,
+              openState: gitConflictOpenState,
+            }}
             onBack={leaveGitRepository}
             onOpenRepository={openGitRepository}
             onCancelOpen={leaveGitRepository}
@@ -2302,7 +2588,7 @@ export default function App() {
               setGitChangedFileFilter((current) => ({ ...current, status }))
             }
             onSelectChangedFile={selectGitChangedFile}
-            onRefreshWorkingTree={refreshGitWorkingTree}
+            onRefreshWorkingTree={refreshGitRepositoryStatus}
             onWorkingTreeFilterChange={(query) =>
               setGitWorkingTreeFilter((current) => ({ ...current, query }))
             }
@@ -2311,6 +2597,8 @@ export default function App() {
             }
             onWorkingTreeComparisonChange={setGitWorkingTreeComparison}
             onSelectWorkingTreeFile={selectGitWorkingTreeFile}
+            onRefreshConflicts={refreshGitRepositoryStatus}
+            onSelectConflict={selectGitConflict}
           />
         )}
 
@@ -2394,7 +2682,9 @@ export default function App() {
             onBack={
               mergeSession.origin === "mergetool"
                 ? closeExternalGitToolWindow
-                : backHome
+                : mergeSession.origin === "gitConflict"
+                  ? backFromGitConflict
+                  : backHome
             }
             onResultChange={updateMergeResult}
             onRecoveryDraftsEnabledChange={setMergeRecoveryEnabled}

@@ -1,11 +1,16 @@
 import type {
+  AppMode,
+  CompareSession,
   FileDocument,
   GitConflictMergeSession,
   GitFileCompareSession,
+  MergeSession,
 } from "./models";
 import type { WritePrecondition } from "./mergeSave";
 import type {
   GitCompareSession,
+  GitConflictEntry,
+  GitConflictList,
   GitConflictSession,
   GitChangedFile,
   GitChangedFileList,
@@ -24,6 +29,16 @@ import type {
 
 export type GitRevisionValidationPhase = "idle" | "validating" | "resolved" | "error";
 export type GitRevisionSide = "left" | "right";
+
+export function keepsGitRepositorySession(
+  mode: AppMode,
+  compareOrigin: CompareSession["origin"] | null,
+  mergeOrigin: MergeSession["origin"] | null,
+): boolean {
+  return mode === "git"
+    || (mode === "compare" && compareOrigin === "git")
+    || (mode === "merge" && mergeOrigin === "gitConflict");
+}
 
 export interface GitRevisionFieldState {
   input: string;
@@ -109,6 +124,55 @@ export type GitWorkingTreeLoadState =
   | { kind: "loading"; requestGeneration: number }
   | { kind: "ready"; requestGeneration: number; snapshot: GitStatusSnapshot }
   | { kind: "error"; requestGeneration: number; message: string };
+
+export type GitConflictLoadState =
+  | { kind: "idle" }
+  | { kind: "loading"; requestGeneration: number }
+  | { kind: "ready"; requestGeneration: number; list: GitConflictList }
+  | { kind: "error"; requestGeneration: number; message: string };
+
+export type GitConflictOpenState =
+  | { kind: "idle" }
+  | { kind: "loading"; entryKey: string }
+  | {
+      kind: "notice";
+      entryKey: string;
+      contentStates: GitSnapshotContentState["kind"][];
+    }
+  | { kind: "error"; entryKey: string; message: string };
+
+export function gitConflictEntryKey(entry: GitConflictEntry): string {
+  return entry.path.opaqueId;
+}
+
+export function selectedGitConflictEntryKeyAfterRefresh(
+  selectedKey: string | null,
+  list: GitConflictList,
+): string | null {
+  if (selectedKey === null) return null;
+  return list.entries.some((entry) => gitConflictEntryKey(entry) === selectedKey)
+    ? selectedKey
+    : null;
+}
+
+export function nextGitConflictEntryKey(
+  entries: GitConflictEntry[],
+  selectedKey: string | null,
+  key: "ArrowUp" | "ArrowDown" | "Home" | "End",
+): string | null {
+  if (entries.length === 0) return null;
+  const current = selectedKey === null
+    ? -1
+    : entries.findIndex((entry) => gitConflictEntryKey(entry) === selectedKey);
+  const index = key === "Home"
+    ? 0
+    : key === "End"
+      ? entries.length - 1
+      : key === "ArrowUp"
+        ? Math.max(0, current < 0 ? 0 : current - 1)
+        : Math.min(entries.length - 1, current + 1);
+  return gitConflictEntryKey(entries[index]!);
+}
 
 export type GitWorkingTreeRow =
   | {

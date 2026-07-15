@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { AppCommandId } from "../core/commands";
 import type { MergeRecoveryDraft } from "../core/mergeRecovery";
-import type { MergeSession } from "../core/models";
+import type { GitConflictMergeSession, MergeSession } from "../core/models";
 import { demoMergeSession } from "../core/samples";
 import { virtualMissingFileDocument } from "../core/virtualDocument";
 import { canRunMergeViewCommand, MergeView } from "./MergeView";
@@ -163,6 +163,36 @@ describe("MergeView Git mergetool mode", () => {
   });
 });
 
+describe("MergeView repository conflict mode", () => {
+  it("shows operation-aware sources, Result-only save scope, and the external terminal next step", () => {
+    const markup = renderMergeView(true, gitConflictSession());
+
+    expect(markup).toContain("Git conflict Result");
+    expect(markup).toContain("Rebase · src/conflict.ts");
+    expect(markup).toContain("Save writes only the Result file");
+    expect(markup).toContain("Forktail does not run git add or continue");
+    expect(markup).toContain("Run git add and continue the rebase outside Forktail");
+    expect(markup).toContain("Rebase base (Git ours, index stage 2)");
+    expect(markup).toContain("Rebased commit (Git theirs, index stage 3)");
+    expect(markup).toContain(">Repository review</button>");
+    expect(markup).not.toContain(">Home</button>");
+    expect(markup).not.toContain(">Save As</button>");
+    expect(markup).not.toContain(">Backups</button>");
+    expect(markup).not.toContain(">Drafts</label>");
+  });
+
+  it("shares the dirty close guard and blocks unresolved Result saves", () => {
+    const session = gitConflictSession();
+
+    expect(commandAvailable("save", session, 1)).toBe(false);
+    expect(commandAvailable("save", { ...session, result: "resolved\n" }, 0)).toBe(true);
+    expect(commandAvailable("saveAs", session, 0)).toBe(false);
+    expect(renderMergeView(true, session)).toContain(
+      "aria-label=\"Merge result has unsaved changes\"",
+    );
+  });
+});
+
 function mergetoolSession(result = demoMergeSession().result): MergeSession {
   const demo = demoMergeSession();
   return {
@@ -177,6 +207,83 @@ function mergetoolSession(result = demoMergeSession().result): MergeSession {
     },
     result,
     outputPath: "/repo/MERGED",
+  };
+}
+
+function gitConflictSession(): GitConflictMergeSession {
+  const demo = demoMergeSession();
+  const path = {
+    opaqueId: "repository-session-1:path:9:1",
+    displayPath: "src/conflict.ts",
+    utf8Path: "src/conflict.ts",
+  };
+  const base = {
+    ...demo.base,
+    path: "Base (index stage 1) · src/conflict.ts",
+    virtual: { kind: "gitSnapshot" as const, contentState: "text" as const },
+  };
+  const ours = {
+    ...demo.ours,
+    path: "Rebase base (Git ours, index stage 2) · src/conflict.ts",
+    virtual: { kind: "gitSnapshot" as const, contentState: "text" as const },
+  };
+  const theirs = {
+    ...demo.theirs,
+    path: "Rebased commit (Git theirs, index stage 3) · src/conflict.ts",
+    virtual: { kind: "gitSnapshot" as const, contentState: "text" as const },
+  };
+  const output = {
+    ...demo.ours,
+    path: "Result (working tree) · src/conflict.ts",
+    text: demo.result,
+    virtual: { kind: "gitSnapshot" as const, contentState: "text" as const },
+  };
+  const objectId = { algorithm: "sha1" as const, hex: "a".repeat(40) };
+  const snapshot = (label: string, text: string, origin: "indexStage" | "workingTree") => ({
+    origin,
+    label,
+    readOnly: origin === "indexStage",
+    objectId: origin === "indexStage" ? objectId : null,
+    path,
+    mode: "100644",
+    textMetadata: {
+      encoding: "UTF-8",
+      lineEnding: "lf" as const,
+      hadFinalNewline: true,
+      decodeHadErrors: false,
+      size: text.length,
+    },
+    workingTreeVersion: origin === "workingTree" ? { size: text.length, modifiedMs: 10 } : null,
+    contentState: { kind: "text" as const, text },
+  });
+  const stage = { mode: "100644", objectId };
+  return {
+    origin: "gitConflict",
+    base,
+    ours,
+    theirs,
+    output,
+    outputPath: output.path,
+    resultDocument: output,
+    result: demo.result,
+    conflict: {
+      repositoryId: "repository-session-1",
+      path,
+      base: snapshot(base.path, base.text, "indexStage"),
+      stage2: snapshot(ours.path, ours.text, "indexStage"),
+      stage3: snapshot(theirs.path, theirs.text, "indexStage"),
+      result: snapshot(output.path, output.text, "workingTree"),
+      resultFingerprint: {
+        kind: "regularFile",
+        size: output.size,
+        modifiedMs: output.modifiedMs,
+        contentHash: "f".repeat(64),
+      },
+      stageFingerprint: { stage1: stage, stage2: stage, stage3: stage },
+      operation: "rebase",
+      saveState: "clean",
+      generation: 9,
+    },
   };
 }
 

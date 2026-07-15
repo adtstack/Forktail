@@ -1,9 +1,15 @@
-import type { GitIndexComparison, GitRepositorySummary } from "../core/gitModels";
+import type {
+  GitConflictEntry,
+  GitIndexComparison,
+  GitRepositorySummary,
+} from "../core/gitModels";
 import type { GitChangedFile } from "../core/gitModels";
 import type {
   GitChangedFileFilter,
   GitChangedFileLoadState,
   GitChangedFileStatusFilter,
+  GitConflictLoadState,
+  GitConflictOpenState,
   GitRefLoadState,
   GitRevisionFieldState,
   GitSnapshotSelectionState,
@@ -14,6 +20,7 @@ import type {
 } from "../core/gitSession";
 import type { AppLanguage } from "../core/settings";
 import { GitChangedFiles } from "./GitChangedFiles";
+import { GitConflictView } from "./GitConflictView";
 import { GitRevisionSelector } from "./GitRevisionSelector";
 import { GitWorkingTreeFiles } from "./GitWorkingTreeFiles";
 
@@ -55,6 +62,7 @@ interface GitCompareViewProps {
   revisionReview?: GitRevisionReviewState;
   changedFilesReview?: GitChangedFilesReviewState;
   workingTreeReview?: GitWorkingTreeReviewState;
+  conflictReview?: GitConflictReviewState;
   onBack: () => void;
   onOpenRepository: () => void;
   onCancelOpen: () => void;
@@ -68,6 +76,8 @@ interface GitCompareViewProps {
   onWorkingTreeSectionFilterChange?: (section: GitWorkingTreeSection) => void;
   onWorkingTreeComparisonChange?: (comparison: GitIndexComparison) => void;
   onSelectWorkingTreeFile?: (row: GitWorkingTreeRow) => void;
+  onRefreshConflicts?: () => void;
+  onSelectConflict?: (entry: GitConflictEntry) => void;
 }
 
 export interface GitRevisionReviewState {
@@ -91,6 +101,12 @@ export interface GitWorkingTreeReviewState {
   comparison: GitIndexComparison;
   selectedKey: string | null;
   snapshotState: GitSnapshotSelectionState;
+}
+
+export interface GitConflictReviewState {
+  state: GitConflictLoadState;
+  selectedKey: string | null;
+  openState: GitConflictOpenState;
 }
 
 const GIT_COMPARE_TEXT = {
@@ -148,6 +164,7 @@ export function GitCompareView({
   revisionReview,
   changedFilesReview,
   workingTreeReview,
+  conflictReview,
   onBack,
   onOpenRepository,
   onCancelOpen,
@@ -161,6 +178,8 @@ export function GitCompareView({
   onWorkingTreeSectionFilterChange,
   onWorkingTreeComparisonChange,
   onSelectWorkingTreeFile,
+  onRefreshConflicts,
+  onSelectConflict,
 }: GitCompareViewProps) {
   const text = GIT_COMPARE_TEXT[languageMode];
 
@@ -229,6 +248,21 @@ export function GitCompareView({
           {repository.isShallow && <span>{text.shallow}</span>}
         </div>
       </section>
+
+      {repository.head.kind !== "unborn"
+        && conflictReview
+        && conflictReview.state.kind !== "idle"
+        && onRefreshConflicts
+        && onSelectConflict && (
+        <GitConflictView
+          state={conflictReview.state}
+          selectedKey={conflictReview.selectedKey}
+          openState={conflictReview.openState}
+          languageMode={languageMode}
+          onRefresh={onRefreshConflicts}
+          onSelect={onSelectConflict}
+        />
+      )}
 
       {repository.head.kind !== "unborn"
         && workingTreeReview

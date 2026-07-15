@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { GitRepositorySummary } from "../core/gitModels";
 import type {
   GitChangedFilesReviewState,
+  GitConflictReviewState,
   GitRevisionReviewState,
   GitWorkingTreeReviewState,
 } from "./GitCompareView";
@@ -35,6 +36,7 @@ function renderGitCompareView(
   revisionReview?: GitRevisionReviewState,
   changedFilesReview?: GitChangedFilesReviewState,
   workingTreeReview?: GitWorkingTreeReviewState,
+  conflictReview?: GitConflictReviewState,
 ): string {
   return renderToStaticMarkup(
     <GitCompareView
@@ -43,6 +45,7 @@ function renderGitCompareView(
       revisionReview={revisionReview}
       changedFilesReview={changedFilesReview}
       workingTreeReview={workingTreeReview}
+      conflictReview={conflictReview}
       onBack={() => {}}
       onOpenRepository={() => {}}
       onCancelOpen={() => {}}
@@ -56,6 +59,8 @@ function renderGitCompareView(
       onWorkingTreeSectionFilterChange={() => {}}
       onWorkingTreeComparisonChange={() => {}}
       onSelectWorkingTreeFile={() => {}}
+      onRefreshConflicts={() => {}}
+      onSelectConflict={() => {}}
     />,
   );
 }
@@ -318,5 +323,49 @@ describe("GitCompareView repository shell", () => {
     expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*\.git-repository-header/s);
     expect(styles).toMatch(/\.git-revision-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2/s);
     expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*\.git-revision-grid/s);
+    expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*\.git-conflict-row/s);
+  });
+});
+
+describe("GitCompareView conflict review", () => {
+  it("places unmerged paths in the repository review without exposing Git mutation actions", () => {
+    const path = {
+      opaqueId: "repository-session-1:path:4:1",
+      displayPath: "src/conflict.ts",
+      utf8Path: "src/conflict.ts",
+    };
+    const stage = {
+      mode: "100644",
+      objectId: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+    };
+    const conflictReview: GitConflictReviewState = {
+      state: {
+        kind: "ready",
+        requestGeneration: 4,
+        list: {
+          entries: [{ path, stage1: stage, stage2: stage, stage3: stage }],
+          operation: "merge",
+          truncated: false,
+          totalEntries: 1,
+          generation: 4,
+        },
+      },
+      selectedKey: path.opaqueId,
+      openState: { kind: "idle" },
+    };
+
+    const markup = renderGitCompareView(
+      { kind: "ready", repository: branchRepository },
+      "en",
+      undefined,
+      undefined,
+      undefined,
+      conflictReview,
+    );
+
+    expect(markup).toContain("Conflicts 1");
+    expect(markup).toContain("src/conflict.ts");
+    expect(markup).toContain("Open Result editor");
+    expect(markup).not.toMatch(/>Stage<|>Add<|>Continue<|>Commit</);
   });
 });
