@@ -1,3 +1,5 @@
+import type { GitCompareSession as GitSnapshotCompareSession } from "./gitModels";
+
 export type AppMode = "home" | "compare" | "folders" | "merge";
 
 export const appErrorCodes = [
@@ -57,9 +59,12 @@ export interface FileDocument {
   modifiedMs: number | null;
   isBinary: boolean;
   decodeHadErrors: boolean;
-  virtual?: {
-    kind: "missing";
-  };
+  virtual?:
+    | { kind: "missing" }
+    | {
+        kind: "gitSnapshot";
+        contentState: "text" | "missing";
+      };
 }
 
 export interface FileVersion {
@@ -172,7 +177,12 @@ export interface DifftoolCompareSession extends CompareSessionBase {
   origin: "difftool";
 }
 
-export type CompareSession = FileCompareSession | DifftoolCompareSession;
+export interface GitFileCompareSession extends CompareSessionBase {
+  origin: "git";
+  snapshot: GitSnapshotCompareSession;
+}
+
+export type CompareSession = FileCompareSession | DifftoolCompareSession | GitFileCompareSession;
 
 interface MergeSessionBase {
   base: FileDocument;

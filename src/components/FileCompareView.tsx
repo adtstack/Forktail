@@ -47,7 +47,7 @@ import {
   writeClipboardText,
 } from "../core/pathCopy";
 import { loadCompareViewSettings, saveCompareViewSettings, type AppLanguage } from "../core/settings";
-import { isVirtualFileDocument } from "../core/virtualDocument";
+import { isMissingFileDocument, isVirtualFileDocument } from "../core/virtualDocument";
 
 interface FileCompareViewProps {
   session: CompareSession;
@@ -147,6 +147,10 @@ export function FileCompareView({
     left: isVirtualFileDocument(session.left),
     right: isVirtualFileDocument(session.right),
   }), [session.left, session.right]);
+  const missingSides = useMemo(() => ({
+    left: isMissingFileDocument(session.left),
+    right: isMissingFileDocument(session.right),
+  }), [session.left, session.right]);
   const hasVirtualSide = virtualSides.left || virtualSides.right;
   const activeVirtual = activeEditableSide !== "none" && virtualSides[activeEditableSide];
   const activeDirty = activeEditableSide === "none" || activeVirtual
@@ -156,9 +160,9 @@ export function FileCompareView({
     (!virtualSides.left && dirtySides.left) || (!virtualSides.right && dirtySides.right)
   );
   const activeSideLabel = activeEditableSide === "left"
-    ? virtualSides.left ? `${text.left} (${text.missingFile})` : text.left
+    ? missingSides.left ? `${text.left} (${text.missingFile})` : text.left
     : activeEditableSide === "right"
-      ? virtualSides.right ? `${text.right} (${text.missingFile})` : text.right
+      ? missingSides.right ? `${text.right} (${text.missingFile})` : text.right
       : text.readOnly;
   const newlineDifference = finalNewlineDifference(
     session.left.hadFinalNewline,
@@ -1038,7 +1042,7 @@ export function FileHeading({
   onDragLeave: (side: CompareDropSide, event: DragEvent<HTMLElement>) => void;
   onDrop: (side: CompareDropSide, event: DragEvent<HTMLElement>) => void;
 }) {
-  const missing = isVirtualFileDocument(document);
+  const missing = isMissingFileDocument(document);
 
   return (
     <div
@@ -1099,7 +1103,7 @@ function formatFileStatus(
   text: (typeof FILE_COMPARE_TEXT)[AppLanguage],
   languageMode: AppLanguage,
 ): string {
-  if (isVirtualFileDocument(document)) {
+  if (isMissingFileDocument(document)) {
     return `${text.missingFile} · ${formatBytes(document.size)}`;
   }
 

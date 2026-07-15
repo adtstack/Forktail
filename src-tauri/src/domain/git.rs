@@ -245,6 +245,100 @@ pub struct GitChangedFileList {
     pub generation: u64,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitSnapshotOrigin {
+    CommittedBlob,
+    Missing,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitSnapshotUnavailableReason {
+    ObjectMissingLocal,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitTextMetadata {
+    pub encoding: String,
+    pub line_ending: LineEnding,
+    pub had_final_newline: bool,
+    pub decode_had_errors: bool,
+    pub size: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GitSnapshotContentState {
+    Text {
+        text: String,
+    },
+    Missing,
+    Binary,
+    LfsPointer {
+        oid_sha256: String,
+        referenced_size: u64,
+    },
+    Symlink,
+    Submodule,
+    TooLarge,
+    Unavailable {
+        reason: GitSnapshotUnavailableReason,
+    },
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitSnapshotDocument {
+    pub origin: GitSnapshotOrigin,
+    pub label: String,
+    pub read_only: bool,
+    pub object_id: Option<GitObjectId>,
+    pub path: Option<GitPathIdentity>,
+    pub mode: Option<String>,
+    pub text_metadata: Option<GitTextMetadata>,
+    pub content_state: GitSnapshotContentState,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitCompareSourceKind {
+    RevisionPair,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRevisionPair {
+    pub left: GitRevision,
+    pub right: GitRevision,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCompareCapabilities {
+    pub edit: bool,
+    pub save: bool,
+    pub hunk_copy: bool,
+    pub export_patch: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCompareSession {
+    pub repository_id: String,
+    pub left: GitSnapshotDocument,
+    pub right: GitSnapshotDocument,
+    pub source_kind: GitCompareSourceKind,
+    pub revision_pair: GitRevisionPair,
+    pub capabilities: GitCompareCapabilities,
+    pub generation: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPathIdentity {
@@ -356,6 +450,16 @@ impl GitPathRegistry {
             return Err(GitPathRegistryError::PlatformConversionUnsupported);
         }
         Ok(path)
+    }
+
+    pub fn resolve_identity(
+        &self,
+        opaque_id: &str,
+        generation: u64,
+        platform: GitPathPlatform,
+    ) -> Result<GitPathIdentity, GitPathRegistryError> {
+        let path = self.resolve(opaque_id, generation, platform)?;
+        Ok(path_identity(opaque_id.to_string(), path))
     }
 
     pub fn refresh(&mut self) -> Result<(), GitPathRegistryError> {
@@ -500,9 +604,11 @@ pub struct GitRepositoryIdentity {
 mod tests {
     use super::{
         GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
-        GitChangedFileStatus, GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError,
-        GitObjectType, GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef,
-        GitRepositorySummary, GitRevision, GitRevisionKind, GitTreeEntry, GitTreeEntryKind,
+        GitChangedFileStatus, GitCompareCapabilities, GitCompareSession, GitCompareSourceKind,
+        GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
+        GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
+        GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
+        GitSnapshotDocument, GitSnapshotOrigin, GitTextMetadata, GitTreeEntry, GitTreeEntryKind,
         GitTreeList,
     };
     use serde_json::json;
@@ -803,6 +909,99 @@ mod tests {
                 "kind": "lfsPointer",
                 "oidSha256": "d".repeat(64),
                 "referencedSize": 123_456,
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_read_only_git_compare_session_contract() {
+        let left_revision = GitRevision {
+            raw_label: "main~1".to_string(),
+            resolved: sha1('a'),
+            kind: GitRevisionKind::Symbolic,
+            display_name: "main~1".to_string(),
+        };
+        let right_revision = GitRevision {
+            raw_label: "main".to_string(),
+            resolved: sha1('b'),
+            kind: GitRevisionKind::Branch,
+            display_name: "main".to_string(),
+        };
+        let path = GitPathIdentity::new(
+            "repository-session-1:path:4:1",
+            "empty.txt",
+            Some("empty.txt"),
+        );
+        let session = GitCompareSession {
+            repository_id: "repository-session-1".to_string(),
+            left: GitSnapshotDocument {
+                origin: GitSnapshotOrigin::Missing,
+                label: "main~1 (aaaaaaaaaaaa) · empty.txt".to_string(),
+                read_only: true,
+                object_id: None,
+                path: Some(path.clone()),
+                mode: None,
+                text_metadata: None,
+                content_state: GitSnapshotContentState::Missing,
+            },
+            right: GitSnapshotDocument {
+                origin: GitSnapshotOrigin::CommittedBlob,
+                label: "main (bbbbbbbbbbbb) · empty.txt".to_string(),
+                read_only: true,
+                object_id: Some(sha1('c')),
+                path: Some(path),
+                mode: Some("100644".to_string()),
+                text_metadata: Some(GitTextMetadata {
+                    encoding: "UTF-8".to_string(),
+                    line_ending: crate::LineEnding::None,
+                    had_final_newline: true,
+                    decode_had_errors: false,
+                    size: 0,
+                }),
+                content_state: GitSnapshotContentState::Text {
+                    text: String::new(),
+                },
+            },
+            source_kind: GitCompareSourceKind::RevisionPair,
+            revision_pair: GitRevisionPair {
+                left: left_revision,
+                right: right_revision,
+            },
+            capabilities: GitCompareCapabilities {
+                edit: false,
+                save: false,
+                hunk_copy: false,
+                export_patch: true,
+            },
+            generation: 4,
+        };
+        let value = serde_json::to_value(session).expect("serialize Git compare session");
+
+        assert_eq!(value["sourceKind"], "revisionPair");
+        assert_eq!(value["left"]["contentState"], json!({ "kind": "missing" }));
+        assert_eq!(value["left"]["objectId"], json!(null));
+        assert_eq!(value["right"]["origin"], "committedBlob");
+        assert_eq!(
+            value["right"]["contentState"],
+            json!({ "kind": "text", "text": "" })
+        );
+        assert_eq!(
+            value["right"]["textMetadata"],
+            json!({
+                "encoding": "UTF-8",
+                "lineEnding": "none",
+                "hadFinalNewline": true,
+                "decodeHadErrors": false,
+                "size": 0,
+            })
+        );
+        assert_eq!(
+            value["capabilities"],
+            json!({
+                "edit": false,
+                "save": false,
+                "hunkCopy": false,
+                "exportPatch": true,
             })
         );
     }

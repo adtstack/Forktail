@@ -339,7 +339,7 @@ export function persistentMergeSessionInput(
 export function persistentCompareSessionInput(
   session: CompareSession,
 ): PersistentCompareSessionInput | null {
-  if (session.origin === "difftool") return null;
+  if (session.origin !== "files") return null;
 
   return {
     kind: "compare",

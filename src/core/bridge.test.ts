@@ -7,7 +7,8 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
-import { exitExternalGitTool, gitToolExecutablePath } from "./bridge";
+import { exitExternalGitTool, gitToolExecutablePath, openGitRevisionCompare } from "./bridge";
+import type { GitRevisionCompareRequest } from "./gitModels";
 
 describe("external Git tool lifecycle bridge", () => {
   afterEach(() => {
@@ -55,5 +56,59 @@ describe("Git tool executable path bridge", () => {
   it("does not invent an executable path in browser or SSR contexts", async () => {
     await expect(gitToolExecutablePath()).rejects.toThrow("Tauri desktop runtime");
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+});
+
+describe("Git revision compare bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("passes only the typed repository operation request and job identity", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ repositoryId: "repository-session-1" });
+    const leftRevision = {
+      rawLabel: "main~1",
+      resolved: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+      kind: "symbolic" as const,
+      displayName: "main~1",
+    };
+    const rightRevision = {
+      rawLabel: "main",
+      resolved: { algorithm: "sha1" as const, hex: "b".repeat(40) },
+      kind: "branch" as const,
+      displayName: "main",
+    };
+    const request = {
+      leftRevision,
+      rightRevision,
+      changedFile: {
+        status: "modified",
+        oldPath: {
+          opaqueId: "repository-session-1:path:4:1",
+          displayPath: "src/file.txt",
+          utf8Path: "src/file.txt",
+        },
+        newPath: {
+          opaqueId: "repository-session-1:path:4:1",
+          displayPath: "src/file.txt",
+          utf8Path: "src/file.txt",
+        },
+        similarityScore: null,
+      },
+      generation: 4,
+    } satisfies GitRevisionCompareRequest;
+
+    await openGitRevisionCompare("repository-session-1", request, 73);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("open_git_revision_compare", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 73,
+    });
   });
 });

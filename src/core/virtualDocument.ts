@@ -3,7 +3,17 @@ import type { CompareSession, FileDocument } from "./models";
 export function isVirtualFileDocument(
   document: Pick<FileDocument, "virtual">,
 ): boolean {
-  return document.virtual?.kind === "missing";
+  return document.virtual !== undefined;
+}
+
+export function isMissingFileDocument(
+  document: Pick<FileDocument, "virtual">,
+): boolean {
+  return document.virtual?.kind === "missing"
+    || (
+      document.virtual?.kind === "gitSnapshot"
+      && document.virtual.contentState === "missing"
+    );
 }
 
 export function compareSessionHasVirtualDocument(session: CompareSession): boolean {

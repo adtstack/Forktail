@@ -68,7 +68,7 @@
 - [X] T023 [US1] GIT-202 UTF-8/UTF-16/binary/64 MiB boundary/type-size mismatch blob 테스트를 `src-tauri/src/git/blob.rs`와 `src-tauri/src/commands/files.rs`에 먼저 추가한다
 - [X] T024 [P] [US1] GIT-203 lazy-fetch/filter/textconv/LFS helper가 0회인 fake/partial-clone 테스트를 `src-tauri/src/git/blob.rs`와 `src/core/networkPolicy.test.ts`에 먼저 추가한다
 - [X] T025 [P] [US1] GIT-301 A/D/M/T/R/C/U/unknown/truncated byte record와 rename score 테스트를 `src-tauri/src/git/changed_files.rs`에 먼저 추가한다
-- [ ] T026 [US1] GIT-302 status-to-session, missing-vs-empty, origin/read-only capability 계약 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
+- [X] T026 [US1] GIT-302 status-to-session, missing-vs-empty, origin/read-only capability 계약 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
 - [ ] T027 [P] [US1] GIT-601 repository open cancel/loading/error/keyboard/200%와 repository→revision pair→changed file diff가 5회 이하 major interaction인 component 테스트를 `src/components/GitCompareView.test.tsx`와 `src/components/StartPage.test.tsx`에 먼저 추가한다
 - [ ] T028 [P] [US1] GIT-602 revision selector race/ambiguity/keyboard/combobox 테스트를 `src/components/GitRevisionSelector.test.tsx`에 먼저 추가한다
 - [ ] T029 [P] [US1] GIT-603 changed-file filter/count/rename/selection/10k virtualization/read-only와 bare/copy/cross-repository 후보 비노출 테스트를 `src/components/GitChangedFiles.test.tsx`와 `src/components/FileCompareView.test.tsx`에 먼저 추가한다
@@ -81,7 +81,7 @@
 - [X] T033 [US1] GIT-202 blob type/size/read와 공유 text decode pipeline을 `src-tauri/src/git/blob.rs`, `src-tauri/src/commands/files.rs`, `src-tauri/src/domain/git.rs`에 구현한다
 - [X] T034 [US1] GIT-203 raw blob/LFS/no-lazy-fetch 상태와 bounded memory cache를 `src-tauri/src/git/blob.rs`, `src-tauri/src/git/runner.rs`에 구현한다
 - [X] T035 [US1] GIT-301 name-status changed-file service와 lossless old/new path mapping을 `src-tauri/src/git/changed_files.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T036 [US1] GIT-302 read-only compare session builder와 TypeScript adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`, `src/core/bridge.ts`에 구현한다
+- [X] T036 [US1] GIT-302 read-only compare session builder와 TypeScript adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`, `src/core/bridge.ts`에 구현한다
 - [ ] T037 [US1] GIT-601 `Open Git Repository` shell과 repository header를 `src/components/StartPage.tsx`, `src/components/GitCompareView.tsx`, `src/App.tsx`에 구현한다
 - [ ] T038 [US1] GIT-602 left/right revision selector와 stale validation handling을 `src/components/GitRevisionSelector.tsx`, `src/components/GitCompareView.tsx`, `src/core/gitSession.ts`에 구현한다
 - [ ] T039 [US1] GIT-603 changed-file sidebar와 기존 read-only diff viewer 연결을 `src/components/GitChangedFiles.tsx`, `src/components/GitCompareView.tsx`, `src/components/FileCompareView.tsx`에 구현한다

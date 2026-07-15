@@ -22,7 +22,7 @@ export const APP_COMMAND_EVENT = "forktail-command";
 
 export interface ShellOpenCommandContext {
   mode: "home" | "compare" | "folders" | "merge";
-  compareOrigin: "files" | "difftool" | null;
+  compareOrigin: "files" | "difftool" | "git" | null;
   mergeOrigin: "files" | "mergetool" | null;
 }
 

@@ -10,6 +10,7 @@ import type {
   WriteResult,
 } from "./models";
 import type { WritePrecondition } from "./mergeSave";
+import type { GitCompareSession, GitRevisionCompareRequest } from "./gitModels";
 
 declare global {
   interface Window {
@@ -66,6 +67,19 @@ export async function chooseSavePath(
 export async function readTextFile(path: string): Promise<FileDocument> {
   requireTauri();
   return invoke<FileDocument>("read_text_file", { path });
+}
+
+export async function openGitRevisionCompare(
+  repositorySessionId: string,
+  request: GitRevisionCompareRequest,
+  jobId: number,
+): Promise<GitCompareSession> {
+  requireTauri();
+  return invoke<GitCompareSession>("open_git_revision_compare", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
 }
 
 export async function statTextFileVersion(path: string): Promise<FileVersion> {

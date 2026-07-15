@@ -8,6 +8,7 @@ use crate::git::jobs::{GitJobError, GitJobs};
 use crate::git::refs::{GitRefError, list_refs};
 use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
 use crate::git::revision::{GitRevisionError, resolve_revision};
+use crate::git::session::{GitSessionError, open_revision_compare};
 use crate::git::tree::{GitTreeError, list_tree};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -34,6 +35,15 @@ pub struct GitChangedFilesRequest {
     pub right_commit: crate::GitObjectId,
     pub hard_limit: usize,
     pub request_generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRevisionCompareRequest {
+    pub left_revision: crate::GitRevision,
+    pub right_revision: crate::GitRevision,
+    pub changed_file: crate::GitChangedFile,
+    pub generation: u64,
 }
 
 #[tauri::command]
@@ -177,6 +187,36 @@ pub async fn read_git_blob(
         .map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
         read_blob(&session, &object_id, lease.cancellation())
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn open_git_revision_compare(
+    repository_session_id: String,
+    request: GitRevisionCompareRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitCompareSession> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        open_revision_compare(
+            &session,
+            &request.left_revision,
+            &request.right_revision,
+            &request.changed_file,
+            request.generation,
+            lease.cancellation(),
+        )
     })
     .await
     .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
@@ -338,6 +378,25 @@ impl From<GitChangedFilesError> for CommandError {
             | GitChangedFilesError::DuplicatePath
             | GitChangedFilesError::StaleGeneration
             | GitChangedFilesError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
+impl From<GitSessionError> for CommandError {
+    fn from(error: GitSessionError) -> Self {
+        match error {
+            GitSessionError::InvalidRevision => Self::git(AppErrorCode::GitInvalidRevision),
+            GitSessionError::UnsupportedStatus => Self::git(AppErrorCode::GitObjectTypeUnsupported),
+            GitSessionError::UnknownPath | GitSessionError::PathUnsupported => {
+                Self::git(AppErrorCode::GitPathUnsupported)
+            }
+            GitSessionError::PathNotAtRevision => Self::git(AppErrorCode::GitPathNotAtRevision),
+            GitSessionError::Cancelled => Self::git(AppErrorCode::GitCommandCancelled),
+            GitSessionError::Tree(error) => error.into(),
+            GitSessionError::Blob(error) => error.into(),
+            GitSessionError::InvalidChangedFile
+            | GitSessionError::StaleGeneration
+            | GitSessionError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
         }
     }
 }
@@ -559,6 +618,38 @@ mod tests {
             assert_eq!(error.code, expected);
             assert!(!error.message.contains("R100"));
             assert!(!error.message.contains("path bytes"));
+        }
+    }
+
+    #[test]
+    fn maps_compare_session_failures_to_stable_non_content_errors() {
+        let cases = [
+            (
+                GitSessionError::InvalidRevision,
+                AppErrorCode::GitInvalidRevision,
+            ),
+            (
+                GitSessionError::PathNotAtRevision,
+                AppErrorCode::GitPathNotAtRevision,
+            ),
+            (
+                GitSessionError::UnsupportedStatus,
+                AppErrorCode::GitObjectTypeUnsupported,
+            ),
+            (
+                GitSessionError::StaleGeneration,
+                AppErrorCode::GitCommandFailed,
+            ),
+            (
+                GitSessionError::Cancelled,
+                AppErrorCode::GitCommandCancelled,
+            ),
+        ];
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("empty.txt"));
+            assert!(!error.message.contains(&"a".repeat(40)));
         }
     }
 }
