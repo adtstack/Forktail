@@ -31,10 +31,23 @@ candidatePath: user-selected folder path
 
 **Response**: `GitRepositorySummary`
 
+The response contains display-safe root and typed worktree/HEAD metadata only. Canonical root, worktree Git directory,
+common Git directory, executable identity, and runner remain in the backend session. Opening a new repository replaces
+the single active MVP session and invalidates the previous session ID.
+
 **Errors**: `GIT_NOT_FOUND`, `GIT_VERSION_UNSUPPORTED`, `GIT_NOT_REPOSITORY`,
 `GIT_UNSAFE_REPOSITORY`, `GIT_BARE_UNSUPPORTED`, `GIT_PATH_UNSUPPORTED`.
 
 **Mutation contract**: none.
+
+### `close_git_repository`
+
+**Request**: active `repositorySessionId`.
+
+**Response**: empty acknowledgement. Closing an already-replaced or already-closed ID is idempotent and cannot close a
+newer session.
+
+**Mutation contract**: backend in-memory session state only; repository files and Git state are unchanged.
 
 ### `resolve_git_revision`
 

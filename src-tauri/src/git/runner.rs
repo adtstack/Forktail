@@ -43,19 +43,60 @@ const SAFE_GIT_ENVIRONMENT: [(&str, &str); 5] = [
     ("GIT_PAGER", "cat"),
 ];
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum GitOperation {
     Version,
+    Repository {
+        candidate: PathBuf,
+        query: RepositoryQuery,
+    },
 }
 
 impl GitOperation {
-    fn arguments(self) -> Vec<OsString> {
-        SAFE_GLOBAL_ARGUMENTS
+    fn arguments(&self) -> Vec<OsString> {
+        let mut arguments = SAFE_GLOBAL_ARGUMENTS
             .iter()
             .copied()
-            .chain(["version"])
             .map(OsString::from)
-            .collect()
+            .collect::<Vec<_>>();
+        match self {
+            Self::Version => arguments.push(OsString::from("version")),
+            Self::Repository { candidate, query } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(candidate.as_os_str().to_owned());
+                arguments.extend(query.arguments().iter().map(OsString::from));
+            }
+        }
+        arguments
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RepositoryQuery {
+    Bare,
+    Root,
+    GitDir,
+    CommonDir,
+    Metadata,
+    HeadCommit,
+    SymbolicHead,
+}
+
+impl RepositoryQuery {
+    fn arguments(self) -> &'static [&'static str] {
+        match self {
+            Self::Bare => &["rev-parse", "--is-bare-repository"],
+            Self::Root => &["rev-parse", "--path-format=absolute", "--show-toplevel"],
+            Self::GitDir => &["rev-parse", "--path-format=absolute", "--absolute-git-dir"],
+            Self::CommonDir => &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+            Self::Metadata => &[
+                "rev-parse",
+                "--is-shallow-repository",
+                "--show-object-format=storage",
+            ],
+            Self::HeadCommit => &["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"],
+            Self::SymbolicHead => &["symbolic-ref", "--quiet", "HEAD"],
+        }
     }
 }
 
@@ -189,21 +230,45 @@ fn validate_executable(executable: &Path) -> Result<(), RunnerError> {
 }
 
 fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError> {
-    if arguments.len() != SAFE_GLOBAL_ARGUMENTS.len() + 1 {
-        return Err(RunnerError::ForbiddenOperation);
-    }
     let safe_prefix = arguments
         .iter()
         .zip(SAFE_GLOBAL_ARGUMENTS)
         .all(|(actual, expected)| actual == OsStr::new(expected));
-    if !safe_prefix
-        || arguments
-            .last()
-            .is_none_or(|argument| argument != "version")
-    {
+    if !safe_prefix || arguments.len() <= SAFE_GLOBAL_ARGUMENTS.len() {
         return Err(RunnerError::ForbiddenOperation);
     }
-    Ok(())
+    let operation = &arguments[SAFE_GLOBAL_ARGUMENTS.len()..];
+    if operation == [OsString::from("version")] {
+        return Ok(());
+    }
+    if operation.len() < 4 || operation[0] != "-C" || !Path::new(&operation[1]).is_absolute() {
+        return Err(RunnerError::ForbiddenOperation);
+    }
+    let query_arguments = &operation[2..];
+    let approved = [
+        RepositoryQuery::Bare,
+        RepositoryQuery::Root,
+        RepositoryQuery::GitDir,
+        RepositoryQuery::CommonDir,
+        RepositoryQuery::Metadata,
+        RepositoryQuery::HeadCommit,
+        RepositoryQuery::SymbolicHead,
+    ]
+    .iter()
+    .any(|query| os_arguments_equal(query_arguments, query.arguments()));
+    if approved {
+        Ok(())
+    } else {
+        Err(RunnerError::ForbiddenOperation)
+    }
+}
+
+fn os_arguments_equal(actual: &[OsString], expected: &[&str]) -> bool {
+    actual.len() == expected.len()
+        && actual
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| actual == OsStr::new(expected))
 }
 
 fn safe_environment_from<I>(inherited: I) -> BTreeMap<OsString, OsString>
@@ -640,8 +705,8 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        CancellationToken, GitOperation, OutputStream, ProductionGitRunner, RunnerError,
-        RunnerLimits, SAFE_GLOBAL_ARGUMENTS,
+        CancellationToken, GitOperation, OutputStream, ProductionGitRunner, RepositoryQuery,
+        RunnerError, RunnerLimits, SAFE_GLOBAL_ARGUMENTS,
         fixture::{FixtureGitRunner, FixtureProcess},
         safe_environment_from, validate_approved_arguments,
     };
@@ -681,6 +746,41 @@ mod tests {
             plan.environment.get(OsStr::new("GIT_PAGER")),
             Some(&OsString::from("cat"))
         );
+    }
+
+    #[test]
+    fn repository_operations_allow_only_absolute_context_and_exact_read_queries() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let candidate = std::env::temp_dir().join("repository with spaces 한글");
+
+        for query in [
+            RepositoryQuery::Bare,
+            RepositoryQuery::Root,
+            RepositoryQuery::GitDir,
+            RepositoryQuery::CommonDir,
+            RepositoryQuery::Metadata,
+            RepositoryQuery::HeadCommit,
+            RepositoryQuery::SymbolicHead,
+        ] {
+            let plan = runner
+                .plan(GitOperation::Repository {
+                    candidate: candidate.clone(),
+                    query,
+                })
+                .expect("typed repository query should be approved");
+            assert_eq!(plan.arguments[SAFE_GLOBAL_ARGUMENTS.len()], "-C");
+            assert_eq!(plan.arguments[SAFE_GLOBAL_ARGUMENTS.len() + 1], candidate);
+            assert!(validate_approved_arguments(&plan.arguments).is_ok());
+        }
+
+        let error = runner
+            .plan(GitOperation::Repository {
+                candidate: PathBuf::from("relative-repository"),
+                query: RepositoryQuery::Root,
+            })
+            .expect_err("relative repository context must fail closed");
+        assert_eq!(error, RunnerError::ForbiddenOperation);
     }
 
     #[test]

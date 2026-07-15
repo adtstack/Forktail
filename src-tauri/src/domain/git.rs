@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -138,6 +139,14 @@ pub struct GitRepositorySummary {
     pub is_shallow: bool,
     pub object_format: GitObjectAlgorithm,
     pub head: GitHeadState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GitRepositoryIdentity {
+    pub root: PathBuf,
+    pub git_dir: PathBuf,
+    pub common_dir: PathBuf,
+    pub object_format: GitObjectAlgorithm,
 }
 
 #[cfg(test)]

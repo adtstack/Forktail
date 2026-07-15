@@ -382,6 +382,16 @@ cargo test
 - 테스트 선행 증거: 구현 전 `cargo test executable`은 executable/version/discovery API 미정의 compile error로 실패했다. 구현 후 Windows/macOS/Linux candidate와 fake version/capability fixture가 통과했다.
 - 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/358 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 75 tests 통과/0 ignored. macOS 실제 probe는 `/usr/bin/git`의 safe-global invocation에서 `git version 2.50.1 (Apple Git-155)`로 통과했다. Windows/Linux packaged Git probe는 사용자가 실행할 항목으로 남긴다.
 
+### GIT-004 repository identity and session lifecycle — 2026-07-15
+
+- 변경 파일: `src-tauri/src/git/repository.rs`, `src-tauri/src/git/runner.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/domain/git.rs`, `src-tauri/src/lib.rs`, Git command contract와 task/검증 기록을 갱신했다.
+- 수용 기준: absolute directory candidate에서 typed allowlist로 bare 여부, canonical worktree root, absolute worktree Git dir, common Git dir, shallow state, storage object format, immutable HEAD commit, symbolic HEAD를 조회한다. linked worktree는 Git dir/common dir identity 차이로 분류하고 branch/detached/unborn과 SHA-1/SHA-256 full object ID를 반환한다. canonical root/git-dir/common-dir, executable과 runner는 backend session에만 남고 frontend에는 display-safe root와 typed summary만 직렬화한다.
+- session lifecycle: 앱은 한 active repository session을 관리한다. 새 open은 이전 opaque session ID를 무효화하고, stale close는 새 session을 닫지 않으며 close는 idempotent하다. session은 검증된 executable path와 production runner를 함께 소유해 PATH 변경과 다른 repository handle 재사용을 막는다.
+- 실패/경계: relative/missing/deleted/non-directory/final-symlink candidate는 `GIT_PATH_UNSUPPORTED`, non-repository는 `GIT_NOT_REPOSITORY`, `safe.directory` token이 있는 dubious ownership 실패는 raw stderr를 노출하지 않고 `GIT_UNSAFE_REPOSITORY`, bare는 `GIT_BARE_UNSUPPORTED`로 변환한다. unknown object format은 typed `unknown`으로 보존하고 malformed/truncated metadata와 HEAD는 generic stable Git failure로 축약한다. `safe.directory=*` 우회나 config mutation은 추가하지 않았다.
+- 테스트: 격리 HOME/config를 쓰는 `cfg(test)` mutation helper로 space/Unicode temp repository를 생성했다. root와 nested open, normal branch, linked worktree+detached HEAD, unborn, SHA-256 64자리 ID, non-repo, bare, deleted candidate, Unix picker symlink, unsafe classifier, shallow/unknown-format parser, active-session replacement/close를 검증했다. normal open 전후 `.git/HEAD`, config, index, branch ref bytes와 mtime이 모두 동일했다. fixture Git mutation은 production operation/type과 분리했고 통합 fixture는 직렬화해 process-tree timeout 테스트의 startup budget과 경합하지 않게 했다.
+- 테스트 선행 증거: 구현 전 `cargo test repository`는 repository error/session/classifier API 미정의 compile error로 실패했다. 구현 후 focused repository 테스트와 전체 suite가 통과했다.
+- 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/358 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 84 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux repository fixture 실행은 사용자가 확인할 항목으로 남긴다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.

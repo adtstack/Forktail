@@ -2,7 +2,10 @@ use crate::error::{AppErrorCode, CommandError, CommandResult};
 use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
+use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
 use serde::Serialize;
+use std::path::PathBuf;
+use tauri::State;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -20,6 +23,26 @@ pub fn check_git_availability() -> CommandResult<GitRuntimeStatus> {
     })
 }
 
+#[tauri::command]
+pub fn detect_git_repository(
+    candidate_path: String,
+    sessions: State<'_, GitRepositorySessions>,
+) -> CommandResult<crate::GitRepositorySummary> {
+    sessions
+        .open(PathBuf::from(candidate_path), None)
+        .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub fn close_git_repository(
+    repository_session_id: String,
+    sessions: State<'_, GitRepositorySessions>,
+) -> CommandResult<()> {
+    sessions
+        .close(&repository_session_id)
+        .map_err(CommandError::from)
+}
+
 impl From<GitExecutableError> for CommandError {
     fn from(error: GitExecutableError) -> Self {
         match error {
@@ -33,6 +56,24 @@ impl From<GitExecutableError> for CommandError {
                 Self::git(AppErrorCode::GitVersionUnsupported)
             }
             GitExecutableError::Probe(error) => error.into(),
+        }
+    }
+}
+
+impl From<GitRepositoryError> for CommandError {
+    fn from(error: GitRepositoryError) -> Self {
+        match error {
+            GitRepositoryError::Executable(error) => error.into(),
+            GitRepositoryError::Runner(error) => error.into(),
+            GitRepositoryError::PathUnsupported => Self::git(AppErrorCode::GitPathUnsupported),
+            GitRepositoryError::NotRepository => Self::git(AppErrorCode::GitNotRepository),
+            GitRepositoryError::UnsafeRepository => Self::git(AppErrorCode::GitUnsafeRepository),
+            GitRepositoryError::BareUnsupported => Self::git(AppErrorCode::GitBareUnsupported),
+            GitRepositoryError::InvalidOutput
+            | GitRepositoryError::InvalidHead
+            | GitRepositoryError::SessionStateUnavailable => {
+                Self::git(AppErrorCode::GitCommandFailed)
+            }
         }
     }
 }
@@ -78,6 +119,38 @@ mod tests {
 
         for (source, expected) in cases {
             assert_eq!(CommandError::from(source).code, expected);
+        }
+    }
+
+    #[test]
+    fn maps_repository_failures_without_raw_git_details() {
+        let cases = [
+            (
+                GitRepositoryError::PathUnsupported,
+                AppErrorCode::GitPathUnsupported,
+            ),
+            (
+                GitRepositoryError::NotRepository,
+                AppErrorCode::GitNotRepository,
+            ),
+            (
+                GitRepositoryError::UnsafeRepository,
+                AppErrorCode::GitUnsafeRepository,
+            ),
+            (
+                GitRepositoryError::BareUnsupported,
+                AppErrorCode::GitBareUnsupported,
+            ),
+            (
+                GitRepositoryError::InvalidOutput,
+                AppErrorCode::GitCommandFailed,
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("stderr"));
         }
     }
 }

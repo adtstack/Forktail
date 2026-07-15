@@ -45,8 +45,8 @@
 - [X] T013 GIT-002 stable Git error와 object/path/repository DTO를 `src-tauri/src/error.rs`, `src-tauri/src/domain/git.rs`, `src/core/errors.ts`, `src/core/gitModels.ts`에 구현한다
 - [X] T014 [P] GIT-003 Git discovery/version/capability와 공백·Unicode executable path 테스트를 `src-tauri/src/git/executable.rs`에 먼저 추가한다
 - [X] T015 GIT-003 absolute Git executable discovery와 fail-closed capability gate를 `src-tauri/src/git/executable.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T016 GIT-004 root/nested/non-repo/bare/linked-worktree/detached/unsafe repository integration 테스트를 `src-tauri/src/git/repository.rs`에 먼저 추가한다
-- [ ] T017 GIT-004 repository identity와 session lifecycle을 `src-tauri/src/git/repository.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/domain/git.rs`에 구현한다
+- [X] T016 GIT-004 root/nested/non-repo/bare/linked-worktree/detached/unsafe repository integration 테스트를 `src-tauri/src/git/repository.rs`에 먼저 추가한다
+- [X] T017 GIT-004 repository identity와 session lifecycle을 `src-tauri/src/git/repository.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/domain/git.rs`에 구현한다
 - [ ] T018 [P] GIT-005 NUL/truncated/non-UTF-8/control-byte/duplicate opaque ID parser 테스트를 `src-tauri/src/git/parsers.rs`에 먼저 추가한다
 - [ ] T019 GIT-005 byte-preserving parser primitive와 session-scoped opaque path map을 `src-tauri/src/git/parsers.rs`, `src-tauri/src/domain/git.rs`에 구현한다
 
