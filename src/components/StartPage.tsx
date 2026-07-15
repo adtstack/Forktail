@@ -23,6 +23,7 @@ interface StartPageProps {
   onOpenCompare: () => void;
   onOpenFolders: () => void;
   onOpenMerge: () => void;
+  onOpenGitRepository: () => void;
   onDropCompareFiles: (paths: [string, string]) => void;
   onDropRejected: (message: string) => void;
   onDemoCompare: () => void;
@@ -44,6 +45,7 @@ export function StartPage({
   onOpenCompare,
   onOpenFolders,
   onOpenMerge,
+  onOpenGitRepository,
   onDropCompareFiles,
   onDropRejected,
   onDemoCompare,
@@ -142,6 +144,18 @@ export function StartPage({
             <span className="action-copy">
               <strong>{text.mergeTitle}</strong>
               <small>{text.mergeDescription}</small>
+            </span>
+          </button>
+          <button
+            className="action-card"
+            onClick={onOpenGitRepository}
+            disabled={busy}
+            aria-keyshortcuts={commandAriaKeyshortcuts("openGitRepository")}
+          >
+            <span className="action-icon">G</span>
+            <span className="action-copy">
+              <strong>{text.gitRepositoryTitle}</strong>
+              <small>{text.gitRepositoryDescription}</small>
             </span>
           </button>
         </section>

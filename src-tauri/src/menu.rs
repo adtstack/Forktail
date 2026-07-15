@@ -9,6 +9,7 @@ const COMMAND_IDS: &[&str] = &[
     "openCompare",
     "openFolders",
     "openMerge",
+    "openGitRepository",
     "save",
     "saveAs",
     "undo",
@@ -48,6 +49,13 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
         true,
         Some("CmdOrCtrl+Alt+O"),
     )?;
+    let open_git_repository = MenuItem::with_id(
+        app,
+        "openGitRepository",
+        "Open Git Repository",
+        true,
+        Some("CmdOrCtrl+Alt+G"),
+    )?;
     let save = MenuItem::with_id(app, "save", "Save", true, Some("CmdOrCtrl+S"))?;
     let save_as = MenuItem::with_id(app, "saveAs", "Save As", true, Some("CmdOrCtrl+Shift+S"))?;
     let file_separator_one = PredefinedMenuItem::separator(app)?;
@@ -62,6 +70,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
             &open_compare,
             &open_folders,
             &open_merge,
+            &open_git_repository,
             &file_separator_one,
             &save,
             &save_as,

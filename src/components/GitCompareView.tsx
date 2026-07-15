@@ -1,0 +1,201 @@
+import type { GitRepositorySummary } from "../core/gitModels";
+import type { AppLanguage } from "../core/settings";
+
+export type GitRepositoryScreenState =
+  | { kind: "loading"; requestId: number }
+  | { kind: "error"; message: string }
+  | { kind: "ready"; repository: GitRepositorySummary };
+
+export interface GitRepositoryExitPlan {
+  releaseRequestId: number | null;
+  closeSessionId: string | null;
+}
+
+export function isCurrentGitRepositoryRequest(
+  activeRequestId: number,
+  responseRequestId: number,
+): boolean {
+  return activeRequestId === responseRequestId;
+}
+
+export function planGitRepositoryExit(
+  state: GitRepositoryScreenState | null,
+): GitRepositoryExitPlan {
+  if (state?.kind === "loading") {
+    return { releaseRequestId: state.requestId, closeSessionId: null };
+  }
+  if (state?.kind === "ready") {
+    return {
+      releaseRequestId: null,
+      closeSessionId: state.repository.sessionId,
+    };
+  }
+  return { releaseRequestId: null, closeSessionId: null };
+}
+
+interface GitCompareViewProps {
+  state: GitRepositoryScreenState;
+  languageMode?: AppLanguage;
+  onBack: () => void;
+  onOpenRepository: () => void;
+  onCancelOpen: () => void;
+}
+
+const GIT_COMPARE_TEXT = {
+  en: {
+    aria: "Repository review",
+    eyebrow: "LOCAL GIT SNAPSHOTS",
+    title: "Repository review",
+    loading: "Opening Git repository…",
+    loadingDetail: "Validating the selected folder and local Git metadata.",
+    cancelOpening: "Cancel opening",
+    errorTitle: "Repository unavailable",
+    chooseAnother: "Choose another folder",
+    back: "Back to start",
+    openAnother: "Open another repository",
+    root: "Repository root",
+    currentBranch: "Current branch",
+    detached: "Detached HEAD",
+    noCommits: "No commits yet",
+    noCommitsDetail: "Create the first commit outside Forktail, then open the repository again.",
+    linkedWorktree: "Linked worktree",
+    shallow: "Shallow history",
+    localOnly: "Local snapshots only",
+    readOnly: "Read-only review",
+    readyPrompt: "Choose two local revisions to start reviewing committed changes.",
+  },
+  ko: {
+    aria: "저장소 검토",
+    eyebrow: "로컬 GIT SNAPSHOT",
+    title: "저장소 검토",
+    loading: "Git 저장소를 여는 중…",
+    loadingDetail: "선택한 폴더와 로컬 Git metadata를 검증하고 있습니다.",
+    cancelOpening: "열기 취소",
+    errorTitle: "저장소를 열 수 없음",
+    chooseAnother: "다른 폴더 선택",
+    back: "시작 화면으로",
+    openAnother: "다른 저장소 열기",
+    root: "저장소 root",
+    currentBranch: "현재 branch",
+    detached: "분리된 HEAD",
+    noCommits: "아직 commit 없음",
+    noCommitsDetail: "Forktail 밖에서 첫 commit을 만든 뒤 저장소를 다시 여세요.",
+    linkedWorktree: "연결된 worktree",
+    shallow: "Shallow history",
+    localOnly: "로컬 snapshot 전용",
+    readOnly: "읽기 전용 검토",
+    readyPrompt: "검토할 로컬 revision 두 개를 선택하세요.",
+  },
+} as const;
+
+export function GitCompareView({
+  state,
+  languageMode = "en",
+  onBack,
+  onOpenRepository,
+  onCancelOpen,
+}: GitCompareViewProps) {
+  const text = GIT_COMPARE_TEXT[languageMode];
+
+  if (state.kind === "loading") {
+    return (
+      <main className="git-repository-shell" aria-label={text.aria} aria-busy="true">
+        <section className="git-repository-state" role="status" aria-live="polite">
+          <span className="eyebrow">{text.eyebrow}</span>
+          <h1>{text.loading}</h1>
+          <p>{text.loadingDetail}</p>
+          <button type="button" onClick={onCancelOpen}>{text.cancelOpening}</button>
+        </section>
+      </main>
+    );
+  }
+
+  if (state.kind === "error") {
+    return (
+      <main className="git-repository-shell" aria-label={text.aria}>
+        <section className="git-repository-state" role="alert">
+          <span className="eyebrow">{text.eyebrow}</span>
+          <h1>{text.errorTitle}</h1>
+          <p>{state.message}</p>
+          <div className="git-repository-actions">
+            <button type="button" onClick={onOpenRepository}>{text.chooseAnother}</button>
+            <button type="button" onClick={onBack}>{text.back}</button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  const repository = state.repository;
+  const head = repositoryHeadPresentation(repository, text);
+  return (
+    <main className="git-repository-shell" aria-label={text.aria}>
+      <header className="git-repository-header">
+        <div>
+          <span className="eyebrow">{text.eyebrow}</span>
+          <h1>{text.title}</h1>
+          <code className="git-repository-root" title={repository.displayRoot}>
+            {repository.displayRoot}
+          </code>
+        </div>
+        <div className="git-repository-actions">
+          <button type="button" onClick={onOpenRepository}>{text.openAnother}</button>
+          <button type="button" onClick={onBack}>{text.back}</button>
+        </div>
+      </header>
+
+      <section className="git-repository-summary" aria-label={text.aria}>
+        <dl>
+          <div>
+            <dt>{text.root}</dt>
+            <dd className="git-repository-root">{repository.displayRoot}</dd>
+          </div>
+          <div>
+            <dt>{head.label}</dt>
+            <dd>{head.value}</dd>
+          </div>
+        </dl>
+        <div className="git-repository-badges">
+          <span>{text.localOnly}</span>
+          <span>{text.readOnly}</span>
+          {repository.isLinkedWorktree && <span>{text.linkedWorktree}</span>}
+          {repository.isShallow && <span>{text.shallow}</span>}
+        </div>
+      </section>
+
+      {repository.head.kind === "unborn" ? (
+        <section className="git-review-empty" role="status">
+          <strong>{text.noCommits}</strong>
+          <p>{text.noCommitsDetail}</p>
+        </section>
+      ) : (
+        <section className="git-review-empty" role="status">
+          <p>{text.readyPrompt}</p>
+        </section>
+      )}
+    </main>
+  );
+}
+
+function repositoryHeadPresentation(
+  repository: GitRepositorySummary,
+  text: (typeof GIT_COMPARE_TEXT)[AppLanguage],
+): { label: string; value: string } {
+  if (repository.head.kind === "unborn") {
+    return { label: text.currentBranch, value: text.noCommits };
+  }
+  if (repository.head.kind === "detached") {
+    return {
+      label: text.detached,
+      value: shortObjectId(repository.head.objectId.hex),
+    };
+  }
+  return {
+    label: text.currentBranch,
+    value: `${repository.head.displayName} · ${shortObjectId(repository.head.objectId.hex)}`,
+  };
+}
+
+function shortObjectId(hex: string): string {
+  return hex.slice(0, 12);
+}

@@ -1,6 +1,6 @@
 import type { GitCompareSession as GitSnapshotCompareSession } from "./gitModels";
 
-export type AppMode = "home" | "compare" | "folders" | "merge";
+export type AppMode = "home" | "compare" | "folders" | "merge" | "git";
 
 export const appErrorCodes = [
   "CANCELLED",

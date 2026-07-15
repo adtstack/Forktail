@@ -422,7 +422,7 @@ input, select {
 }
 .action-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 .start-page.is-drop-active .action-grid {
@@ -593,6 +593,77 @@ input, select {
   border-radius: 6px;
   padding: 3px 7px;
   font-size: 11px;
+}
+
+.git-repository-shell {
+  height: 100%;
+  overflow: auto;
+  padding: clamp(18px, 3vw, 34px);
+  background: var(--bg);
+}
+.git-repository-header {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.git-repository-header h1,
+.git-repository-state h1 { margin: 6px 0 8px; }
+.git-repository-root {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: var(--muted-text);
+}
+.git-repository-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.git-repository-state,
+.git-repository-summary,
+.git-review-empty {
+  max-width: 1120px;
+  margin: 18px auto 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+.git-repository-state { margin-top: min(20vh, 140px); }
+.git-repository-state p,
+.git-review-empty p { color: var(--muted-text); line-height: 1.5; }
+.git-repository-summary dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+}
+.git-repository-summary dl > div { min-width: 0; }
+.git-repository-summary dt {
+  color: var(--muted-text);
+  font-size: 12px;
+}
+.git-repository-summary dd { margin: 4px 0 0; font-weight: 700; }
+.git-repository-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 14px;
+}
+.git-repository-badges span {
+  padding: 4px 7px;
+  border: 1px solid var(--pill-border);
+  border-radius: 6px;
+  background: var(--pill-bg);
+  color: var(--pill-text);
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .git-tool-setup {
@@ -1266,6 +1337,9 @@ input, select {
   .start-assurance { justify-content: flex-start; max-width: none; }
   .action-grid { grid-template-columns: 1fr; }
   .action-card { min-height: 70px; }
+  .git-repository-header { grid-template-columns: 1fr; align-items: start; }
+  .git-repository-actions { justify-content: flex-start; }
+  .git-repository-summary dl { grid-template-columns: 1fr; }
   .start-lower-grid { grid-template-columns: 1fr; }
   .git-tool-controls,
   .git-tool-snippets { grid-template-columns: 1fr; }

@@ -1,11 +1,19 @@
 import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
 import { FolderCompareView } from "./components/FolderCompareView";
+import {
+  GitCompareView,
+  isCurrentGitRepositoryRequest,
+  planGitRepositoryExit,
+  type GitRepositoryScreenState,
+} from "./components/GitCompareView";
 import { StartPage } from "./components/StartPage";
 import {
   cancelFolderScan as cancelFolderScanJob,
   chooseDirectory,
   chooseSavePath,
   chooseTextFile,
+  closeGitRepository,
+  detectGitRepository,
   exitExternalGitTool,
   isTauriRuntime,
   listFileBackups,
@@ -167,6 +175,8 @@ export default function App() {
   const [folderResult, setFolderResult] = useState<FolderScanResult | null>(null);
   const [folderOptions, setFolderOptions] = useState(() => loadFolderScanOptions());
   const [mergeSession, setMergeSession] = useState<MergeSession | null>(null);
+  const [gitRepositoryState, setGitRepositoryState] =
+    useState<GitRepositoryScreenState | null>(null);
   const [savedMergeResult, setSavedMergeResult] = useState<string | null>(null);
   const [mergeOutputVersion, setMergeOutputVersion] = useState<WritePrecondition | null>(null);
   const [mergeRecoveryDraft, setMergeRecoveryDraft] = useState<MergeRecoveryDraft | null>(null);
@@ -197,6 +207,11 @@ export default function App() {
   const allowWindowClose = useRef(false);
   const activeFolderScanId = useRef(0);
   const releasedFolderScanIds = useRef(new Set<number>());
+  const activeGitRepositoryRequestId = useRef(0);
+  const releasedGitRepositoryRequestIds = useRef(new Set<number>());
+  const gitRepositoryPickerActive = useRef(false);
+  const gitRepositoryProbeTail = useRef<Promise<void>>(Promise.resolve());
+  const gitRepositoryStateRef = useRef<GitRepositoryScreenState | null>(null);
   const attemptedActiveSessionRestore = useRef(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [showUnresolvedSaveDialog, setShowUnresolvedSaveDialog] = useState(false);
@@ -204,6 +219,7 @@ export default function App() {
 
   const busy = busyCount > 0;
   const appText = APP_TEXT[languageMode];
+  gitRepositoryStateRef.current = gitRepositoryState;
 
   const beginBusy = useCallback(() => {
     setBusyCount((current) => current + 1);
@@ -721,6 +737,11 @@ export default function App() {
 
     if (mode === "home") {
       saveActiveSession(null);
+      return;
+    }
+
+    if (mode === "git") {
+      saveActiveSession(null);
     }
   }, [
     activeSessionStorageReady,
@@ -745,6 +766,24 @@ export default function App() {
     if (!hasUnsavedMergeChanges(mergeSession.result, savedMergeResult)) return;
     saveMergeRecoveryDraft(mergeSession);
   }, [mergeRecoveryEnabled, mergeSession, mode, savedMergeResult]);
+
+  useEffect(() => {
+    if (mode === "git") return;
+    const state = gitRepositoryStateRef.current;
+    if (!state) return;
+
+    activeGitRepositoryRequestId.current += 1;
+    const exitPlan = planGitRepositoryExit(state);
+    if (exitPlan.releaseRequestId != null) {
+      if (!releasedGitRepositoryRequestIds.current.has(exitPlan.releaseRequestId)) {
+        releasedGitRepositoryRequestIds.current.add(exitPlan.releaseRequestId);
+        endBusy();
+      }
+    } else if (exitPlan.closeSessionId != null) {
+      void closeGitRepository(exitPlan.closeSessionId).catch(() => {});
+    }
+    setGitRepositoryState(null);
+  }, [endBusy, mode]);
 
   const requestLeaveActiveSession = useCallback((leave: () => void) => {
     if (!activeUnsavedMessage) {
@@ -787,6 +826,100 @@ export default function App() {
     setShowUnresolvedSaveDialog(false);
     save?.();
   }, []);
+
+  const openGitRepository = useCallback(() => {
+    if (
+      gitRepositoryPickerActive.current
+      || gitRepositoryStateRef.current?.kind === "loading"
+    ) return;
+    requestLeaveActiveSession(() => {
+      void (async () => {
+        gitRepositoryPickerActive.current = true;
+        let candidatePath: string | null;
+        try {
+          candidatePath = await chooseDirectory(appText.chooseGitRepository);
+        } catch (caught) {
+          setError(errorMessage(caught, languageMode));
+          return;
+        } finally {
+          gitRepositoryPickerActive.current = false;
+        }
+        if (!candidatePath) return;
+
+        const requestId = activeGitRepositoryRequestId.current + 1;
+        activeGitRepositoryRequestId.current = requestId;
+        const previousState = gitRepositoryStateRef.current;
+        beginBusy();
+        setError(null);
+        setMessage(null);
+        setRecentSessionFailure(null);
+        setGitRepositoryState({ kind: "loading", requestId });
+        setMode("git");
+
+        const precedingProbe = gitRepositoryProbeTail.current;
+        let releaseProbeSlot = () => {};
+        const probeSlot = new Promise<void>((resolve) => {
+          releaseProbeSlot = resolve;
+        });
+        gitRepositoryProbeTail.current = precedingProbe.then(() => probeSlot);
+        await precedingProbe;
+
+        try {
+          if (previousState?.kind === "ready") {
+            await closeGitRepository(previousState.repository.sessionId);
+          }
+          if (!isCurrentGitRepositoryRequest(activeGitRepositoryRequestId.current, requestId)) {
+            return;
+          }
+
+          const repository = await detectGitRepository(candidatePath);
+          if (!isCurrentGitRepositoryRequest(activeGitRepositoryRequestId.current, requestId)) {
+            await closeGitRepository(repository.sessionId).catch(() => {});
+            return;
+          }
+          setGitRepositoryState({ kind: "ready", repository });
+        } catch (caught) {
+          if (!isCurrentGitRepositoryRequest(activeGitRepositoryRequestId.current, requestId)) {
+            return;
+          }
+          const message = errorMessage(caught, languageMode);
+          setError(message);
+          setGitRepositoryState({ kind: "error", message });
+        } finally {
+          releaseProbeSlot();
+          if (!releasedGitRepositoryRequestIds.current.delete(requestId)) {
+            endBusy();
+          }
+        }
+      })();
+    });
+  }, [
+    appText.chooseGitRepository,
+    beginBusy,
+    endBusy,
+    languageMode,
+    requestLeaveActiveSession,
+  ]);
+
+  const leaveGitRepository = useCallback(() => {
+    requestLeaveActiveSession(() => {
+      const state = gitRepositoryStateRef.current;
+      activeGitRepositoryRequestId.current += 1;
+      const exitPlan = planGitRepositoryExit(state);
+      if (exitPlan.releaseRequestId != null) {
+        if (!releasedGitRepositoryRequestIds.current.has(exitPlan.releaseRequestId)) {
+          releasedGitRepositoryRequestIds.current.add(exitPlan.releaseRequestId);
+          endBusy();
+        }
+      } else if (exitPlan.closeSessionId != null) {
+        void closeGitRepository(exitPlan.closeSessionId).catch(() => {});
+      }
+      setGitRepositoryState(null);
+      setMode("home");
+      setMessage(null);
+      setError(null);
+    });
+  }, [endBusy, requestLeaveActiveSession]);
 
   const backHome = () => {
     requestLeaveActiveSession(() => {
@@ -1315,6 +1448,10 @@ export default function App() {
       mergeOrigin: mergeSession?.origin ?? null,
     })) return;
 
+    if (commandId === "openGitRepository") {
+      openGitRepository();
+      return;
+    }
     if (commandId === "openMerge") {
       openMerge();
       return;
@@ -1326,11 +1463,24 @@ export default function App() {
     if (commandId === "openCompare") {
       openCompare();
     }
-  }, [compareSession?.origin, mergeSession?.origin, mode, openCompare, openFolders, openMerge]);
+  }, [
+    compareSession?.origin,
+    mergeSession?.origin,
+    mode,
+    openCompare,
+    openFolders,
+    openGitRepository,
+    openMerge,
+  ]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      if (matchesCommandShortcut("openGitRepository", event)) {
+        event.preventDefault();
+        handleShellCommand("openGitRepository");
+        return;
+      }
       if (matchesCommandShortcut("openMerge", event)) {
         event.preventDefault();
         handleShellCommand("openMerge");
@@ -1485,6 +1635,7 @@ export default function App() {
             onOpenCompare={openCompare}
             onOpenFolders={openFolders}
             onOpenMerge={openMerge}
+            onOpenGitRepository={openGitRepository}
             onDropCompareFiles={openDroppedCompareFiles}
             onDropRejected={rejectDroppedFiles}
             onOpenRecentSession={openRecentSession}
@@ -1510,6 +1661,16 @@ export default function App() {
                 setMode("merge");
               });
             }}
+          />
+        )}
+
+        {mode === "git" && gitRepositoryState && (
+          <GitCompareView
+            state={gitRepositoryState}
+            languageMode={languageMode}
+            onBack={leaveGitRepository}
+            onOpenRepository={openGitRepository}
+            onCancelOpen={leaveGitRepository}
           />
         )}
 

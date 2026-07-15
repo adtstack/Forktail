@@ -31,6 +31,8 @@ export const START_PAGE_TEXT = {
     folderDescription: "Filter status and choose hash depth.",
     mergeTitle: "3-way Merge",
     mergeDescription: "Resolve conflicts and save the result.",
+    gitRepositoryTitle: "Open Git Repository",
+    gitRepositoryDescription: "Review local committed snapshots without checkout or fetch.",
     dropHint: "Drop two files here to open a 2-way compare.",
     dropPathUnavailable:
       "Cannot read the dropped file path. Drop local files in the desktop app.",
@@ -77,6 +79,8 @@ export const START_PAGE_TEXT = {
     folderDescription: "상태를 필터링하고 해시 깊이를 선택합니다.",
     mergeTitle: "3-way 병합",
     mergeDescription: "충돌을 해결하고 결과를 저장합니다.",
+    gitRepositoryTitle: "Git 저장소 열기",
+    gitRepositoryDescription: "checkout이나 fetch 없이 로컬 commit snapshot을 검토합니다.",
     dropHint: "파일 두 개를 이 화면에 놓으면 바로 2-way 비교로 엽니다.",
     dropPathUnavailable:
       "드롭한 항목의 파일 경로를 읽을 수 없습니다. 데스크톱 앱에서 로컬 파일을 드롭하세요.",
@@ -130,6 +134,7 @@ export const APP_TEXT = {
     chooseRightFile: "Choose Right File",
     chooseLeftFolder: "Choose Left Folder",
     chooseRightFolder: "Choose Right Folder",
+    chooseGitRepository: "Choose Git Repository",
     chooseBaseFile: "Choose BASE File",
     chooseOursFile: "Choose OURS File",
     chooseTheirsFile: "Choose THEIRS File",
@@ -197,6 +202,7 @@ export const APP_TEXT = {
     chooseRightFile: "오른쪽 파일 선택",
     chooseLeftFolder: "왼쪽 폴더 선택",
     chooseRightFolder: "오른쪽 폴더 선택",
+    chooseGitRepository: "Git 저장소 선택",
     chooseBaseFile: "BASE 파일 선택",
     chooseOursFile: "OURS 파일 선택",
     chooseTheirsFile: "THEIRS 파일 선택",

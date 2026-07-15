@@ -2,6 +2,7 @@ export type AppCommandId =
   | "openCompare"
   | "openFolders"
   | "openMerge"
+  | "openGitRepository"
   | "save"
   | "saveAs"
   | "undo"
@@ -21,7 +22,7 @@ export type AppCommandId =
 export const APP_COMMAND_EVENT = "forktail-command";
 
 export interface ShellOpenCommandContext {
-  mode: "home" | "compare" | "folders" | "merge";
+  mode: "home" | "compare" | "folders" | "merge" | "git";
   compareOrigin: "files" | "difftool" | "git" | null;
   mergeOrigin: "files" | "mergetool" | null;
 }
@@ -61,6 +62,10 @@ export const appCommands = {
   openMerge: command("openMerge", "Open 3-way Merge", [
     { key: "o", ctrl: true, alt: true, aria: "Control+Alt+O" },
     { key: "o", meta: true, alt: true, aria: "Meta+Alt+O" },
+  ]),
+  openGitRepository: command("openGitRepository", "Open Git Repository", [
+    { key: "g", ctrl: true, alt: true, aria: "Control+Alt+G" },
+    { key: "g", meta: true, alt: true, aria: "Meta+Alt+G" },
   ]),
   save: command("save", "Save", [
     { key: "s", ctrl: true, aria: "Control+S" },
@@ -161,7 +166,8 @@ export function isShellOpenCommandAllowed(
   if (
     commandId !== "openCompare" &&
     commandId !== "openFolders" &&
-    commandId !== "openMerge"
+    commandId !== "openMerge" &&
+    commandId !== "openGitRepository"
   ) {
     return false;
   }

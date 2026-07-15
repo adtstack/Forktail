@@ -7,7 +7,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
-import { exitExternalGitTool, gitToolExecutablePath, openGitRevisionCompare } from "./bridge";
+import {
+  closeGitRepository,
+  detectGitRepository,
+  exitExternalGitTool,
+  gitToolExecutablePath,
+  openGitRevisionCompare,
+} from "./bridge";
 import type { GitRevisionCompareRequest } from "./gitModels";
 
 describe("external Git tool lifecycle bridge", () => {
@@ -109,6 +115,41 @@ describe("Git revision compare bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 73,
+    });
+  });
+});
+
+describe("Git repository lifecycle bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("validates a selected folder through the repository command", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ sessionId: "repository-session-8" });
+
+    await detectGitRepository("/work/repository");
+
+    expect(mocks.invoke).toHaveBeenCalledWith("detect_git_repository", {
+      candidatePath: "/work/repository",
+    });
+  });
+
+  it("closes only the opaque repository session", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await closeGitRepository("repository-session-8");
+
+    expect(mocks.invoke).toHaveBeenCalledWith("close_git_repository", {
+      repositorySessionId: "repository-session-8",
     });
   });
 });

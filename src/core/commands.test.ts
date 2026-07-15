@@ -26,6 +26,9 @@ describe("command registry", () => {
   it("exposes aria-keyshortcuts from the same shortcut definitions", () => {
     expect(commandAriaKeyshortcuts("openCompare")).toBe("Control+O Meta+O");
     expect(commandAriaKeyshortcuts("saveAs")).toBe("Control+Shift+S Meta+Shift+S");
+    expect(commandAriaKeyshortcuts("openGitRepository")).toBe(
+      "Control+Alt+G Meta+Alt+G",
+    );
     expect(commandAriaKeyshortcuts("redo")).toBe(
       "Control+Y Meta+Y Control+Shift+Z Meta+Shift+Z",
     );
@@ -43,6 +46,10 @@ describe("command registry", () => {
     expect(matchesCommandShortcut("openMerge", key("o", { metaKey: true, altKey: true }))).toBe(
       true,
     );
+    expect(matchesCommandShortcut(
+      "openGitRepository",
+      key("g", { ctrlKey: true, altKey: true }),
+    )).toBe(true);
   });
 
   it("keeps save and save-as distinct", () => {
@@ -88,7 +95,12 @@ describe("command registry", () => {
   });
 
   it("blocks keyboard and native open commands while an external Git tool owns the window", () => {
-    for (const commandId of ["openCompare", "openFolders", "openMerge"] as const) {
+    for (const commandId of [
+      "openCompare",
+      "openFolders",
+      "openMerge",
+      "openGitRepository",
+    ] as const) {
       expect(isShellOpenCommandAllowed(commandId, {
         mode: "compare",
         compareOrigin: "difftool",

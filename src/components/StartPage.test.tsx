@@ -48,6 +48,7 @@ function renderStartPage({
       onOpenCompare={() => {}}
       onOpenFolders={() => {}}
       onOpenMerge={() => {}}
+      onOpenGitRepository={() => {}}
       onDropCompareFiles={() => {}}
       onDropRejected={() => {}}
       onDemoCompare={() => {}}
@@ -67,6 +68,8 @@ describe("StartPage", () => {
     expect(markup).toContain("aria-keyshortcuts=\"Control+O Meta+O\"");
     expect(markup).toContain("aria-keyshortcuts=\"Control+Shift+O Meta+Shift+O\"");
     expect(markup).toContain("aria-keyshortcuts=\"Control+Alt+O Meta+Alt+O\"");
+    expect(markup).toContain("aria-keyshortcuts=\"Control+Alt+G Meta+Alt+G\"");
+    expect(markup).toContain("Open Git Repository");
   });
 
   it("renders language settings as a two-button segmented control", () => {
@@ -83,6 +86,7 @@ describe("StartPage", () => {
 
     expect(markup).toContain("파일 비교");
     expect(markup).toContain("폴더 비교");
+    expect(markup).toContain("Git 저장소 열기");
     expect(markup).toContain("최근 세션이 없습니다.");
     expect(markup).toContain("aria-label=\"언어 선택\"");
     expect(markup).toContain("aria-pressed=\"true\">한국어");
