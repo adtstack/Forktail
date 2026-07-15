@@ -164,6 +164,14 @@ npm run doctor
 22. `docs/20_GIT_TEST_PLAN.md` — Git parser·service·실제 repository 검증 계획
 23. `docs/21_GIT_REFERENCES.md` — Git 공식 문서와 안전 계약 근거
 
+기능을 새로 설계할 때는 `.specify/memory/constitution.md`의 품질 gate를 적용하고,
+`specs/<NNN-feature>/`에 `spec.md` → `plan.md` → `tasks.md` 순서로 Spec Kit 산출물을 만든다.
+기존 `docs/`는 제품과 아키텍처의 정본이며, `specs/`는 선택한 기능의 실행 가능한 범위와
+추적성을 제공한다.
+
+현재 첫 Spec Kit 산출물은 `specs/001-git-snapshot-integration/`이며, repository-aware Git의
+전체 사용자 시나리오, 단계별 delivery, 데이터/command 계약, 후속 후보를 연결한다.
+
 ## 디렉터리 구조
 
 ```text
@@ -176,6 +184,8 @@ src-tauri/                 Rust 네이티브 백엔드
 fixtures/                  회귀 테스트용 샘플
 docs/                      제품·개발·테스트 문서
 .github/                   CI와 이슈/PR 템플릿
+.specify/                  Spec Kit 원칙, 템플릿, 워크플로
+specs/                     기능별 spec, plan, contract, task 산출물
 ```
 
 ## 핵심 원칙

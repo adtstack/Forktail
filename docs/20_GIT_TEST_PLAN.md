@@ -389,6 +389,11 @@ duplicate stage  malformed/explicit error
 
 path별 grouping과 stage 정렬을 검증한다. stage가 없다는 사실을 empty text로 위장하지 않고 `missing`으로 보존한다.
 
+stage 0 index compare를 승격하면 `ls-files --stage -z -- <literal-path>`의 normal entry도 별도 fixture로
+검증한다. staged+unstaged 동시 변경, intent-to-add, skip-worktree, sparse missing, index race에서
+`HEAD ↔ index`, `index ↔ working tree`, `HEAD ↔ working tree`가 정확히 분리되고 index bytes/mtime가
+변하지 않아야 한다.
+
 ### 6.4 `status --porcelain=v2 -z --branch --untracked-files=all`
 
 필수 사례:
@@ -518,6 +523,7 @@ git init --object-format=sha256
 - symlink와 submodule entry
 - file/directory path conflict
 - blob이 현재 text limit 바로 아래/위
+- stage 0 index와 HEAD/working tree 사이의 three-state pair compare
 
 각 테스트는 전후 repository fingerprint가 같고 checkout이 발생하지 않았음을 확인한다.
 
@@ -649,6 +655,11 @@ repository-aware conflict 화면의 성공 메시지는 파일 저장만 완료�
 - cancel 후 spinner와 keyboard focus가 복구된다.
 - `GIT-605` working-tree 목록은 staged/unstaged/untracked/unmerged를 구분하고 mutation action을 노출하지 않는다.
 - `GIT-606` 전체 tracked-file picker는 changed-file 기본 흐름과 분리하고 large tree를 virtualize한다.
+- `GIT-607` viewed/unviewed와 next-unviewed는 filter count와 같은 entry 집합을 사용하고 revision pair
+  변경 때 stale 상태를 초기화한다.
+- `GIT-608` patch export는 immutable text snapshot에서만 활성화하고 source repository가 아닌
+  사용자 지정 output만 변경한다.
+- `GIT-609` file history는 bounded local metadata만 표시하고 목록 조회 중 blob/commit body를 읽지 않는다.
 
 ### 11.2 Conflict UI
 
@@ -755,6 +766,8 @@ macOS의 단순 `open App.app`처럼 즉시 반환하는 launcher는 Git tool �
 - stderr flood
 - rename 후보가 많은 diff
 - conflict file 1,000개
+- viewed/unviewed review state가 있는 changed path 100,000개
+- rename boundary가 많은 bounded file history
 
 검증:
 
@@ -813,6 +826,7 @@ Git 미설치나 선택 기능 미지원 skip은 테스트 결과에 이유와 p
 - [ ] added/deleted/renamed/type-changed 항목을 연다.
 - [ ] binary, symlink, submodule, LFS pointer가 안전하게 차단/표시된다.
 - [ ] working tree 파일과 revision blob을 비교한다.
+- [ ] staged와 unstaged 변경이 함께 있는 path에서 HEAD/index/working-tree 세 비교 조합을 확인한다.
 - [ ] compare 전후 branch, HEAD, index, working files가 그대로다.
 - [ ] timeout과 사용자 cancel 후 Git/child process가 남지 않는다.
 - [ ] 실제 merge conflict를 열고 stage source label을 확인한다.
@@ -823,6 +837,8 @@ Git 미설치나 선택 기능 미지원 skip은 테스트 결과에 이유와 p
 - [ ] packaged binary를 difftool로 실행하고 window 종료까지 wait하는지 확인한다.
 - [ ] packaged binary를 mergetool로 실행해 save/no-save lifecycle을 확인한다.
 - [ ] network/credential prompt가 한 번도 나타나지 않는다.
+- [ ] review session 종료 뒤 blob/diff/Git 임시 path가 persistent storage에 남지 않는다.
+- [ ] snapshot patch export가 source repository를 바꾸지 않고 선택 output만 기록한다.
 
 ## 16. Git 기능 완료 기준
 
@@ -838,3 +854,5 @@ Git 기능의 한 milestone은 관련 이슈들의 테스트만 통과했다고 
 - Windows/macOS/Linux packaged lifecycle 결과가 기록된다.
 - `docs/07_TEST_PLAN.md`의 공통 gate와 이 문서의 관련 gate가 모두 통과한다.
 - 구현 문서와 실제 command/환경/오류 계약이 일치한다.
+- stage-0 index compare와 review productivity를 승격한 경우 privacy retention, exact patch, bounded history,
+  three-state mutation guard가 모두 통과한다.

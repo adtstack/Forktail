@@ -21,6 +21,7 @@
 | `docs/17_GIT_INTEGRATION.md` | repository-aware Git 기능의 제안 명세 |
 | `docs/18_GIT_BACKLOG.md` | Git 후보를 구현 가능한 작업으로 나눈 목록 |
 | `docs/20_GIT_TEST_PLAN.md` | Git 전용 검증 계약 |
+| `specs/001-git-snapshot-integration/` | Spec Kit 기반 사용자 시나리오, 구현 계획, 계약, 작업 추적 |
 
 `MRG-009`, `MRG-014`, `INT-002`는 외부 `git mergetool`/`git difftool` 연결을 다룬다. 이 문서의 `GIT-*`는 앱이 Git object database와 index를 직접 읽는 더 큰 후속 트랙이다. 둘을 같은 완료 상태로 취급하지 않는다.
 
@@ -93,6 +94,17 @@ repository-aware Git 작업은 다음 조건을 만족한 뒤 시작한다.
 - preview result는 임시 메모리 버퍼이며 기본 저장 금지
 - 실제 Git merge 결과와 동일하다고 표현하지 않음
 
+### Git-4. Review productivity
+
+- `HEAD ↔ index`, `index ↔ working tree`, `HEAD ↔ working tree`의 read-only 비교
+- 현재 session의 viewed/unviewed 상태와 다음 미검토 파일 탐색
+- immutable text snapshot의 명시적 plain unified patch Save As
+- 선택 path의 bounded local file history에서 두 snapshot 비교
+- blob/diff/Git 임시 path는 review state나 recent session에 저장하지 않음
+
+이 단계는 read-only MVP가 실제 review 시간을 줄인다는 증거 뒤에 승격한다. stage/unstage, full history
+graph, 자동 fetch는 포함하지 않는다.
+
 ### 명시적 범위 밖
 
 - checkout, switch, restore, reset
@@ -164,6 +176,27 @@ repository-aware Git 작업은 다음 조건을 만족한 뒤 시작한다.
 - rebase에서 Ours/Theirs의 의미가 직관과 다를 수 있음을 commit/ref label로 보완한다.
 - 저장 직전 index stage와 Result fingerprint가 바뀌었는지 다시 확인한다.
 - 저장 후에도 index는 unmerged 상태이며 사용자가 terminal에서 후속 작업을 한다.
+
+### GUC-006. Staged와 unstaged 변경 분리 검토
+
+사용자는 같은 path에서 `HEAD ↔ index` 또는 `index ↔ working tree`를 선택한다.
+
+수용 기준:
+
+- stage 0 index snapshot과 disk working tree를 구분한다.
+- staged와 unstaged 변경이 동시에 있어도 선택한 구간만 표시한다.
+- index와 working tree를 바꾸는 stage/unstage action을 제공하지 않는다.
+
+### GUC-007. 큰 변경 집합 검토 완료
+
+사용자는 changed-file 목록에서 다음 미검토 항목으로 이동하고 필요하면 snapshot diff를 patch로 내보낸다.
+
+수용 기준:
+
+- viewed 상태는 현재 revision pair와 session에 scoped한다.
+- revision pair가 바뀌면 stale viewed 상태를 재사용하지 않는다.
+- patch export는 사용자 지정 새 대상만 쓰고 source repository를 바꾸지 않는다.
+- persistent settings/recent session에 blob, diff, opaque path id, Git 임시 path를 남기지 않는다.
 
 ## 6. UX 구조
 
@@ -681,8 +714,11 @@ Phase 1 안정화
   → tree/blob + changed-file list
   → read-only revision compare MVP
   → working tree compare
+  → stage-0 index compare
   → index-stage conflict adapter
   → merge-base preview
+  → review queue + patch export
+  → bounded file history
 ```
 
 첫 MVP는 branch/commit 사이의 **read-only 파일 비교**다. history graph, conflict save, 많은 UI를 동시에 넣지 않는다.
@@ -697,8 +733,10 @@ Phase 1 안정화
 - [ ] rename, added, deleted, type-changed entry를 구분한다.
 - [ ] path byte identity를 lossy string으로 왕복하지 않는다.
 - [ ] working tree 비교가 root escape와 symlink를 거절한다.
+- [ ] HEAD/index/working-tree pair 비교가 staged/unstaged 상태를 정확히 분리하고 index를 바꾸지 않는다.
 - [ ] conflict stage 1/2/3과 Result를 정확히 구성한다.
 - [ ] conflict save는 Result 파일만 안전 저장하고 index/HEAD/refs를 바꾸지 않는다.
 - [ ] LFS object, submodule, missing partial-clone object를 자동 다운로드하지 않는다.
 - [ ] parser, fake runner, temp repository, 세 OS packaged smoke가 `docs/20_GIT_TEST_PLAN.md`를 통과한다.
 - [ ] checkout/switch/fetch/push/add/commit 계열 command가 운영 runner allowlist에 존재하지 않는다.
+- [ ] review state와 recent session에 blob/diff/Git 임시 path가 남지 않는다.

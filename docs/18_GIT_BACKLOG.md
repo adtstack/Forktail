@@ -535,6 +535,37 @@ Git integration test는 임시 repository만 사용한다. 운영 runner와 test
 
 의존: `GIT-302`, `GIT-401`
 
+### GIT-403. Stage-0 index와 three-state compare
+
+목표:
+
+- `HEAD ↔ index`, `index ↔ working tree`, `HEAD ↔ working tree`를 read-only session으로 연다.
+
+변경 후보:
+
+- `src-tauri/src/git/index.rs`
+- `src-tauri/src/git/session.rs`
+- `src-tauri/src/commands/git.rs`
+- `src/core/gitSession.ts`
+
+수용 기준:
+
+- stage 0의 mode/object ID/path를 lossless identity로 읽는다.
+- 한 path에 staged와 unstaged 변경이 모두 있어도 세 비교 조합이 서로 다른 정확한 snapshot을 연다.
+- untracked, deleted, sparse missing을 explicit missing/unsupported 상태로 표현한다.
+- index, HEAD, refs, working tree를 변경하는 command나 UI action을 추가하지 않는다.
+
+실패/경계:
+
+- unmerged path, intent-to-add, skip-worktree, symlink/type change, index가 조회 중 바뀌는 경쟁을 처리한다.
+
+테스트:
+
+- stage 0 byte parser와 temp repo three-state fixture.
+- 비교 전후 index bytes/mtime와 working-tree fingerprint mutation guard.
+
+의존: `GIT-401`, `GIT-402`
+
 ## 7. Milestone Git-5 — Index-stage conflict adapter
 
 ### GIT-501. Unmerged file과 stage discovery
@@ -801,6 +832,98 @@ Git integration test는 임시 repository만 사용한다. 운영 runner와 test
 
 의존: `GIT-201`, `GIT-202`, `GIT-302`, `GIT-601`, `GIT-602`; read-only MVP 뒤 선택
 
+### GIT-607. Review queue와 viewed state
+
+목표:
+
+- 큰 changed-file 목록에서 다음 미검토 항목을 keyboard로 순회하고 현재 session의 진행 상태를 본다.
+
+변경 후보:
+
+- `src/components/GitChangedFiles.tsx`
+- `src/components/GitCompareView.tsx`
+- `src/core/gitReview.ts`
+
+수용 기준:
+
+- viewed/unviewed와 남은 수가 filter 결과와 같은 entry 집합을 사용한다.
+- revision pair 변경 또는 repository refresh generation 변경 시 stale viewed state를 재사용하지 않는다.
+- blob/diff/opaque path id/Git 임시 path를 recent session이나 disk cache에 저장하지 않는다.
+- next/previous와 next-unviewed가 keyboard, focus, 200% 확대에서 동작한다.
+
+실패/경계:
+
+- rename/path collision, binary/unavailable entry, selection 삭제, cancel/stale refresh를 처리한다.
+
+테스트:
+
+- pure review-state reducer와 10k row component/virtualization fixture.
+- local storage/recent session privacy regression.
+
+의존: `GIT-603`; working-tree 목록까지 포함하려면 `GIT-605`
+
+### GIT-608. Immutable snapshot patch export
+
+목표:
+
+- 선택한 두 immutable text snapshot의 plain unified patch를 명시적 Save As로 내보낸다.
+
+변경 후보:
+
+- `src/core/diffReport.ts`
+- `src/core/gitSession.ts`
+- `src/components/GitCompareView.tsx`
+- 기존 safe-write command 경계
+
+수용 기준:
+
+- patch header가 resolved revision identity와 old/new display path를 명시한다.
+- snapshot content가 text이고 두 side가 immutable인 경우에만 활성화한다.
+- source repository를 변경하지 않고 사용자 지정 output만 기존 safe writer로 기록한다.
+- binary, symlink, submodule, LFS, missing-object 상태는 export를 차단하거나 명시적 metadata report로 분리한다.
+
+실패/경계:
+
+- added/deleted/missing, rename, no-final-newline, encoding warning, output external change와 저장 취소를 처리한다.
+
+테스트:
+
+- exact patch fixture와 Save As cancellation/fault injection.
+- repository fingerprint mutation guard.
+
+의존: `GIT-302`, `TXT-010`, `SAV-001`; review MVP 뒤 선택
+
+### GIT-609. Bounded local file history
+
+목표:
+
+- 선택 path의 제한된 local commit history에서 두 항목을 snapshot compare로 연다.
+
+변경 후보:
+
+- `src-tauri/src/git/history.rs`
+- `src-tauri/src/commands/git.rs`
+- `src/components/GitFileHistory.tsx`
+- `src/core/gitSession.ts`
+
+수용 기준:
+
+- default 50과 hard max 안에서 full ID, bounded subject, author timestamp, path identity만 반환한다.
+- commit body와 file content를 목록 조회 중 읽거나 저장하지 않는다.
+- history 항목 선택은 기존 `GIT-302` snapshot compare를 재사용한다.
+- shallow/partial boundary에서 자동 fetch하지 않고 local-object-only 제한을 표시한다.
+
+실패/경계:
+
+- rename boundary, deleted path, non-UTF-8 path, huge history, cancel/stale response를 처리한다.
+
+테스트:
+
+- pure parser/fake runner와 rename/shallow temp repo fixture.
+- no-network/helper invocation guard와 history limit/cancellation.
+
+의존: `GIT-103`, `GIT-302`, `GIT-607`; read-only MVP 사용성 증거 뒤 선택
+
 ## 9. Milestone Git-7 — Merge-base preview
 
 ### GIT-701. Merge-base service
@@ -907,10 +1030,13 @@ GIT-000 → GIT-001 → GIT-002 → GIT-003 → GIT-004 → GIT-005
 
 ```text
 GIT-401 → GIT-402
-→ GIT-605
+→ GIT-403 → GIT-605
 → GIT-501 → GIT-502 → GIT-503 → GIT-604
 → GIT-701 → GIT-702
+→ GIT-607 → GIT-608 → GIT-609
 → GIT-801
 ```
 
-`GIT-103` recent commit과 `GIT-606` 전체 tracked-file picker는 convenience 기능이므로 read-only MVP의 필수 경로가 아니다. Git-1 MVP가 실제 사용자 검토 시간을 줄이는지 확인한 뒤 추가한다.
+`GIT-103` recent commit, `GIT-606` 전체 tracked-file picker, `GIT-607`~`609` review productivity는
+convenience 기능이므로 read-only MVP의 필수 경로가 아니다. Git-1 MVP가 실제 사용자 검토 시간을
+줄이는지 확인한 뒤 추가한다.

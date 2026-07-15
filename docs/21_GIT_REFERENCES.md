@@ -370,6 +370,8 @@ custom merge driver      : %O    %A     %B      (%A에 결과 기록, %P는 path
 - [ ] mergetool은 `$BASE/$LOCAL/$REMOTE/$MERGED`, merge driver는 `%O/%A/%B`와 `%A` output이라는 계약을 각각 snapshot test로 고정한다.
 - [ ] mergetool의 save/abort/unresolved/backup/exit lifecycle을 packaged binary로 세 OS에서 smoke test한다.
 - [ ] difftool 임시 입력은 기본 read-only이며 `--dir-diff` 지원 여부를 명시한다.
+- [ ] stage 0 index snapshot과 stage 1/2/3 conflict snapshot을 다른 계약으로 파싱하고 three-state compare가 index를 바꾸지 않는지 검증한다.
+- [ ] bounded file history를 추가하면 자동 fetch 없이 metadata만 읽고 full graph로 범위를 넓히지 않는다.
 
 ## 6. 공식 링크 모음
 

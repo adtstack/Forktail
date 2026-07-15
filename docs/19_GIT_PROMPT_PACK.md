@@ -21,10 +21,11 @@ GIT-000
   → GIT-201 → GIT-202 → GIT-203
   → GIT-301 → GIT-302
   → GIT-601 → GIT-602 → GIT-603
-  → GIT-401 → GIT-402 → GIT-605
+  → GIT-401 → GIT-402 → GIT-403 → GIT-605
   → GIT-501 → GIT-502 → GIT-503 → GIT-604
   → GIT-606 (선택)
   → GIT-701 → GIT-702
+  → GIT-607 → GIT-608 → GIT-609 (선택)
   → GIT-801
 ```
 
@@ -264,6 +265,17 @@ external-change fingerprint를, snapshot 쪽은 read-only DTO를 사용한다. m
 binary, encoding, dirty editor state를 테스트하고 Git index는 수정하지 않는다.
 ```
 
+### GIT-403 — Stage-0 index와 three-state compare
+
+```text
+공통 기본 프롬프트의 <ISSUE_ID>를 GIT-403으로 바꾼다.
+
+stage 0 index snapshot을 읽어 HEAD↔index, index↔working tree, HEAD↔working tree session을 만든다.
+staged와 unstaged 변경이 함께 있는 path, untracked/deleted/sparse missing, intent-to-add, unmerged 상태를
+테스트한다. index bytes/mtime와 working-tree fingerprint를 전후 비교하고 stage/unstage/add action은
+구현하지 않는다.
+```
+
 ## 8. Conflict adapter
 
 ### GIT-501 — Conflict discovery
@@ -359,6 +371,37 @@ changed-file sidebar와 별도의 선택 기능으로 revision tree와 fuzzy pat
 left/right에서 서로 다른 path도 고를 수 있게 하되 object ID와 opaque path identity를 유지한다.
 10k/100k virtualization, batch/cancel/stale result, symlink/submodule/missing을 테스트한다.
 changed-file 기본 흐름이나 working tree를 변경하지 않는다.
+```
+
+### GIT-607 — Review queue와 viewed state
+
+```text
+공통 기본 프롬프트의 <ISSUE_ID>를 GIT-607로 바꾼다.
+
+changed-file 목록에 session-local viewed/unviewed, 남은 수, next-unviewed keyboard navigation을 추가한다.
+filter와 review count가 같은 집합을 사용하고 revision pair/refresh generation 변경 때 stale state를
+재사용하지 않게 테스트한다. blob/diff/opaque path id/Git 임시 path를 settings나 recent session에
+저장하지 않는다.
+```
+
+### GIT-608 — Immutable snapshot patch export
+
+```text
+공통 기본 프롬프트의 <ISSUE_ID>를 GIT-608로 바꾼다.
+
+두 immutable text snapshot의 plain unified patch Save As를 추가한다. resolved revision identity,
+added/deleted/rename, no-final-newline을 exact fixture로 검증하고 binary/symlink/submodule/LFS 상태는
+명시적으로 차단한다. source repository는 바꾸지 않고 output만 기존 safe writer로 저장한다.
+```
+
+### GIT-609 — Bounded local file history
+
+```text
+공통 기본 프롬프트의 <ISSUE_ID>를 GIT-609로 바꾼다.
+
+선택 path의 local file history를 default 50/hard max로 제한해 full OID, bounded subject, timestamp,
+path identity만 반환하고 두 항목을 기존 snapshot compare로 연다. rename/shallow boundary, non-UTF-8 path,
+limit/cancel/stale response와 no-network helper invocation을 테스트한다. full history graph는 구현하지 않는다.
 ```
 
 ## 10. 3-way preview
