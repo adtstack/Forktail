@@ -123,7 +123,7 @@ function mergeSession({
 }: {
   basePath?: string;
   result?: string;
-  origin?: MergeSession["origin"];
+  origin?: "files" | "mergetool";
 } = {}): MergeSession {
   const base = document(basePath, "base file contents\n", 1000);
   const ours = document("/repo/ours.ts", "ours file contents\n", 1001);

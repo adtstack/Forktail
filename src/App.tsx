@@ -1843,6 +1843,7 @@ export default function App() {
     lineEndingMode: SaveLineEndingMode = "original",
   ) => run(async () => {
     if (!mergeSession) return;
+    if (mergeSession.origin === "gitConflict") return;
     const capabilities = mergetoolSessionCapabilities(mergeSession);
     if (forceSaveAs && !capabilities.saveAs) return;
 
@@ -1889,6 +1890,28 @@ export default function App() {
             result: saved.savedSnapshot,
             outputPath: saved.outputPath,
           }
+        : current?.origin === "gitConflict"
+          ? {
+              ...current,
+              output: {
+                ...fileDocumentWithText(current.output, saved.savedSnapshot),
+                path: saved.outputPath,
+                encoding: "UTF-8",
+                size: written.size,
+                modifiedMs: written.modifiedMs,
+                decodeHadErrors: false,
+              },
+              resultDocument: {
+                ...fileDocumentWithText(current.resultDocument, saved.savedSnapshot),
+                path: saved.outputPath,
+                encoding: "UTF-8",
+                size: written.size,
+                modifiedMs: written.modifiedMs,
+                decodeHadErrors: false,
+              },
+              result: saved.savedSnapshot,
+              outputPath: saved.outputPath,
+            }
         : current
           ? {
               ...current,
@@ -1918,7 +1941,7 @@ export default function App() {
   }), [appText, mergeOutputVersion, mergeSession, rememberRecentSession, run]);
 
   const showMergeBackups = useCallback(() => run(async () => {
-    if (!mergeSession?.outputPath) return;
+    if (!mergeSession?.outputPath || mergeSession.origin === "gitConflict") return;
     const backups = await listFileBackups(mergeSession.outputPath);
     setBackupDialog({
       kind: "merge",

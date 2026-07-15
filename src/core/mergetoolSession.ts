@@ -62,7 +62,7 @@ export function buildMergetoolSession(
 export function mergetoolSessionCapabilities(
   session: Pick<MergeSession, "origin">,
 ): MergeSessionCapabilities {
-  if (session.origin === "mergetool") {
+  if (session.origin === "mergetool" || session.origin === "gitConflict") {
     return {
       saveTarget: "output-only",
       saveAs: false,

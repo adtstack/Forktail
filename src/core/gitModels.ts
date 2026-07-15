@@ -223,6 +223,41 @@ export interface GitConflictsRequest {
   requestGeneration: number;
 }
 
+export interface GitConflictStageFingerprint {
+  stage1: GitConflictStage | null;
+  stage2: GitConflictStage | null;
+  stage3: GitConflictStage | null;
+}
+
+export type GitConflictResultKind = "missing" | "regularFile" | "symlink" | "directory";
+
+export interface GitConflictResultFingerprint {
+  kind: GitConflictResultKind;
+  size: number | null;
+  modifiedMs: number | null;
+}
+
+export type GitConflictSaveState = "clean" | "dirty" | "stale" | "saving" | "saved" | "failed";
+
+export interface GitConflictSession {
+  repositoryId: string;
+  path: GitPathIdentity;
+  base: GitSnapshotDocument;
+  stage2: GitSnapshotDocument;
+  stage3: GitSnapshotDocument;
+  result: GitSnapshotDocument;
+  resultFingerprint: GitConflictResultFingerprint;
+  stageFingerprint: GitConflictStageFingerprint;
+  operation: GitConflictOperation;
+  saveState: GitConflictSaveState;
+  generation: number;
+}
+
+export interface GitConflictSessionRequest {
+  opaquePathId: string;
+  generation: number;
+}
+
 export type GitSnapshotOrigin = "committedBlob" | "indexStage" | "workingTree" | "missing";
 export type GitSnapshotUnavailableReason = "objectMissingLocal" | "sparseWorkingTreeMissing";
 

@@ -472,6 +472,58 @@ pub struct GitConflictList {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitConflictStageFingerprint {
+    pub stage1: Option<GitConflictStage>,
+    pub stage2: Option<GitConflictStage>,
+    pub stage3: Option<GitConflictStage>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitConflictResultKind {
+    Missing,
+    RegularFile,
+    Symlink,
+    Directory,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictResultFingerprint {
+    pub kind: GitConflictResultKind,
+    pub size: Option<u64>,
+    pub modified_ms: Option<u64>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitConflictSaveState {
+    Clean,
+    Dirty,
+    Stale,
+    Saving,
+    Saved,
+    Failed,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictSession {
+    pub repository_id: String,
+    pub path: GitPathIdentity,
+    pub base: GitSnapshotDocument,
+    pub stage2: GitSnapshotDocument,
+    pub stage3: GitSnapshotDocument,
+    pub result: GitSnapshotDocument,
+    pub result_fingerprint: GitConflictResultFingerprint,
+    pub stage_fingerprint: GitConflictStageFingerprint,
+    pub operation: GitConflictOperation,
+    pub save_state: GitConflictSaveState,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitRevisionPair {
     pub left: GitRevision,
     pub right: GitRevision,

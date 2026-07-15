@@ -1,4 +1,7 @@
-import type { GitCompareSession as GitSnapshotCompareSession } from "./gitModels";
+import type {
+  GitCompareSession as GitSnapshotCompareSession,
+  GitConflictSession,
+} from "./gitModels";
 
 export type AppMode = "home" | "compare" | "folders" | "merge" | "git";
 
@@ -203,4 +206,12 @@ export interface MergetoolMergeSession extends MergeSessionBase {
   outputPath: string;
 }
 
-export type MergeSession = FileMergeSession | MergetoolMergeSession;
+export interface GitConflictMergeSession extends MergeSessionBase {
+  origin: "gitConflict";
+  output: FileDocument;
+  outputPath: string;
+  resultDocument: FileDocument;
+  conflict: GitConflictSession;
+}
+
+export type MergeSession = FileMergeSession | MergetoolMergeSession | GitConflictMergeSession;

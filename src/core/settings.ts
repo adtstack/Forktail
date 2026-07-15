@@ -325,7 +325,7 @@ export function saveActiveSession(
 export function persistentMergeSessionInput(
   session: MergeSession,
 ): PersistentMergeSessionInput | null {
-  if (session.origin === "mergetool") return null;
+  if (session.origin !== "files") return null;
 
   return {
     kind: "merge",

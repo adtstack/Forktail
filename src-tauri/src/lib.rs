@@ -8,14 +8,15 @@ mod text;
 pub use domain::git::{
     GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
     GitChangedFileStatus, GitCompareCapabilities, GitCompareSession, GitCompareSourceKind,
-    GitConflictEntry, GitConflictList, GitConflictOperation, GitConflictStage, GitHeadState,
-    GitIndexComparison, GitIndexEntry, GitObjectAlgorithm, GitObjectId, GitObjectIdError,
-    GitObjectType, GitPathIdentity, GitRefKind, GitRefList, GitRepositoryIdentity,
-    GitRepositoryRef, GitRepositorySummary, GitRevision, GitRevisionKind, GitRevisionPair,
-    GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason,
-    GitStatusBranch, GitStatusBranchState, GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot,
-    GitSubmoduleStatus, GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList,
-    GitUnmergedStatusEntry, GitWorkingTreeVersion,
+    GitConflictEntry, GitConflictList, GitConflictOperation, GitConflictResultFingerprint,
+    GitConflictResultKind, GitConflictSaveState, GitConflictSession, GitConflictStage,
+    GitConflictStageFingerprint, GitHeadState, GitIndexComparison, GitIndexEntry,
+    GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType, GitPathIdentity, GitRefKind,
+    GitRefList, GitRepositoryIdentity, GitRepositoryRef, GitRepositorySummary, GitRevision,
+    GitRevisionKind, GitRevisionPair, GitSnapshotContentState, GitSnapshotDocument,
+    GitSnapshotOrigin, GitSnapshotUnavailableReason, GitStatusBranch, GitStatusBranchState,
+    GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus, GitTextMetadata,
+    GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry, GitWorkingTreeVersion,
 };
 pub use domain::models::LineEnding;
 
@@ -49,6 +50,7 @@ pub fn run() {
             git_commands::open_git_revision_compare,
             git_commands::open_git_working_tree_compare,
             git_commands::open_git_index_compare,
+            git_commands::open_git_conflict,
             git_commands::cancel_git_job,
             git_commands::resolve_git_revision,
             merge::merge_texts,

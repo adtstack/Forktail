@@ -123,14 +123,14 @@
 ### Tests for User Story 3
 
 - [X] T048 [US3] GIT-501 stage 1/2/3 grouping, missing/duplicate stage, add-add/delete-modify/rename/type conflict 테스트를 `src-tauri/src/git/conflicts.rs`에 먼저 추가한다
-- [ ] T049 [US3] GIT-502 conflict operation label, missing Result, marker/binary/symlink/submodule session 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
+- [X] T049 [US3] GIT-502 conflict operation label, missing Result, marker/binary/symlink/submodule session 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
 - [ ] T050 [US3] GIT-503 stage/result fingerprint race, containment/symlink, unresolved marker, write fault, index mutation guard 테스트를 `src-tauri/src/git/conflicts.rs`와 `src-tauri/src/commands/files.rs`에 먼저 추가한다
 - [ ] T051 [P] [US3] GIT-604 conflict selection/save-refresh/dirty-switch/keyboard UI 테스트를 `src/components/GitConflictView.test.tsx`와 `src/components/MergeView.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 3
 
 - [X] T052 [US3] GIT-501 unmerged path/stage discovery와 operation context를 `src-tauri/src/git/conflicts.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T053 [US3] GIT-502 stage snapshot + working Result merge session adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`에 구현한다
+- [X] T053 [US3] GIT-502 stage snapshot + working Result merge session adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`에 구현한다
 - [ ] T054 [US3] GIT-503 Result-only safe-save와 `CONFLICT_SAVED` next-step contract를 `src-tauri/src/git/conflicts.rs`, `src-tauri/src/commands/git.rs`, `src/core/mergeSave.ts`에 구현한다
 - [ ] T055 [US3] GIT-604 conflict list와 기존 MergeView 연결을 `src/components/GitConflictView.tsx`, `src/components/MergeView.tsx`, `src/App.tsx`에 구현한다
 

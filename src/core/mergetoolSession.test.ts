@@ -89,6 +89,17 @@ describe("mergetoolSessionCapabilities", () => {
     });
   });
 
+  it("gives repository conflicts the same fixed-output and no-persistence boundary", () => {
+    expect(mergetoolSessionCapabilities({ origin: "gitConflict" })).toEqual({
+      saveTarget: "output-only",
+      saveAs: false,
+      backupRestore: false,
+      persistPaths: false,
+      recoveryDrafts: false,
+      unresolvedPolicy: "block-unresolved",
+    });
+  });
+
   it("keeps ordinary file merge capabilities", () => {
     expect(mergetoolSessionCapabilities({ origin: "files" })).toEqual({
       saveTarget: "selectable",

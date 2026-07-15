@@ -33,7 +33,7 @@ import {
   undoTextHistory,
 } from "../core/textHistory";
 import type { ConflictBlock, MergeSession } from "../core/models";
-import { isVirtualFileDocument } from "../core/virtualDocument";
+import { isMissingFileDocument } from "../core/virtualDocument";
 
 interface MergeViewProps {
   session: MergeSession;
@@ -95,7 +95,7 @@ export function MergeView({
   const conflicts = useMemo(() => parseConflictBlocks(resultText), [resultText]);
   const capabilities = useMemo(() => mergetoolSessionCapabilities(session), [session.origin]);
   const isMergetool = session.origin === "mergetool";
-  const baseMissing = isVirtualFileDocument(session.base);
+  const baseMissing = isMissingFileDocument(session.base);
   const resultEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
   const activeDecorationIds = useRef<string[]>([]);
   const lastSyncedResult = useRef(session.result);

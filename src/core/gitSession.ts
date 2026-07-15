@@ -1,6 +1,12 @@
-import type { FileDocument, GitFileCompareSession } from "./models";
+import type {
+  FileDocument,
+  GitConflictMergeSession,
+  GitFileCompareSession,
+} from "./models";
+import type { WritePrecondition } from "./mergeSave";
 import type {
   GitCompareSession,
+  GitConflictSession,
   GitChangedFile,
   GitChangedFileList,
   GitChangedFileStatus,
@@ -394,6 +400,63 @@ export function adaptGitCompareSession(session: GitCompareSession): GitCompareVi
       right,
       snapshot: session,
     },
+  };
+}
+
+export type GitConflictMergeViewState =
+  | {
+      kind: "merge";
+      session: GitConflictMergeSession;
+      outputVersion: WritePrecondition | null;
+    }
+  | {
+      kind: "notice";
+      session: GitConflictSession;
+      contentStates: GitSnapshotContentState["kind"][];
+      unavailableReasons: GitSnapshotUnavailableReason[];
+    };
+
+export function adaptGitConflictSession(session: GitConflictSession): GitConflictMergeViewState {
+  const snapshots = [session.base, session.stage2, session.stage3, session.result];
+  const documents = snapshots.map(gitSnapshotFileDocument);
+  const [base, ours, theirs, resultDocument] = documents;
+  const validMutabilityContract = session.base.readOnly
+    && session.stage2.readOnly
+    && session.stage3.readOnly
+    && !session.result.readOnly;
+
+  if (!base || !ours || !theirs || !resultDocument || !validMutabilityContract) {
+    return {
+      kind: "notice",
+      session,
+      contentStates: snapshots.map((snapshot) => snapshot.contentState.kind),
+      unavailableReasons: snapshots
+        .map((snapshot) => snapshot.contentState)
+        .filter((state): state is Extract<GitSnapshotContentState, { kind: "unavailable" }> =>
+          state.kind === "unavailable")
+        .map((state) => state.reason),
+    };
+  }
+
+  return {
+    kind: "merge",
+    session: {
+      origin: "gitConflict",
+      base,
+      ours,
+      theirs,
+      output: resultDocument,
+      outputPath: resultDocument.path,
+      resultDocument,
+      result: resultDocument.text,
+      conflict: session,
+    },
+    outputVersion: session.result.workingTreeVersion === null
+      ? null
+      : {
+          expectedSize: session.result.workingTreeVersion.size,
+          expectedModifiedMs: session.result.workingTreeVersion.modifiedMs,
+        },
   };
 }
 

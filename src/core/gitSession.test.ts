@@ -3,8 +3,13 @@ import { compareSessionCapabilities } from "./difftoolSession";
 import { compareReportDefaultPath } from "./diffReport";
 import { compareSavePreconditionForPath } from "./compareSave";
 import { fileDocumentVersionChanged } from "./fileVersion";
-import type { GitCompareSession, GitSnapshotDocument } from "./gitModels";
-import { adaptGitCompareSession } from "./gitSession";
+import type {
+  GitCompareSession,
+  GitConflictOperation,
+  GitConflictSession,
+  GitSnapshotDocument,
+} from "./gitModels";
+import { adaptGitCompareSession, adaptGitConflictSession } from "./gitSession";
 import { persistentCompareSessionInput } from "./settings";
 import { isMissingFileDocument, isVirtualFileDocument } from "./virtualDocument";
 
@@ -85,6 +90,46 @@ function workingTreeSession(right: GitSnapshotDocument): GitCompareSession {
     sourceKind: "revisionWorkingTree",
     revisionPair: null,
     revision,
+  };
+}
+
+function conflictSession(
+  contentStates: Partial<Record<"base" | "stage2" | "stage3" | "result", GitSnapshotDocument["contentState"]>> = {},
+  operation: GitConflictOperation = "merge",
+): GitConflictSession {
+  const base = snapshot(contentStates.base ?? { kind: "text", text: "base\n" }, "Base (index stage 1) · src/file.txt");
+  const stage2 = snapshot(contentStates.stage2 ?? { kind: "text", text: "ours\n" }, "Current HEAD (Git ours, index stage 2) · src/file.txt");
+  const stage3 = snapshot(contentStates.stage3 ?? { kind: "text", text: "theirs\n" }, "Merged commit (Git theirs, index stage 3) · src/file.txt");
+  const result = {
+    ...snapshot(contentStates.result ?? { kind: "text", text: "result without markers\n" }, "Result (working tree) · src/file.txt"),
+    origin: "workingTree" as const,
+    readOnly: false,
+    objectId: null,
+    workingTreeVersion: { size: 23, modifiedMs: 1_700_000_000_000 },
+  };
+  for (const stage of [base, stage2, stage3]) {
+    if (stage.contentState.kind !== "missing") stage.origin = "indexStage";
+  }
+  return {
+    repositoryId: "repository-session-1",
+    path: result.path!,
+    base,
+    stage2,
+    stage3,
+    result,
+    resultFingerprint: {
+      kind: "regularFile",
+      size: 23,
+      modifiedMs: 1_700_000_000_000,
+    },
+    stageFingerprint: {
+      stage1: { mode: "100644", objectId: { algorithm: "sha1", hex: "1".repeat(40) } },
+      stage2: { mode: "100644", objectId: { algorithm: "sha1", hex: "2".repeat(40) } },
+      stage3: { mode: "100644", objectId: { algorithm: "sha1", hex: "3".repeat(40) } },
+    },
+    operation,
+    saveState: "clean",
+    generation: 7,
   };
 }
 
@@ -217,5 +262,62 @@ describe("Git compare session adapter", () => {
       "left",
     )).toBeNull();
     expect(fileDocumentVersionChanged(adapted.session.left, null)).toBe(false);
+  });
+});
+
+describe("Git conflict merge session adapter", () => {
+  it("adapts immutable stages and the current markerless working Result as the only output", () => {
+    const source = conflictSession();
+
+    const adapted = adaptGitConflictSession(source);
+
+    expect(adapted.kind).toBe("merge");
+    if (adapted.kind !== "merge") throw new Error("expected merge state");
+    expect(adapted.session.origin).toBe("gitConflict");
+    expect(adapted.session.base.text).toBe("base\n");
+    expect(adapted.session.ours.text).toBe("ours\n");
+    expect(adapted.session.theirs.text).toBe("theirs\n");
+    expect(adapted.session.result).toBe("result without markers\n");
+    expect(adapted.session.output).toBe(adapted.session.resultDocument);
+    expect(adapted.outputVersion).toEqual({
+      expectedSize: 23,
+      expectedModifiedMs: 1_700_000_000_000,
+    });
+  });
+
+  it("keeps absent base or Result explicit without conflating them with empty text", () => {
+    const source = conflictSession({
+      base: { kind: "missing" },
+      result: { kind: "missing" },
+    });
+    source.result.origin = "missing";
+    source.result.workingTreeVersion = null;
+    source.resultFingerprint = { kind: "missing", size: null, modifiedMs: null };
+
+    const adapted = adaptGitConflictSession(source);
+
+    expect(adapted.kind).toBe("merge");
+    if (adapted.kind !== "merge") throw new Error("expected merge state");
+    expect(isMissingFileDocument(adapted.session.base)).toBe(true);
+    expect(isMissingFileDocument(adapted.session.resultDocument)).toBe(true);
+    expect(adapted.session.result).toBe("");
+    expect(adapted.outputVersion).toBeNull();
+  });
+
+  it("blocks text merge when any stage or Result is binary, a symlink, or a submodule", () => {
+    for (const contentState of [
+      { kind: "binary" } as const,
+      { kind: "symlink" } as const,
+      { kind: "submodule" } as const,
+    ]) {
+      expect(adaptGitConflictSession(conflictSession({ stage2: contentState }))).toMatchObject({
+        kind: "notice",
+        contentStates: ["text", contentState.kind, "text", "text"],
+      });
+      expect(adaptGitConflictSession(conflictSession({ result: contentState }))).toMatchObject({
+        kind: "notice",
+        contentStates: ["text", "text", "text", contentState.kind],
+      });
+    }
   });
 });

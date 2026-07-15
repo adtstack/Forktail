@@ -13,6 +13,8 @@ import type { WritePrecondition } from "./mergeSave";
 import type {
   GitCompareSession,
   GitConflictList,
+  GitConflictSession,
+  GitConflictSessionRequest,
   GitConflictsRequest,
   GitIndexCompareRequest,
   GitChangedFileList,
@@ -202,6 +204,19 @@ export async function listGitConflicts(
 ): Promise<GitConflictList> {
   requireTauri();
   return invoke<GitConflictList>("list_git_conflicts", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
+}
+
+export async function openGitConflict(
+  repositorySessionId: string,
+  request: GitConflictSessionRequest,
+  jobId: number,
+): Promise<GitConflictSession> {
+  requireTauri();
+  return invoke<GitConflictSession>("open_git_conflict", {
     repositorySessionId,
     request,
     jobId,

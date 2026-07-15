@@ -1,12 +1,14 @@
 use crate::domain::git::{
     GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileStatus, GitCompareCapabilities,
-    GitCompareSession, GitCompareSourceKind, GitHeadState, GitIndexComparison, GitIndexEntry,
-    GitPathIdentity, GitPathPlatform, GitPathRegistryError, GitRevision, GitRevisionKind,
-    GitRevisionPair, GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin,
-    GitSnapshotUnavailableReason, GitTextMetadata, GitTreeEntry, GitTreeEntryKind,
-    GitWorkingTreeVersion,
+    GitCompareSession, GitCompareSourceKind, GitConflictOperation, GitConflictResultFingerprint,
+    GitConflictResultKind, GitConflictSaveState, GitConflictSession, GitConflictStage,
+    GitConflictStageFingerprint, GitHeadState, GitIndexComparison, GitIndexEntry, GitPathIdentity,
+    GitPathPlatform, GitPathRegistryError, GitRevision, GitRevisionKind, GitRevisionPair,
+    GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason,
+    GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitWorkingTreeVersion,
 };
 use crate::git::blob::{GitBlobError, read_blob};
+use crate::git::conflicts::{GitConflictError, MAX_CONFLICT_ENTRIES, list_conflicts};
 use crate::git::index::{
     GitIndexError, index_entry_visible_against_head, index_fingerprint_matches,
     read_stage_zero_index_entry,
@@ -43,6 +45,8 @@ pub enum GitSessionError {
     IntentToAddUnsupported,
     UnmergedIndexPath,
     IndexChanged,
+    ConflictNotFound,
+    ConflictStateChanged,
     StateUnavailable,
     Cancelled,
     Tree(GitTreeError),
@@ -248,6 +252,272 @@ pub fn open_index_compare(
     })
 }
 
+pub fn open_conflict_session(
+    session: &GitRepositorySession,
+    path: &GitPathIdentity,
+    generation: u64,
+    cancellation: &CancellationToken,
+) -> Result<GitConflictSession, GitSessionError> {
+    if cancellation.is_cancelled() {
+        return Err(GitSessionError::Cancelled);
+    }
+    validate_generation(session, generation)?;
+    let canonical_path = session
+        .paths()
+        .lock()
+        .map_err(|_| GitSessionError::StateUnavailable)?
+        .resolve_identity(&path.opaque_id, generation, current_path_platform())
+        .map_err(map_path_error)?;
+    let conflicts =
+        list_conflicts(session, MAX_CONFLICT_ENTRIES, cancellation).map_err(map_conflict_error)?;
+    let entry = conflicts
+        .entries
+        .iter()
+        .find(|entry| entry.path.opaque_id == canonical_path.opaque_id)
+        .cloned()
+        .ok_or(GitSessionError::ConflictNotFound)?;
+    let operation = conflicts.operation;
+    let base = conflict_stage_document(
+        session,
+        canonical_path.clone(),
+        entry.stage1.as_ref(),
+        1,
+        operation,
+        cancellation,
+    )?;
+    let stage2 = conflict_stage_document(
+        session,
+        canonical_path.clone(),
+        entry.stage2.as_ref(),
+        2,
+        operation,
+        cancellation,
+    )?;
+    let stage3 = conflict_stage_document(
+        session,
+        canonical_path.clone(),
+        entry.stage3.as_ref(),
+        3,
+        operation,
+        cancellation,
+    )?;
+    let (result, result_fingerprint) =
+        conflict_result_document(session, canonical_path.clone(), generation, cancellation)?;
+
+    validate_generation(session, generation)?;
+    let verified =
+        list_conflicts(session, MAX_CONFLICT_ENTRIES, cancellation).map_err(map_conflict_error)?;
+    let verified_entry = verified
+        .entries
+        .iter()
+        .find(|candidate| candidate.path.opaque_id == canonical_path.opaque_id)
+        .ok_or(GitSessionError::ConflictStateChanged)?;
+    if verified.operation != operation || verified_entry != &entry {
+        return Err(GitSessionError::ConflictStateChanged);
+    }
+
+    Ok(GitConflictSession {
+        repository_id: session.summary().session_id.clone(),
+        path: canonical_path,
+        base,
+        stage2,
+        stage3,
+        result,
+        result_fingerprint,
+        stage_fingerprint: GitConflictStageFingerprint {
+            stage1: entry.stage1,
+            stage2: entry.stage2,
+            stage3: entry.stage3,
+        },
+        operation,
+        save_state: GitConflictSaveState::Clean,
+        generation,
+    })
+}
+
+fn conflict_stage_document(
+    session: &GitRepositorySession,
+    path: GitPathIdentity,
+    stage: Option<&GitConflictStage>,
+    stage_number: u8,
+    operation: GitConflictOperation,
+    cancellation: &CancellationToken,
+) -> Result<GitSnapshotDocument, GitSessionError> {
+    let label = conflict_stage_label(stage_number, operation, &path);
+    let Some(stage) = stage else {
+        return Ok(GitSnapshotDocument {
+            origin: GitSnapshotOrigin::Missing,
+            label,
+            read_only: true,
+            object_id: None,
+            path: Some(path),
+            mode: None,
+            text_metadata: None,
+            working_tree_version: None,
+            content_state: GitSnapshotContentState::Missing,
+        });
+    };
+    let content_state = match stage.mode.as_str() {
+        "120000" => GitSnapshotContentState::Symlink,
+        "160000" => GitSnapshotContentState::Submodule,
+        "100644" | "100755" => {
+            let blob = match read_blob(session, &stage.object_id, cancellation) {
+                Ok(blob) => blob,
+                Err(GitBlobError::ObjectMissingLocal) => {
+                    return Ok(GitSnapshotDocument {
+                        origin: GitSnapshotOrigin::IndexStage,
+                        label,
+                        read_only: true,
+                        object_id: Some(stage.object_id.clone()),
+                        path: Some(path),
+                        mode: Some(stage.mode.clone()),
+                        text_metadata: None,
+                        working_tree_version: None,
+                        content_state: GitSnapshotContentState::Unavailable {
+                            reason: GitSnapshotUnavailableReason::ObjectMissingLocal,
+                        },
+                    });
+                }
+                Err(error) => return Err(GitSessionError::Blob(error)),
+            };
+            let revision = GitRevision {
+                raw_label: label.clone(),
+                resolved: stage.object_id.clone(),
+                kind: GitRevisionKind::Commit,
+                display_name: label.clone(),
+            };
+            let mut document =
+                snapshot_document_from_blob(&revision, path, stage.mode.clone(), blob);
+            document.origin = GitSnapshotOrigin::IndexStage;
+            document.label = label;
+            return Ok(document);
+        }
+        _ => return Err(GitSessionError::StateUnavailable),
+    };
+    Ok(GitSnapshotDocument {
+        origin: GitSnapshotOrigin::IndexStage,
+        label,
+        read_only: true,
+        object_id: Some(stage.object_id.clone()),
+        path: Some(path),
+        mode: Some(stage.mode.clone()),
+        text_metadata: None,
+        working_tree_version: None,
+        content_state,
+    })
+}
+
+fn conflict_stage_label(
+    stage: u8,
+    operation: GitConflictOperation,
+    path: &GitPathIdentity,
+) -> String {
+    let context = match (stage, operation) {
+        (1, _) => "Base (index stage 1)",
+        (2, GitConflictOperation::Rebase) => "Rebase base (Git ours, index stage 2)",
+        (3, GitConflictOperation::Rebase) => "Rebased commit (Git theirs, index stage 3)",
+        (2, GitConflictOperation::CherryPick) => "Current HEAD (Git ours, index stage 2)",
+        (3, GitConflictOperation::CherryPick) => "Cherry-picked commit (Git theirs, index stage 3)",
+        (2, GitConflictOperation::Revert) => "Current HEAD (Git ours, index stage 2)",
+        (3, GitConflictOperation::Revert) => "Reverted commit (Git theirs, index stage 3)",
+        (2, _) => "Current HEAD (Git ours, index stage 2)",
+        (3, _) => "Merged commit (Git theirs, index stage 3)",
+        _ => "Conflict stage",
+    };
+    format!("{context} · {}", path.display_path)
+}
+
+fn conflict_result_document(
+    session: &GitRepositorySession,
+    path: GitPathIdentity,
+    generation: u64,
+    cancellation: &CancellationToken,
+) -> Result<(GitSnapshotDocument, GitConflictResultFingerprint), GitSessionError> {
+    let plan = prepare_working_tree_path_allow_final_symlink(session, &path, generation)?;
+    let Some(metadata) = working_tree_metadata(&plan.candidate)? else {
+        let mut document = missing_working_tree_document(path);
+        document.label = conflict_result_label(&document.path);
+        document.read_only = false;
+        return Ok((
+            document,
+            GitConflictResultFingerprint {
+                kind: GitConflictResultKind::Missing,
+                size: None,
+                modified_ms: None,
+            },
+        ));
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(conflict_non_text_result(
+            path,
+            &metadata,
+            GitConflictResultKind::Symlink,
+            GitSnapshotContentState::Symlink,
+        ));
+    }
+    if metadata.is_dir() {
+        return Ok(conflict_non_text_result(
+            path,
+            &metadata,
+            GitConflictResultKind::Directory,
+            GitSnapshotContentState::Submodule,
+        ));
+    }
+    let mut document = read_working_tree_snapshot(session, &plan, cancellation, &mut |_| {})?;
+    document.label = conflict_result_label(&document.path);
+    document.read_only = !matches!(
+        document.content_state,
+        GitSnapshotContentState::Text { .. } | GitSnapshotContentState::Missing
+    );
+    let version = document
+        .working_tree_version
+        .as_ref()
+        .ok_or(GitSessionError::StateUnavailable)?;
+    let fingerprint = GitConflictResultFingerprint {
+        kind: GitConflictResultKind::RegularFile,
+        size: Some(version.size),
+        modified_ms: version.modified_ms,
+    };
+    Ok((document, fingerprint))
+}
+
+fn conflict_non_text_result(
+    path: GitPathIdentity,
+    metadata: &Metadata,
+    kind: GitConflictResultKind,
+    content_state: GitSnapshotContentState,
+) -> (GitSnapshotDocument, GitConflictResultFingerprint) {
+    let label = format!("Result (working tree) · {}", path.display_path);
+    (
+        GitSnapshotDocument {
+            origin: GitSnapshotOrigin::WorkingTree,
+            label,
+            read_only: true,
+            object_id: None,
+            path: Some(path),
+            mode: None,
+            text_metadata: None,
+            working_tree_version: Some(GitWorkingTreeVersion {
+                size: metadata.len(),
+                modified_ms: modified_ms(metadata),
+            }),
+            content_state,
+        },
+        GitConflictResultFingerprint {
+            kind,
+            size: Some(metadata.len()),
+            modified_ms: modified_ms(metadata),
+        },
+    )
+}
+
+fn conflict_result_label(path: &Option<GitPathIdentity>) -> String {
+    match path {
+        Some(path) => format!("Result (working tree) · {}", path.display_path),
+        None => "Result (working tree)".to_string(),
+    }
+}
+
 fn head_revision(session: &GitRepositorySession) -> Result<GitRevision, GitSessionError> {
     let resolved = match &session.summary().head {
         GitHeadState::Unborn => return Err(GitSessionError::InvalidRevision),
@@ -382,6 +652,23 @@ fn prepare_working_tree_path(
     path: &GitPathIdentity,
     generation: u64,
 ) -> Result<WorkingTreePathPlan, GitSessionError> {
+    prepare_working_tree_path_inner(session, path, generation, false)
+}
+
+fn prepare_working_tree_path_allow_final_symlink(
+    session: &GitRepositorySession,
+    path: &GitPathIdentity,
+    generation: u64,
+) -> Result<WorkingTreePathPlan, GitSessionError> {
+    prepare_working_tree_path_inner(session, path, generation, true)
+}
+
+fn prepare_working_tree_path_inner(
+    session: &GitRepositorySession,
+    path: &GitPathIdentity,
+    generation: u64,
+    allow_final_symlink: bool,
+) -> Result<WorkingTreePathPlan, GitSessionError> {
     let paths = session
         .paths()
         .lock()
@@ -405,13 +692,37 @@ fn prepare_working_tree_path(
         return Err(GitSessionError::PathOutsideRoot);
     }
     let candidate = session.identity().root.join(&relative_path);
-    ensure_no_symlinks(&session.identity().root, &relative_path)?;
+    if allow_final_symlink {
+        ensure_no_symlink_ancestors(&session.identity().root, &relative_path)?;
+    } else {
+        ensure_no_symlinks(&session.identity().root, &relative_path)?;
+    }
     Ok(WorkingTreePathPlan {
         identity,
         raw_path,
         relative_path,
         candidate,
     })
+}
+
+fn ensure_no_symlink_ancestors(root: &Path, relative_path: &Path) -> Result<(), GitSessionError> {
+    let components = relative_path.components().collect::<Vec<_>>();
+    let mut current = root.to_path_buf();
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        let Component::Normal(component) = component else {
+            return Err(GitSessionError::PathOutsideRoot);
+        };
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(GitSessionError::SymlinkUnsupported);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(map_working_tree_io(error)),
+        }
+    }
+    Ok(())
 }
 
 fn read_optional_committed_snapshot(
@@ -1067,6 +1378,19 @@ fn map_index_error(error: GitIndexError) -> GitSessionError {
     }
 }
 
+fn map_conflict_error(error: GitConflictError) -> GitSessionError {
+    match error {
+        GitConflictError::Runner(crate::git::runner::RunnerError::Cancelled) => {
+            GitSessionError::Cancelled
+        }
+        GitConflictError::StaleGeneration => GitSessionError::StaleGeneration,
+        GitConflictError::IndexChanged | GitConflictError::OperationChanged => {
+            GitSessionError::ConflictStateChanged
+        }
+        _ => GitSessionError::StateUnavailable,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1075,8 +1399,8 @@ mod tests {
     };
     use crate::domain::git::{
         GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileStatus,
-        GitCompareSourceKind, GitObjectAlgorithm, GitObjectId, GitPathIdentity, GitRevision,
-        GitRevisionKind, GitSnapshotContentState, GitSnapshotOrigin,
+        GitCompareSourceKind, GitConflictOperation, GitObjectAlgorithm, GitObjectId,
+        GitPathIdentity, GitRevision, GitRevisionKind, GitSnapshotContentState, GitSnapshotOrigin,
     };
     use crate::git::GIT_FIXTURE_LOCK;
     use crate::git::changed_files::list_changed_files;
@@ -1244,6 +1568,197 @@ mod tests {
         assert!(empty.label.contains("main"));
         assert!(empty.label.contains(&"a".repeat(12)));
         assert!(empty.label.contains("empty.txt"));
+    }
+
+    #[test]
+    fn labels_conflict_stages_with_operation_specific_ours_and_theirs_meaning() {
+        let path = path("conflict", "src/conflict.txt");
+
+        assert_eq!(
+            super::conflict_stage_label(1, GitConflictOperation::Merge, &path),
+            "Base (index stage 1) · src/conflict.txt",
+        );
+        assert_eq!(
+            super::conflict_stage_label(2, GitConflictOperation::Merge, &path),
+            "Current HEAD (Git ours, index stage 2) · src/conflict.txt",
+        );
+        assert_eq!(
+            super::conflict_stage_label(3, GitConflictOperation::Merge, &path),
+            "Merged commit (Git theirs, index stage 3) · src/conflict.txt",
+        );
+        assert_eq!(
+            super::conflict_stage_label(2, GitConflictOperation::Rebase, &path),
+            "Rebase base (Git ours, index stage 2) · src/conflict.txt",
+        );
+        assert_eq!(
+            super::conflict_stage_label(3, GitConflictOperation::Rebase, &path),
+            "Rebased commit (Git theirs, index stage 3) · src/conflict.txt",
+        );
+        assert_eq!(
+            super::conflict_stage_label(3, GitConflictOperation::CherryPick, &path),
+            "Cherry-picked commit (Git theirs, index stage 3) · src/conflict.txt",
+        );
+    }
+
+    #[test]
+    fn opens_conflict_stages_and_current_marker_result_without_mutating_git_state() {
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = conflict_session_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-502".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let cancellation = CancellationToken::new();
+        let conflicts = crate::git::conflicts::list_conflicts(&session, 10, &cancellation)
+            .expect("list conflict");
+        let entry = conflicts.entries.first().expect("conflict entry");
+        let before = repository_fingerprint(&fixture.root);
+
+        let opened = super::open_conflict_session(
+            &session,
+            &entry.path,
+            conflicts.generation,
+            &cancellation,
+        )
+        .expect("open conflict session");
+
+        assert_eq!(opened.operation, GitConflictOperation::Merge);
+        assert!(matches!(
+            opened.base.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "base\n"
+        ));
+        assert!(matches!(
+            opened.stage2.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "ours\n"
+        ));
+        assert!(matches!(
+            opened.stage3.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "theirs\n"
+        ));
+        assert!(matches!(
+            opened.result.content_state,
+            GitSnapshotContentState::Text { ref text }
+                if text.contains("<<<<<<<") && text.contains("=======") && text.contains(">>>>>>>")
+        ));
+        assert!(opened.base.read_only && opened.stage2.read_only && opened.stage3.read_only);
+        assert!(!opened.result.read_only);
+        assert_eq!(opened.path.opaque_id, entry.path.opaque_id);
+        assert_eq!(opened.stage_fingerprint.stage1, entry.stage1);
+        assert_eq!(opened.stage_fingerprint.stage2, entry.stage2);
+        assert_eq!(opened.stage_fingerprint.stage3, entry.stage3);
+        assert_eq!(repository_fingerprint(&fixture.root), before);
+    }
+
+    #[test]
+    fn keeps_missing_binary_and_directory_conflict_results_out_of_text_merge() {
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = conflict_session_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-502-result-kinds".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let cancellation = CancellationToken::new();
+        let conflicts = crate::git::conflicts::list_conflicts(&session, 10, &cancellation)
+            .expect("list conflict");
+        let entry = conflicts.entries.first().expect("conflict entry");
+        let target = fixture.root.join("conflict.txt");
+
+        fs::remove_file(&target).expect("remove conflict Result");
+        let missing = super::open_conflict_session(
+            &session,
+            &entry.path,
+            conflicts.generation,
+            &cancellation,
+        )
+        .expect("open missing Result");
+        assert_eq!(
+            missing.result.content_state,
+            GitSnapshotContentState::Missing
+        );
+        assert!(!missing.result.read_only);
+        assert_eq!(
+            missing.result_fingerprint.kind,
+            crate::GitConflictResultKind::Missing
+        );
+
+        fs::write(&target, [0, 1, 2, 3]).expect("binary conflict Result");
+        let binary = super::open_conflict_session(
+            &session,
+            &entry.path,
+            conflicts.generation,
+            &cancellation,
+        )
+        .expect("open binary Result");
+        assert_eq!(binary.result.content_state, GitSnapshotContentState::Binary);
+        assert!(binary.result.read_only);
+
+        fs::remove_file(&target).expect("remove binary Result");
+        fs::create_dir(&target).expect("directory conflict Result");
+        let directory = super::open_conflict_session(
+            &session,
+            &entry.path,
+            conflicts.generation,
+            &cancellation,
+        )
+        .expect("open directory Result");
+        assert_eq!(
+            directory.result.content_state,
+            GitSnapshotContentState::Submodule
+        );
+        assert!(directory.result.read_only);
+        assert_eq!(
+            directory.result_fingerprint.kind,
+            crate::GitConflictResultKind::Directory
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_a_conflict_result_symlink_without_following_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = conflict_session_fixture();
+        let outside = fixture._temp.path().join("outside-secret.txt");
+        fs::write(&outside, b"must not be read\n").expect("outside fixture");
+        let target = fixture.root.join("conflict.txt");
+        fs::remove_file(&target).expect("remove conflict Result");
+        symlink(&outside, &target).expect("conflict Result symlink");
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-502-symlink".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let cancellation = CancellationToken::new();
+        let conflicts = crate::git::conflicts::list_conflicts(&session, 10, &cancellation)
+            .expect("list conflict");
+        let entry = conflicts.entries.first().expect("conflict entry");
+
+        let opened = super::open_conflict_session(
+            &session,
+            &entry.path,
+            conflicts.generation,
+            &cancellation,
+        )
+        .expect("open symlink Result metadata");
+
+        assert_eq!(
+            opened.result.content_state,
+            GitSnapshotContentState::Symlink
+        );
+        assert!(opened.result.read_only);
+        assert_eq!(
+            opened.result_fingerprint.kind,
+            crate::GitConflictResultKind::Symlink
+        );
     }
 
     #[test]
@@ -1814,6 +2329,34 @@ mod tests {
         revision: GitRevision,
     }
 
+    struct ConflictSessionFixture {
+        _temp: TempDir,
+        root: PathBuf,
+    }
+
+    fn conflict_session_fixture() -> ConflictSessionFixture {
+        let temp = tempdir().expect("temporary conflict repository");
+        let root = temp.path().join("repository");
+        fs::create_dir(&root).expect("repository root");
+        git(&root, &["init"]);
+        git(&root, &["config", "user.name", "Forktail Test"]);
+        git(&root, &["config", "user.email", "forktail@example.invalid"]);
+        fs::write(root.join("conflict.txt"), b"base\n").expect("base fixture");
+        git(&root, &["add", "--", "conflict.txt"]);
+        git(&root, &["commit", "-m", "base"]);
+        git(&root, &["branch", "theirs"]);
+        fs::write(root.join("conflict.txt"), b"ours\n").expect("ours fixture");
+        git(&root, &["add", "--", "conflict.txt"]);
+        git(&root, &["commit", "-m", "ours"]);
+        git(&root, &["checkout", "theirs"]);
+        fs::write(root.join("conflict.txt"), b"theirs\n").expect("theirs fixture");
+        git(&root, &["add", "--", "conflict.txt"]);
+        git(&root, &["commit", "-m", "theirs"]);
+        git(&root, &["checkout", "master"]);
+        git_expect_failure(&root, &["merge", "theirs"]);
+        ConflictSessionFixture { _temp: temp, root }
+    }
+
     fn working_tree_compare_fixture() -> WorkingTreeCompareFixture {
         let temp = tempdir().expect("temporary working-tree repository");
         let root = temp.path().join("repository");
@@ -2051,6 +2594,20 @@ mod tests {
             output.status.success(),
             "git {arguments:?} failed: {}",
             String::from_utf8_lossy(&output.stderr),
+        );
+    }
+
+    fn git_expect_failure(root: &Path, arguments: &[&str]) {
+        let output = Command::new("git")
+            .current_dir(root)
+            .args(arguments)
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_TERMINAL_PROMPT", "0")
+            .output()
+            .expect("run failing Git fixture command");
+        assert!(
+            !output.status.success(),
+            "git {arguments:?} unexpectedly succeeded",
         );
     }
 

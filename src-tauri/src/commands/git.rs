@@ -11,7 +11,8 @@ use crate::git::refs::{GitRefError, list_refs};
 use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
 use crate::git::revision::{GitRevisionError, resolve_revision};
 use crate::git::session::{
-    GitSessionError, open_index_compare, open_revision_compare, open_working_tree_compare,
+    GitSessionError, open_conflict_session, open_index_compare, open_revision_compare,
+    open_working_tree_compare,
 };
 use crate::git::status::{GitStatusError, read_status};
 use crate::git::tree::{GitTreeError, list_tree};
@@ -78,6 +79,13 @@ pub struct GitWorkingTreeCompareRequest {
 pub struct GitIndexCompareRequest {
     pub opaque_path_id: String,
     pub comparison: crate::GitIndexComparison,
+    pub generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictSessionRequest {
+    pub opaque_path_id: String,
     pub generation: u64,
 }
 
@@ -366,6 +374,30 @@ pub async fn open_git_index_compare(
 }
 
 #[tauri::command]
+pub async fn open_git_conflict(
+    repository_session_id: String,
+    request: GitConflictSessionRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitConflictSession> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = crate::GitPathIdentity::new(request.opaque_path_id, "", Option::<String>::None);
+        open_conflict_session(&session, &path, request.generation, lease.cancellation())
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn cancel_git_job(
     repository_session_id: String,
     job_id: u64,
@@ -567,7 +599,10 @@ impl From<GitSessionError> for CommandError {
                 Self::git(AppErrorCode::PermissionDenied)
             }
             GitSessionError::WorkingTreeChanged => Self::git(AppErrorCode::FileChanged),
-            GitSessionError::IndexChanged | GitSessionError::UnmergedIndexPath => {
+            GitSessionError::IndexChanged
+            | GitSessionError::UnmergedIndexPath
+            | GitSessionError::ConflictNotFound
+            | GitSessionError::ConflictStateChanged => {
                 Self::git(AppErrorCode::GitConflictStateChanged)
             }
             GitSessionError::IntentToAddUnsupported => {

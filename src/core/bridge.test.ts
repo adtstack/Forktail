@@ -16,6 +16,7 @@ import {
   listGitChangedFiles,
   listGitConflicts,
   listGitRefs,
+  openGitConflict,
   openGitIndexCompare,
   openGitRevisionCompare,
   openGitWorkingTreeCompare,
@@ -299,6 +300,30 @@ describe("Git conflict discovery bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 95,
+    });
+  });
+});
+
+describe("Git conflict session bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("opens one conflict using only its repository-scoped opaque path identity", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+    const request = { opaquePathId: "repository-session-1:path:7:2", generation: 7 };
+
+    await openGitConflict("repository-session-1", request, 96);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("open_git_conflict", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 96,
     });
   });
 });
