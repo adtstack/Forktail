@@ -4,6 +4,7 @@ pub mod conflicts;
 pub mod executable;
 pub mod index;
 pub mod jobs;
+pub mod merge_base;
 pub mod parsers;
 pub mod refs;
 pub mod repository;

@@ -86,6 +86,18 @@ impl GitObjectId {
     }
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GitMergeBase {
+    None,
+    Single { object_id: GitObjectId },
+    Multiple { object_ids: Vec<GitObjectId> },
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GitRevisionKind {
@@ -849,7 +861,7 @@ mod tests {
         GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
         GitChangedFileStatus, GitCompareCapabilities, GitCompareSession, GitCompareSourceKind,
         GitConflictEntry, GitConflictList, GitConflictOperation, GitConflictSaveAction,
-        GitConflictSaveResult, GitConflictStage, GitHeadState, GitIndexComparison,
+        GitConflictSaveResult, GitConflictStage, GitHeadState, GitIndexComparison, GitMergeBase,
         GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType, GitPathIdentity,
         GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary, GitRevision,
         GitRevisionKind, GitRevisionPair, GitSnapshotContentState, GitSnapshotDocument,
@@ -890,6 +902,44 @@ mod tests {
                 "utf8Path": null,
             })
         );
+    }
+
+    #[test]
+    fn serializes_merge_base_cardinality_without_an_implicit_selection() {
+        let cases = [
+            (GitMergeBase::None, json!({ "kind": "none" })),
+            (
+                GitMergeBase::Single {
+                    object_id: sha1('a'),
+                },
+                json!({
+                    "kind": "single",
+                    "objectId": {
+                        "algorithm": "sha1",
+                        "hex": "a".repeat(40),
+                    },
+                }),
+            ),
+            (
+                GitMergeBase::Multiple {
+                    object_ids: vec![sha1('b'), sha1('c')],
+                },
+                json!({
+                    "kind": "multiple",
+                    "objectIds": [
+                        { "algorithm": "sha1", "hex": "b".repeat(40) },
+                        { "algorithm": "sha1", "hex": "c".repeat(40) },
+                    ],
+                }),
+            ),
+        ];
+
+        for (value, expected) in cases {
+            assert_eq!(
+                serde_json::to_value(value).expect("serialize merge base"),
+                expected,
+            );
+        }
     }
 
     #[test]

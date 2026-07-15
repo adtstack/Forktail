@@ -146,12 +146,12 @@
 
 ### Tests for User Story 4
 
-- [ ] T056 [US4] GIT-701 single/none/multiple merge-base, missing object, timeout/cancel 테스트를 `src-tauri/src/git/merge_base.rs`에 먼저 추가한다
+- [X] T056 [US4] GIT-701 single/none/multiple merge-base, missing object, timeout/cancel 테스트를 `src-tauri/src/git/merge_base.rs`에 먼저 추가한다
 - [ ] T057 [US4] GIT-702 clean/conflict/missing/binary/type-change/read-only capability 테스트를 `src-tauri/src/git/session.rs`, `src/core/gitSession.test.ts`, `src/components/MergeView.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 4
 
-- [ ] T058 [US4] GIT-701 merge-base typed service를 `src-tauri/src/git/merge_base.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [X] T058 [US4] GIT-701 merge-base typed service를 `src-tauri/src/git/merge_base.rs`, `src-tauri/src/commands/git.rs`에 구현한다
 - [ ] T059 [US4] GIT-702 immutable Base/Left/Right preview adapter와 disclaimer UI를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/components/MergeView.tsx`에 구현한다
 
 **Checkpoint**: preview가 실제 Git merge로 오인되지 않고 항상 read-only다.

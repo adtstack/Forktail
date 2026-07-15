@@ -12,12 +12,13 @@ pub use domain::git::{
     GitConflictOperation, GitConflictResultFingerprint, GitConflictResultKind,
     GitConflictSaveAction, GitConflictSaveResult, GitConflictSaveState, GitConflictSession,
     GitConflictStage, GitConflictStageFingerprint, GitHeadState, GitIndexComparison, GitIndexEntry,
-    GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType, GitPathIdentity, GitRefKind,
-    GitRefList, GitRepositoryIdentity, GitRepositoryRef, GitRepositorySummary, GitRevision,
-    GitRevisionKind, GitRevisionPair, GitSnapshotContentState, GitSnapshotDocument,
-    GitSnapshotOrigin, GitSnapshotUnavailableReason, GitStatusBranch, GitStatusBranchState,
-    GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus, GitTextMetadata,
-    GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry, GitWorkingTreeVersion,
+    GitMergeBase, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
+    GitPathIdentity, GitRefKind, GitRefList, GitRepositoryIdentity, GitRepositoryRef,
+    GitRepositorySummary, GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
+    GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason, GitStatusBranch,
+    GitStatusBranchState, GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot,
+    GitSubmoduleStatus, GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList,
+    GitUnmergedStatusEntry, GitWorkingTreeVersion,
 };
 pub use domain::models::LineEnding;
 
@@ -47,6 +48,7 @@ pub fn run() {
             git_commands::list_git_changed_files,
             git_commands::read_git_status,
             git_commands::list_git_conflicts,
+            git_commands::get_git_merge_base,
             git_commands::read_git_blob,
             git_commands::open_git_revision_compare,
             git_commands::open_git_working_tree_compare,

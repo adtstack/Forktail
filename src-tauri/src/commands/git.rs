@@ -9,6 +9,7 @@ use crate::git::executable::{
 };
 use crate::git::index::GitIndexError;
 use crate::git::jobs::{GitJobError, GitJobs};
+use crate::git::merge_base::{GitMergeBaseError, get_merge_base};
 use crate::git::refs::{GitRefError, list_refs};
 use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
 use crate::git::revision::{GitRevisionError, resolve_revision};
@@ -57,6 +58,13 @@ pub struct GitStatusRequest {
 pub struct GitConflictsRequest {
     pub hard_limit: usize,
     pub request_generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitMergeBaseRequest {
+    pub left_commit: crate::GitObjectId,
+    pub right_commit: crate::GitObjectId,
 }
 
 #[derive(Debug, Deserialize)]
@@ -271,6 +279,34 @@ pub async fn list_git_conflicts(
         .map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
         list_conflicts(&session, request.hard_limit, lease.cancellation())
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn get_git_merge_base(
+    repository_session_id: String,
+    request: GitMergeBaseRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitMergeBase> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        get_merge_base(
+            &session,
+            &request.left_commit,
+            &request.right_commit,
+            lease.cancellation(),
+        )
     })
     .await
     .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
@@ -726,6 +762,24 @@ impl From<GitConflictError> for CommandError {
     }
 }
 
+impl From<GitMergeBaseError> for CommandError {
+    fn from(error: GitMergeBaseError) -> Self {
+        match error {
+            GitMergeBaseError::Runner(error) => error.into(),
+            GitMergeBaseError::ObjectMissingLocal => Self::git(AppErrorCode::GitObjectMissingLocal),
+            GitMergeBaseError::ObjectTypeUnsupported
+            | GitMergeBaseError::ObjectFormatUnsupported => {
+                Self::git(AppErrorCode::GitObjectTypeUnsupported)
+            }
+            GitMergeBaseError::InvalidObjectId => Self::git(AppErrorCode::GitInvalidRevision),
+            GitMergeBaseError::TooManyCandidates => Self::git(AppErrorCode::GitOutputTooLarge),
+            GitMergeBaseError::CommandFailed | GitMergeBaseError::InvalidOutput => {
+                Self::git(AppErrorCode::GitCommandFailed)
+            }
+        }
+    }
+}
+
 impl From<GitConflictSaveError> for CommandError {
     fn from(error: GitConflictSaveError) -> Self {
         match error {
@@ -1080,6 +1134,39 @@ mod tests {
             assert_eq!(error.code, expected);
             assert!(!error.message.contains("conflict.txt"));
             assert!(!error.message.contains(&"a".repeat(40)));
+        }
+    }
+
+    #[test]
+    fn maps_merge_base_failures_without_object_or_process_details() {
+        let cases = [
+            (
+                GitMergeBaseError::ObjectMissingLocal,
+                AppErrorCode::GitObjectMissingLocal,
+            ),
+            (
+                GitMergeBaseError::ObjectTypeUnsupported,
+                AppErrorCode::GitObjectTypeUnsupported,
+            ),
+            (
+                GitMergeBaseError::Runner(RunnerError::TimedOut),
+                AppErrorCode::GitCommandTimeout,
+            ),
+            (
+                GitMergeBaseError::Runner(RunnerError::Cancelled),
+                AppErrorCode::GitCommandCancelled,
+            ),
+            (
+                GitMergeBaseError::TooManyCandidates,
+                AppErrorCode::GitOutputTooLarge,
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("stderr"));
+            assert!(!error.message.contains("object ID"));
         }
     }
 

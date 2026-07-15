@@ -25,6 +25,7 @@ pub const STATUS_STDOUT_CAP: usize = 32 * 1024 * 1024;
 pub const INDEX_ENTRY_STDOUT_CAP: usize = 64 * 1024;
 pub const INDEX_VISIBILITY_STDOUT_CAP: usize = 64 * 1024;
 pub const CONFLICTS_STDOUT_CAP: usize = 32 * 1024 * 1024;
+pub const MERGE_BASE_STDOUT_CAP: usize = 8 * 1024;
 const REF_LIST_FORMAT: &str =
     "%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00";
 
@@ -99,6 +100,11 @@ pub enum GitOperation {
     },
     Conflicts {
         repository: PathBuf,
+    },
+    MergeBase {
+        repository: PathBuf,
+        left_commit_id: String,
+        right_commit_id: String,
     },
 }
 
@@ -246,6 +252,20 @@ impl GitOperation {
                     OsString::from("--stage"),
                     OsString::from("-z"),
                     OsString::from("--"),
+                ]);
+            }
+            Self::MergeBase {
+                repository,
+                left_commit_id,
+                right_commit_id,
+            } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend([
+                    OsString::from("merge-base"),
+                    OsString::from("--all"),
+                    OsString::from(left_commit_id),
+                    OsString::from(right_commit_id),
                 ]);
             }
         }
@@ -398,6 +418,7 @@ impl RunnerLimits {
                 GitOperation::IndexEntries { .. } => INDEX_ENTRY_STDOUT_CAP,
                 GitOperation::IndexVisibility { .. } => INDEX_VISIBILITY_STDOUT_CAP,
                 GitOperation::Conflicts { .. } => CONFLICTS_STDOUT_CAP,
+                GitOperation::MergeBase { .. } => MERGE_BASE_STDOUT_CAP,
                 GitOperation::Version | GitOperation::Repository { .. } => 8 * 1024 * 1024,
             },
             stderr_bytes: 256 * 1024,
@@ -531,11 +552,20 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
         || validate_index_entries_query_arguments(query_arguments)
         || validate_index_visibility_query_arguments(query_arguments)
         || validate_conflicts_query_arguments(query_arguments)
+        || validate_merge_base_query_arguments(query_arguments)
     {
         Ok(())
     } else {
         Err(RunnerError::ForbiddenOperation)
     }
+}
+
+fn validate_merge_base_query_arguments(arguments: &[OsString]) -> bool {
+    arguments.len() == 4
+        && arguments[0] == "merge-base"
+        && arguments[1] == "--all"
+        && is_full_object_id(&arguments[2])
+        && is_full_object_id(&arguments[3])
 }
 
 fn validate_conflicts_query_arguments(arguments: &[OsString]) -> bool {
@@ -1212,9 +1242,9 @@ mod tests {
     use super::{
         BLOB_CONTENT_STDOUT_CAP, BlobQuery, CHANGED_FILES_STDOUT_CAP, CONFLICTS_STDOUT_CAP,
         CancellationToken, GitOperation, INDEX_ENTRY_STDOUT_CAP, INDEX_VISIBILITY_STDOUT_CAP,
-        OutputStream, ProductionGitRunner, REF_LIST_STDOUT_CAP, RefNamespace, RepositoryQuery,
-        RevisionQuery, RunnerError, RunnerLimits, SAFE_GLOBAL_ARGUMENTS, STATUS_STDOUT_CAP,
-        TREE_LIST_STDOUT_CAP,
+        MERGE_BASE_STDOUT_CAP, OutputStream, ProductionGitRunner, REF_LIST_STDOUT_CAP,
+        RefNamespace, RepositoryQuery, RevisionQuery, RunnerError, RunnerLimits,
+        SAFE_GLOBAL_ARGUMENTS, STATUS_STDOUT_CAP, TREE_LIST_STDOUT_CAP,
         fixture::{FixtureGitRunner, FixtureProcess},
         safe_environment_from, validate_approved_arguments,
     };
@@ -1769,6 +1799,47 @@ mod tests {
             assert_eq!(
                 validate_approved_arguments(&arguments),
                 Err(RunnerError::ForbiddenOperation)
+            );
+        }
+    }
+
+    #[test]
+    fn merge_base_operation_allows_only_two_full_local_commit_ids() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let repository = std::env::temp_dir().join("merge base repository 한글");
+        let left = "a".repeat(40);
+        let right = "b".repeat(40);
+        let plan = runner
+            .plan(GitOperation::MergeBase {
+                repository: repository.clone(),
+                left_commit_id: left.clone(),
+                right_commit_id: right.clone(),
+            })
+            .expect("typed merge-base query should be approved");
+
+        assert_eq!(plan.limits.stdout_bytes, MERGE_BASE_STDOUT_CAP);
+        assert_eq!(
+            &plan.arguments[SAFE_GLOBAL_ARGUMENTS.len() + 2..],
+            ["merge-base", "--all", left.as_str(), right.as_str()].map(OsString::from),
+        );
+
+        for malformed in [
+            vec!["merge-base", left.as_str(), right.as_str()],
+            vec!["merge-base", "--octopus", left.as_str(), right.as_str()],
+            vec!["merge-base", "--all", "HEAD", right.as_str()],
+            vec!["merge-base", "--all", left.as_str(), "--fork-point"],
+        ] {
+            let arguments = SAFE_GLOBAL_ARGUMENTS
+                .iter()
+                .copied()
+                .chain(["-C", repository.to_str().expect("UTF-8 fixture path")])
+                .chain(malformed)
+                .map(OsString::from)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                validate_approved_arguments(&arguments),
+                Err(RunnerError::ForbiddenOperation),
             );
         }
     }

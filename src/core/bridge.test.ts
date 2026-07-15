@@ -13,6 +13,7 @@ import {
   detectGitRepository,
   exitExternalGitTool,
   gitToolExecutablePath,
+  getGitMergeBase,
   listGitChangedFiles,
   listGitConflicts,
   listGitRefs,
@@ -301,6 +302,33 @@ describe("Git conflict discovery bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 95,
+    });
+  });
+});
+
+describe("Git merge-base bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("passes only two immutable full commit identities and the cancellable job identity", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ kind: "none" });
+    const request = {
+      leftCommit: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+      rightCommit: { algorithm: "sha1" as const, hex: "b".repeat(40) },
+    };
+
+    await getGitMergeBase("repository-session-1", request, 98);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("get_git_merge_base", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 98,
     });
   });
 });

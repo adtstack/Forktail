@@ -19,6 +19,8 @@ import type {
   GitConflictSaveResult,
   GitConflictsRequest,
   GitIndexCompareRequest,
+  GitMergeBase,
+  GitMergeBaseRequest,
   GitChangedFileList,
   GitChangedFilesRequest,
   GitRefKind,
@@ -206,6 +208,19 @@ export async function listGitConflicts(
 ): Promise<GitConflictList> {
   requireTauri();
   return invoke<GitConflictList>("list_git_conflicts", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
+}
+
+export async function getGitMergeBase(
+  repositorySessionId: string,
+  request: GitMergeBaseRequest,
+  jobId: number,
+): Promise<GitMergeBase> {
+  requireTauri();
+  return invoke<GitMergeBase>("get_git_merge_base", {
     repositorySessionId,
     request,
     jobId,

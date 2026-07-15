@@ -4,6 +4,7 @@ import type {
   GitHeadState,
   GitBlobDocument,
   GitChangedFileList,
+  GitMergeBase,
   GitObjectId,
   GitPathIdentity,
   GitRefList,
@@ -35,6 +36,27 @@ describe("Git DTO contract", () => {
       displayPath: "src\\x80-name.ts",
       utf8Path: null,
     });
+  });
+
+  it("keeps merge-base cardinality explicit and never invents a selected base", () => {
+    const none: GitMergeBase = { kind: "none" };
+    const single: GitMergeBase = {
+      kind: "single",
+      objectId: { algorithm: "sha1", hex: "a".repeat(40) },
+    };
+    const multiple: GitMergeBase = {
+      kind: "multiple",
+      objectIds: [
+        { algorithm: "sha1", hex: "b".repeat(40) },
+        { algorithm: "sha1", hex: "c".repeat(40) },
+      ],
+    };
+
+    expect(none).toEqual({ kind: "none" });
+    expect(single.kind).toBe("single");
+    expect(multiple.kind).toBe("multiple");
+    expect(rustDtoSource).toContain("pub enum GitMergeBase");
+    expect(rustDtoSource).toContain("Multiple { object_ids: Vec<GitObjectId> }");
   });
 
   it("keeps repository and head state as a discriminated DTO", () => {

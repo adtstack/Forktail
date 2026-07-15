@@ -7,6 +7,16 @@ export interface GitObjectId {
   hex: string;
 }
 
+export type GitMergeBase =
+  | { kind: "none" }
+  | { kind: "single"; objectId: GitObjectId }
+  | { kind: "multiple"; objectIds: GitObjectId[] };
+
+export interface GitMergeBaseRequest {
+  leftCommit: GitObjectId;
+  rightCommit: GitObjectId;
+}
+
 export type GitRevisionKind =
   | "head"
   | "branch"
