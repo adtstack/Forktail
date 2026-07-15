@@ -40,6 +40,7 @@ import {
   type RecentSession,
 } from "./settings";
 import type { CompareSession, FileDocument, MergeSession } from "./models";
+import type { GitCompareSession, GitSnapshotDocument } from "./gitModels";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -450,6 +451,60 @@ describe("active session restore settings", () => {
     expect(serialized).not.toContain("/tmp/git/");
   });
 
+  it("does not persist Git snapshot text, opaque path identities, or review-local labels", () => {
+    const storage = new MemoryStorage();
+    const snapshot: GitCompareSession = {
+      repositoryId: "repository-session-private",
+      left: gitSnapshot("left blob secret", "opaque:left-private"),
+      right: gitSnapshot("right blob secret", "opaque:right-private"),
+      sourceKind: "revisionPair",
+      revisionPair: {
+        left: {
+          rawLabel: "private-left-ref",
+          resolved: { algorithm: "sha1", hex: "a".repeat(40) },
+          kind: "symbolic",
+          displayName: "private-left-ref",
+        },
+        right: {
+          rawLabel: "private-right-ref",
+          resolved: { algorithm: "sha1", hex: "b".repeat(40) },
+          kind: "symbolic",
+          displayName: "private-right-ref",
+        },
+      },
+      revision: null,
+      capabilities: { edit: false, save: false, hunkCopy: false, exportPatch: true },
+      generation: 27,
+    };
+    const session: CompareSession = {
+      origin: "git",
+      left: { ...testDocument("Git snapshot · private-left-ref"), text: "left blob secret" },
+      right: { ...testDocument("Git snapshot · private-right-ref"), text: "right blob secret" },
+      snapshot,
+    };
+
+    const persistent = persistentCompareSessionInput(session);
+    expect(persistent).toBeNull();
+    saveActiveSession(persistent, storage);
+    saveRecentSessions([], storage);
+
+    const serialized = [
+      storage.getItem("forktail.active-session.v1"),
+      storage.getItem("forktail.recent-sessions.v1"),
+    ].join("\n");
+    for (const privateValue of [
+      "left blob secret",
+      "right blob secret",
+      "opaque:left-private",
+      "opaque:right-private",
+      "repository-session-private",
+      "private-left-ref",
+      "private-right-ref",
+    ]) {
+      expect(serialized).not.toContain(privateValue);
+    }
+  });
+
   it("purges a legacy recent entry that contains the current mergetool paths", () => {
     const storage = new MemoryStorage();
     const legacy = upsertRecentSession([], {
@@ -491,5 +546,25 @@ function testDocument(path: string): FileDocument {
     modifiedMs: 1000,
     isBinary: false,
     decodeHadErrors: false,
+  };
+}
+
+function gitSnapshot(text: string, opaqueId: string): GitSnapshotDocument {
+  return {
+    origin: "committedBlob",
+    label: `Git snapshot · ${opaqueId}`,
+    readOnly: true,
+    objectId: { algorithm: "sha1", hex: "c".repeat(40) },
+    path: { opaqueId, displayPath: "private/file.txt", utf8Path: "private/file.txt" },
+    mode: "100644",
+    textMetadata: {
+      encoding: "UTF-8",
+      lineEnding: "none",
+      hadFinalNewline: false,
+      decodeHadErrors: false,
+      size: text.length,
+    },
+    workingTreeVersion: null,
+    contentState: { kind: "text", text },
   };
 }

@@ -10,6 +10,12 @@ import {
   type GitSnapshotSelectionState,
 } from "../core/gitSession";
 import type { GitChangedFile, GitChangedFileStatus } from "../core/gitModels";
+import {
+  gitReviewProgress,
+  nextGitReviewEntryKey,
+  nextUnviewedGitReviewEntryKey,
+  type GitReviewState,
+} from "../core/gitReview";
 import type { AppLanguage } from "../core/settings";
 
 const ROW_HEIGHT = 54;
@@ -64,7 +70,7 @@ interface GitChangedFilesProps {
   state: GitChangedFileLoadState;
   filter: GitChangedFileFilter;
   selectedKey: string | null;
-  viewedKeys: ReadonlySet<string>;
+  reviewState: GitReviewState;
   snapshotState: GitSnapshotSelectionState;
   openMode?: GitChangedFileOpenMode;
   languageMode?: AppLanguage;
@@ -97,6 +103,10 @@ const TEXT = {
     noMergeBase: "These revisions have no merge base, so a 3-way preview cannot be created.",
     multipleMergeBases: (count: number) =>
       `${count} merge-base candidates were found. Forktail will not choose one automatically.`,
+    progress: (viewed: number, total: number) => `${viewed} of ${total} viewed`,
+    previous: "Previous file",
+    next: "Next file",
+    nextUnviewed: "Next unviewed",
     states: {
       text: "Text",
       missing: "Missing",
@@ -130,6 +140,10 @@ const TEXT = {
     noMergeBase: "두 revision에 merge base가 없어 3-way 미리보기를 만들 수 없습니다.",
     multipleMergeBases: (count: number) =>
       `merge-base 후보가 ${count}개입니다. Forktail은 후보를 자동 선택하지 않습니다.`,
+    progress: (viewed: number, total: number) => `${total}개 중 ${viewed}개 검토`,
+    previous: "이전 파일",
+    next: "다음 파일",
+    nextUnviewed: "다음 미검토",
     states: {
       text: "텍스트",
       missing: "없음",
@@ -172,7 +186,7 @@ export function GitChangedFiles({
   state,
   filter,
   selectedKey,
-  viewedKeys,
+  reviewState,
   snapshotState,
   openMode = "compare",
   languageMode = "en",
@@ -196,6 +210,10 @@ export function GitChangedFiles({
     [filter, reviewableEntries],
   );
   const window = virtualizedGitChangedFileWindow(filteredEntries, scrollTop, selectedKey);
+  const progress = useMemo(
+    () => gitReviewProgress(filteredEntries, reviewState),
+    [filteredEntries, reviewState],
+  );
   const counts = state.kind === "ready"
     ? state.list.counts
     : EMPTY_COUNTS;
@@ -211,7 +229,36 @@ export function GitChangedFiles({
     onSelect(entry);
   };
 
+  const selectKey = (key: string | null) => {
+    if (!key) return;
+    const index = filteredEntries.findIndex((entry) => gitChangedFileKey(entry) === key);
+    if (index >= 0) selectIndex(index);
+  };
+
+  const selectRelative = (direction: "previous" | "next") => {
+    selectKey(nextGitReviewEntryKey(filteredEntries, selectedKey, direction));
+  };
+
+  const selectNextUnviewed = () => {
+    selectKey(nextUnviewedGitReviewEntryKey(filteredEntries, reviewState, selectedKey));
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    if (event.altKey && event.key === "ArrowUp") {
+      event.preventDefault();
+      selectRelative("previous");
+      return;
+    }
+    if (event.altKey && event.key === "ArrowDown") {
+      event.preventDefault();
+      selectRelative("next");
+      return;
+    }
+    if (event.altKey && event.key.toLocaleLowerCase() === "n") {
+      event.preventDefault();
+      selectNextUnviewed();
+      return;
+    }
     if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
     event.preventDefault();
     const currentIndex = selectedKey
@@ -291,6 +338,36 @@ export function GitChangedFiles({
           <p className="git-changed-file-shown">
             {text.shown(filteredEntries.length, reviewableTotal)}
           </p>
+          <div
+            className="git-review-navigation"
+            aria-label={text.progress(progress.viewed, progress.total)}
+          >
+            <span role="status">{text.progress(progress.viewed, progress.total)}</span>
+            <button
+              type="button"
+              onClick={() => selectRelative("previous")}
+              disabled={progress.total === 0}
+              aria-keyshortcuts="Alt+ArrowUp"
+            >
+              {text.previous}
+            </button>
+            <button
+              type="button"
+              onClick={() => selectRelative("next")}
+              disabled={progress.total === 0}
+              aria-keyshortcuts="Alt+ArrowDown"
+            >
+              {text.next}
+            </button>
+            <button
+              type="button"
+              onClick={selectNextUnviewed}
+              disabled={progress.remaining === 0}
+              aria-keyshortcuts="Alt+N"
+            >
+              {text.nextUnviewed}
+            </button>
+          </div>
           {state.list.truncated && <p className="git-revision-note">{text.truncated}</p>}
           {filteredEntries.length === 0 ? (
             <p className="git-review-empty" role="status">{text.empty}</p>
@@ -300,7 +377,7 @@ export function GitChangedFiles({
               className="git-changed-file-list"
               role="listbox"
               tabIndex={0}
-              aria-keyshortcuts="ArrowUp ArrowDown Home End"
+              aria-keyshortcuts="ArrowUp ArrowDown Home End Alt+ArrowUp Alt+ArrowDown Alt+N"
               aria-label={text.title}
               onKeyDown={handleKeyDown}
               onScroll={(event) => setScrollTop(event.currentTarget.scrollTop)}
@@ -308,7 +385,7 @@ export function GitChangedFiles({
               <div className="git-changed-file-window" style={{ height: window.totalHeight }}>
                 {window.entries.map((entry, offset) => {
                   const key = gitChangedFileKey(entry);
-                  const viewed = viewedKeys.has(key);
+                  const viewed = reviewState.viewedKeys.has(key);
                   return (
                     <button
                       key={key}

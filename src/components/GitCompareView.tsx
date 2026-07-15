@@ -20,6 +20,7 @@ import type {
   GitWorkingTreeSection,
 } from "../core/gitSession";
 import type { AppLanguage } from "../core/settings";
+import type { GitReviewState } from "../core/gitReview";
 import { GitChangedFiles } from "./GitChangedFiles";
 import { GitConflictView } from "./GitConflictView";
 import { GitRevisionSelector } from "./GitRevisionSelector";
@@ -105,7 +106,7 @@ export interface GitChangedFilesReviewState {
   state: GitChangedFileLoadState;
   filter: GitChangedFileFilter;
   selectedKey: string | null;
-  viewedKeys: ReadonlySet<string>;
+  reviewState: GitReviewState;
   snapshotState: GitSnapshotSelectionState;
   openMode?: GitChangedFileOpenMode;
 }
@@ -393,7 +394,7 @@ export function GitCompareView({
           state={changedFilesReview.state}
           filter={changedFilesReview.filter}
           selectedKey={changedFilesReview.selectedKey}
-          viewedKeys={changedFilesReview.viewedKeys}
+          reviewState={changedFilesReview.reviewState}
           snapshotState={changedFilesReview.snapshotState}
           openMode={changedFilesReview.openMode}
           languageMode={languageMode}

@@ -85,6 +85,12 @@ import type {
   GitTreePickerState,
   GitTreeSelectionKey,
 } from "./components/GitTreePicker";
+import {
+  createGitReviewState,
+  gitReviewScopeKey,
+  markGitReviewViewed,
+  scopeGitReviewState,
+} from "./core/gitReview";
 import { buildDiffReport, compareReportDefaultPath } from "./core/diffReport";
 import type { CompareDropSide } from "./core/dropPaths";
 import {
@@ -252,8 +258,8 @@ export default function App() {
   const [gitChangedFileOpenMode, setGitChangedFileOpenMode] =
     useState<GitChangedFileOpenMode>("compare");
   const [selectedGitChangedFileKey, setSelectedGitChangedFileKey] = useState<string | null>(null);
-  const [viewedGitChangedFileKeys, setViewedGitChangedFileKeys] =
-    useState<Set<string>>(() => new Set());
+  const [gitReviewState, setGitReviewState] =
+    useState(() => createGitReviewState("inactive"));
   const [gitSnapshotSelectionState, setGitSnapshotSelectionState] =
     useState<GitSnapshotSelectionState>({ kind: "idle" });
   const [gitTreePickerState, setGitTreePickerState] =
@@ -967,7 +973,7 @@ export default function App() {
     setGitChangedFileFilter({ query: "", status: "all" });
     setGitChangedFileOpenMode("compare");
     setSelectedGitChangedFileKey(null);
-    setViewedGitChangedFileKeys(new Set());
+    setGitReviewState(createGitReviewState("inactive"));
     setGitSnapshotSelectionState({ kind: "idle" });
     setGitTreePickerState({ kind: "idle" });
     setGitTreeQuery("");
@@ -1225,7 +1231,7 @@ export default function App() {
       cancelActiveGitTree();
       setGitChangedFileState({ kind: "idle" });
       setSelectedGitChangedFileKey(null);
-      setViewedGitChangedFileKeys(new Set());
+      setGitReviewState(createGitReviewState("inactive"));
       setGitSnapshotSelectionState({ kind: "idle" });
       setGitTreePickerState({ kind: "idle" });
       setGitTreeQuery("");
@@ -1243,7 +1249,6 @@ export default function App() {
     setGitChangedFileState({ kind: "loading", requestGeneration });
     setGitChangedFileFilter({ query: "", status: "all" });
     setSelectedGitChangedFileKey(null);
-    setViewedGitChangedFileKeys(new Set());
     setGitSnapshotSelectionState({ kind: "idle" });
     setGitTreePickerState({ kind: "idle" });
     setGitTreeQuery("");
@@ -1262,6 +1267,13 @@ export default function App() {
         && currentRepository?.kind === "ready"
         && currentRepository.repository.sessionId === repository.sessionId
       ) {
+        const scopeKey = gitReviewScopeKey({
+          repositoryId: repository.sessionId,
+          left: leftRevision.resolved,
+          right: rightRevision.resolved,
+          generation: list.generation,
+        });
+        setGitReviewState((current) => scopeGitReviewState(current, scopeKey));
         setGitChangedFileState({ kind: "ready", requestGeneration, list });
         setSelectedGitChangedFileKey((current) =>
           selectedGitChangedFileKeyAfterRefresh(current, list));
@@ -1605,11 +1617,7 @@ export default function App() {
           }, currentJobId);
           if (!isCurrent()) return;
 
-          setViewedGitChangedFileKeys((current) => {
-            const next = new Set(current);
-            next.add(fileKey);
-            return next;
-          });
+          setGitReviewState((current) => markGitReviewViewed(current, fileKey));
           const view = adaptGitMergePreview(preview);
           if (view.kind === "notice") {
             setGitSnapshotSelectionState({
@@ -1671,11 +1679,7 @@ export default function App() {
       ) return;
 
       const view = adaptGitCompareSession(snapshotSession);
-      setViewedGitChangedFileKeys((current) => {
-        const next = new Set(current);
-        next.add(fileKey);
-        return next;
-      });
+      setGitReviewState((current) => markGitReviewViewed(current, fileKey));
       if (view.kind === "notice") {
         setGitSnapshotSelectionState({
           kind: "notice",
@@ -2893,7 +2897,7 @@ export default function App() {
               state: gitChangedFileState,
               filter: gitChangedFileFilter,
               selectedKey: selectedGitChangedFileKey,
-              viewedKeys: viewedGitChangedFileKeys,
+              reviewState: gitReviewState,
               snapshotState: gitSnapshotSelectionState,
               openMode: gitChangedFileOpenMode,
             }}

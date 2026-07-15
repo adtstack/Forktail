@@ -265,7 +265,7 @@ describe("GitCompareView repository shell", () => {
         },
         filter: { query: "", status: "all" },
         selectedKey: null,
-        viewedKeys: new Set(),
+        reviewState: { scopeKey: "test-scope", viewedKeys: new Set() },
         snapshotState: { kind: "idle" },
       },
     );

@@ -82,7 +82,7 @@ function renderChangedFiles(
       state={state}
       filter={filter}
       selectedKey={selectedKey}
-      viewedKeys={viewedKeys}
+      reviewState={{ scopeKey: "test-scope", viewedKeys }}
       snapshotState={snapshotState}
       openMode={openMode}
       languageMode="en"
@@ -137,12 +137,39 @@ describe("GitChangedFiles", () => {
     );
 
     expect(markup).toContain("role=\"listbox\"");
-    expect(markup).toContain("aria-keyshortcuts=\"ArrowUp ArrowDown Home End\"");
+    expect(markup).toContain(
+      "aria-keyshortcuts=\"ArrowUp ArrowDown Home End Alt+ArrowUp Alt+ArrowDown Alt+N\"",
+    );
     expect(markup).toContain("aria-selected=\"true\"");
     expect(markup).toContain("aria-posinset=\"2\"");
     expect(markup).toContain("aria-setsize=\"4\"");
     expect(markup).toContain("Viewed");
     expect(markup).toContain("Modified");
+    expect(markup).toContain("1 of 4 viewed");
+    expect(markup).toContain("Previous file");
+    expect(markup).toContain("Next file");
+    expect(markup).toContain("Next unviewed");
+    expect(markup).toContain("aria-keyshortcuts=\"Alt+N\"");
+  });
+
+  it("computes review progress from the current filtered set only", () => {
+    const modifiedKey = gitChangedFileKey(entries[1]);
+    const addedMarkup = renderChangedFiles(
+      undefined,
+      { query: "", status: "added" },
+      null,
+      new Set([modifiedKey]),
+    );
+    const modifiedMarkup = renderChangedFiles(
+      undefined,
+      { query: "", status: "modified" },
+      null,
+      new Set([modifiedKey]),
+    );
+
+    expect(addedMarkup).toContain("0 of 1 viewed");
+    expect(modifiedMarkup).toContain("1 of 1 viewed");
+    expect(modifiedMarkup).toMatch(/disabled=""[^>]*aria-keyshortcuts="Alt\+N"/);
   });
 
   it("keeps at most one small virtual window for 10,000 generated rows within the UI budget", () => {

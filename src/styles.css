@@ -766,6 +766,18 @@ input, select {
   background: var(--pill-bg);
   font-size: 11px;
 }
+.git-review-navigation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+.git-review-navigation [role="status"] {
+  margin-right: auto;
+  color: var(--muted-text);
+  font-size: 12px;
+}
 .git-changed-file-list {
   height: min(48vh, 520px);
   min-height: 220px;
