@@ -1,4 +1,4 @@
-import type { LineEnding } from "./models";
+import type { LineEnding, WriteResult } from "./models";
 
 export type GitObjectAlgorithm = "sha1" | "sha256" | "unknown";
 
@@ -235,6 +235,26 @@ export interface GitConflictResultFingerprint {
   kind: GitConflictResultKind;
   size: number | null;
   modifiedMs: number | null;
+  contentHash: string | null;
+}
+
+export type GitConflictEncodingPolicy = "preserveResult" | "utf8";
+export type GitConflictLineEndingPolicy = "preserveResult" | "lf" | "crlf" | "cr";
+
+export interface GitConflictSaveRequest {
+  opaquePathId: string;
+  generation: number;
+  expectedStageFingerprint: GitConflictStageFingerprint;
+  expectedResultFingerprint: GitConflictResultFingerprint;
+  text: string;
+  encodingPolicy: GitConflictEncodingPolicy;
+  lineEndingPolicy: GitConflictLineEndingPolicy;
+  createBackup: boolean;
+  explicitOverwriteDecision: boolean;
+}
+
+export interface GitConflictSaveResult extends WriteResult {
+  action: "CONFLICT_SAVED";
 }
 
 export type GitConflictSaveState = "clean" | "dirty" | "stale" | "saving" | "saved" | "failed";

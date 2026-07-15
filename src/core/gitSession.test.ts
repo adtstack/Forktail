@@ -121,6 +121,7 @@ function conflictSession(
       kind: "regularFile",
       size: 23,
       modifiedMs: 1_700_000_000_000,
+      contentHash: "f".repeat(64),
     },
     stageFingerprint: {
       stage1: { mode: "100644", objectId: { algorithm: "sha1", hex: "1".repeat(40) } },
@@ -292,7 +293,12 @@ describe("Git conflict merge session adapter", () => {
     });
     source.result.origin = "missing";
     source.result.workingTreeVersion = null;
-    source.resultFingerprint = { kind: "missing", size: null, modifiedMs: null };
+    source.resultFingerprint = {
+      kind: "missing",
+      size: null,
+      modifiedMs: null,
+      contentHash: null,
+    };
 
     const adapted = adaptGitConflictSession(source);
 

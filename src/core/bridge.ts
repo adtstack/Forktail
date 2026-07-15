@@ -15,6 +15,8 @@ import type {
   GitConflictList,
   GitConflictSession,
   GitConflictSessionRequest,
+  GitConflictSaveRequest,
+  GitConflictSaveResult,
   GitConflictsRequest,
   GitIndexCompareRequest,
   GitChangedFileList,
@@ -217,6 +219,19 @@ export async function openGitConflict(
 ): Promise<GitConflictSession> {
   requireTauri();
   return invoke<GitConflictSession>("open_git_conflict", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
+}
+
+export async function saveGitConflictResult(
+  repositorySessionId: string,
+  request: GitConflictSaveRequest,
+  jobId: number,
+): Promise<GitConflictSaveResult> {
+  requireTauri();
+  return invoke<GitConflictSaveResult>("save_git_conflict_result", {
     repositorySessionId,
     request,
     jobId,

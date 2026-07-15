@@ -22,6 +22,7 @@ import {
   openGitWorkingTreeCompare,
   readGitStatus,
   resolveGitRevision,
+  saveGitConflictResult,
 } from "./bridge";
 import type { GitRevisionCompareRequest } from "./gitModels";
 
@@ -325,6 +326,46 @@ describe("Git conflict session bridge", () => {
       request,
       jobId: 96,
     });
+  });
+});
+
+describe("Git conflict Result save bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("sends fingerprints and an opaque path without exposing a writable filesystem path", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+    const request = {
+      opaquePathId: "repository-session-1:path:7:2",
+      generation: 7,
+      expectedStageFingerprint: { stage1: null, stage2: null, stage3: null },
+      expectedResultFingerprint: {
+        kind: "regularFile" as const,
+        size: 10,
+        modifiedMs: 1234,
+        contentHash: "a".repeat(64),
+      },
+      text: "resolved\n",
+      encodingPolicy: "preserveResult" as const,
+      lineEndingPolicy: "preserveResult" as const,
+      createBackup: true,
+      explicitOverwriteDecision: false,
+    };
+
+    await saveGitConflictResult("repository-session-1", request, 97);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("save_git_conflict_result", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 97,
+    });
+    expect(JSON.stringify(request)).not.toContain("/repo/");
   });
 });
 

@@ -1,7 +1,13 @@
 import { hasUnresolvedConflicts } from "./conflicts";
 import { saveEncodingWarningForDocument } from "./compareSave";
 import { CORE_TEXT } from "./i18n";
+import { defaultSystemLineEnding, type SaveLineEndingMode } from "./lineEndings";
 import type { FileDocument, MergeSession, WriteResult } from "./models";
+import type {
+  GitConflictResultFingerprint,
+  GitConflictSaveRequest,
+  GitConflictStageFingerprint,
+} from "./gitModels";
 import type { AppLanguage } from "./settings";
 import { isVirtualFileDocument } from "./virtualDocument";
 
@@ -20,6 +26,40 @@ export interface SavedMergeState {
   savedSnapshot: string;
   outputVersion: WritePrecondition;
   message: string;
+}
+
+interface GitConflictSaveSource {
+  conflict: {
+    path: { opaqueId: string };
+    generation: number;
+    stageFingerprint: GitConflictStageFingerprint;
+    resultFingerprint: GitConflictResultFingerprint;
+  };
+}
+
+export function gitConflictSaveRequest(
+  source: GitConflictSaveSource,
+  text: string,
+  lineEndingMode: SaveLineEndingMode,
+  systemLineEnding: "\n" | "\r\n" = defaultSystemLineEnding(),
+  explicitOverwriteDecision = false,
+): GitConflictSaveRequest {
+  const lineEndingPolicy = lineEndingMode === "original"
+    ? "preserveResult"
+    : lineEndingMode === "system"
+      ? systemLineEnding === "\r\n" ? "crlf" : "lf"
+      : lineEndingMode;
+  return {
+    opaquePathId: source.conflict.path.opaqueId,
+    generation: source.conflict.generation,
+    expectedStageFingerprint: source.conflict.stageFingerprint,
+    expectedResultFingerprint: source.conflict.resultFingerprint,
+    text,
+    encodingPolicy: "preserveResult",
+    lineEndingPolicy,
+    createBackup: true,
+    explicitOverwriteDecision,
+  };
 }
 
 export function canSaveMergeResult(

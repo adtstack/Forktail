@@ -1,4 +1,4 @@
-use crate::domain::models::LineEnding;
+use crate::domain::models::{LineEnding, WriteResult};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -493,6 +493,37 @@ pub struct GitConflictResultFingerprint {
     pub kind: GitConflictResultKind,
     pub size: Option<u64>,
     pub modified_ms: Option<u64>,
+    pub content_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitConflictEncodingPolicy {
+    PreserveResult,
+    Utf8,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitConflictLineEndingPolicy {
+    PreserveResult,
+    Lf,
+    Crlf,
+    Cr,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum GitConflictSaveAction {
+    ConflictSaved,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictSaveResult {
+    #[serde(flatten)]
+    pub write_result: WriteResult,
+    pub action: GitConflictSaveAction,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
@@ -817,15 +848,16 @@ mod tests {
     use super::{
         GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
         GitChangedFileStatus, GitCompareCapabilities, GitCompareSession, GitCompareSourceKind,
-        GitConflictEntry, GitConflictList, GitConflictOperation, GitConflictStage, GitHeadState,
-        GitIndexComparison, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
-        GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
-        GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
-        GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState,
-        GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus,
-        GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry,
-        GitWorkingTreeVersion,
+        GitConflictEntry, GitConflictList, GitConflictOperation, GitConflictSaveAction,
+        GitConflictSaveResult, GitConflictStage, GitHeadState, GitIndexComparison,
+        GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType, GitPathIdentity,
+        GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary, GitRevision,
+        GitRevisionKind, GitRevisionPair, GitSnapshotContentState, GitSnapshotDocument,
+        GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState, GitStatusChangeKind,
+        GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus, GitTextMetadata, GitTreeEntry,
+        GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry, GitWorkingTreeVersion,
     };
+    use crate::domain::models::WriteResult;
     use serde_json::json;
 
     fn sha1(hex_digit: char) -> GitObjectId {
@@ -1475,6 +1507,27 @@ mod tests {
             value["entries"][0]["stage3"]["objectId"]["hex"],
             "3".repeat(40)
         );
+    }
+
+    #[test]
+    fn serializes_conflict_save_as_the_existing_write_shape_plus_stable_action() {
+        let value = serde_json::to_value(GitConflictSaveResult {
+            write_result: WriteResult {
+                path: "conflict.txt".to_string(),
+                backup_path: Some("conflict.txt.bak.1".to_string()),
+                bytes_written: 9,
+                size: 9,
+                modified_ms: Some(1_700_000_000_000),
+            },
+            action: GitConflictSaveAction::ConflictSaved,
+        })
+        .expect("serialize conflict save");
+
+        assert_eq!(value["path"], "conflict.txt");
+        assert_eq!(value["backupPath"], "conflict.txt.bak.1");
+        assert_eq!(value["bytesWritten"], 9);
+        assert_eq!(value["action"], "CONFLICT_SAVED");
+        assert!(value.get("writeResult").is_none());
     }
 
     #[test]

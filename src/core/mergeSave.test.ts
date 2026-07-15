@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   canSaveMergeResult,
+  gitConflictSaveRequest,
   mergeSaveEncodingWarning,
   mergeSavePreconditionForPath,
   mergeResultOriginalLineEnding,
@@ -8,6 +9,7 @@ import {
   unresolvedSaveMessage,
 } from "./mergeSave";
 import type { FileDocument, FileMergeSession, MergeSession } from "./models";
+import type { GitConflictStageFingerprint } from "./gitModels";
 import { virtualMissingFileDocument } from "./virtualDocument";
 
 const unresolved = `<<<<<<< ours
@@ -181,6 +183,68 @@ describe("mergeSavePreconditionForPath", () => {
 
   it("does not guard arbitrary Save As paths without a known baseline", () => {
     expect(mergeSavePreconditionForPath(mergeSession({ outputPath: null }), "/other/out.txt", null)).toBeNull();
+  });
+});
+
+describe("Git conflict Result save request", () => {
+  it("uses only the opaque identity and frozen stage/result fingerprints", () => {
+    const stageFingerprint: GitConflictStageFingerprint = {
+      stage1: null,
+      stage2: {
+        mode: "100644",
+        objectId: { algorithm: "sha1", hex: "2".repeat(40) },
+      },
+      stage3: {
+        mode: "100644",
+        objectId: { algorithm: "sha1", hex: "3".repeat(40) },
+      },
+    };
+    const source = {
+      conflict: {
+        path: { opaqueId: "session:path:7:2" },
+        generation: 7,
+        stageFingerprint,
+        resultFingerprint: {
+          kind: "regularFile" as const,
+          size: 20,
+          modifiedMs: 1234,
+          contentHash: "a".repeat(64),
+        },
+      },
+    };
+
+    expect(gitConflictSaveRequest(source, "resolved\n", "original")).toEqual({
+      opaquePathId: "session:path:7:2",
+      generation: 7,
+      expectedStageFingerprint: stageFingerprint,
+      expectedResultFingerprint: source.conflict.resultFingerprint,
+      text: "resolved\n",
+      encodingPolicy: "preserveResult",
+      lineEndingPolicy: "preserveResult",
+      createBackup: true,
+      explicitOverwriteDecision: false,
+    });
+  });
+
+  it("maps explicit and system line-ending choices without changing Result text client-side", () => {
+    const source = {
+      conflict: {
+        path: { opaqueId: "session:path:1:1" },
+        generation: 1,
+        stageFingerprint: { stage1: null, stage2: null, stage3: null },
+        resultFingerprint: {
+          kind: "missing" as const,
+          size: null,
+          modifiedMs: null,
+          contentHash: null,
+        },
+      },
+    };
+
+    expect(gitConflictSaveRequest(source, "a\nb\n", "crlf").lineEndingPolicy).toBe("crlf");
+    expect(gitConflictSaveRequest(source, "a\nb\n", "system", "\n").lineEndingPolicy).toBe("lf");
+    expect(gitConflictSaveRequest(source, "a\nb\n", "system", "\r\n").lineEndingPolicy).toBe("crlf");
+    expect(gitConflictSaveRequest(source, "a\nb\n", "lf", "\r\n").text).toBe("a\nb\n");
   });
 });
 

@@ -1,7 +1,9 @@
 use crate::error::{AppErrorCode, CommandError, CommandResult};
 use crate::git::blob::{GitBlobError, read_blob};
 use crate::git::changed_files::{GitChangedFilesError, list_changed_files};
-use crate::git::conflicts::{GitConflictError, list_conflicts};
+use crate::git::conflicts::{
+    ConflictSaveInput, GitConflictError, GitConflictSaveError, list_conflicts, save_conflict_result,
+};
 use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
@@ -87,6 +89,20 @@ pub struct GitIndexCompareRequest {
 pub struct GitConflictSessionRequest {
     pub opaque_path_id: String,
     pub generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictSaveRequest {
+    pub opaque_path_id: String,
+    pub generation: u64,
+    pub expected_stage_fingerprint: crate::GitConflictStageFingerprint,
+    pub expected_result_fingerprint: crate::GitConflictResultFingerprint,
+    pub text: String,
+    pub encoding_policy: crate::GitConflictEncodingPolicy,
+    pub line_ending_policy: crate::GitConflictLineEndingPolicy,
+    pub create_backup: bool,
+    pub explicit_overwrite_decision: bool,
 }
 
 #[tauri::command]
@@ -398,6 +414,44 @@ pub async fn open_git_conflict(
 }
 
 #[tauri::command]
+pub async fn save_git_conflict_result(
+    repository_session_id: String,
+    request: GitConflictSaveRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitConflictSaveResult> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = crate::GitPathIdentity::new(request.opaque_path_id, "", Option::<String>::None);
+        save_conflict_result(
+            &session,
+            ConflictSaveInput {
+                path,
+                generation: request.generation,
+                expected_stage_fingerprint: request.expected_stage_fingerprint,
+                expected_result_fingerprint: request.expected_result_fingerprint,
+                text: request.text,
+                encoding_policy: request.encoding_policy,
+                line_ending_policy: request.line_ending_policy,
+                create_backup: request.create_backup,
+                explicit_overwrite_decision: request.explicit_overwrite_decision,
+            },
+            lease.cancellation(),
+        )
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn cancel_git_job(
     repository_session_id: String,
     job_id: u64,
@@ -668,6 +722,30 @@ impl From<GitConflictError> for CommandError {
             | GitConflictError::StateUnavailable
             | GitConflictError::StaleGeneration
             | GitConflictError::IndexUnavailable => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
+impl From<GitConflictSaveError> for CommandError {
+    fn from(error: GitConflictSaveError) -> Self {
+        match error {
+            GitConflictSaveError::ConflictStateChanged => {
+                Self::git(AppErrorCode::GitConflictStateChanged)
+            }
+            GitConflictSaveError::ResultChanged => Self::new(
+                AppErrorCode::FileChanged,
+                "결과 파일이 열린 뒤 변경됐습니다. 다시 불러온 뒤 저장하세요.",
+            ),
+            GitConflictSaveError::ResultUnsupported => {
+                Self::git(AppErrorCode::GitObjectTypeUnsupported)
+            }
+            GitConflictSaveError::UnresolvedMarkers => Self::new(
+                AppErrorCode::MergeFailed,
+                "해결되지 않은 충돌 marker가 남아 있습니다. 모두 해결한 뒤 저장하세요.",
+            ),
+            GitConflictSaveError::Cancelled => Self::git(AppErrorCode::GitCommandCancelled),
+            GitConflictSaveError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
+            GitConflictSaveError::Write(error) => error,
         }
     }
 }
@@ -1003,5 +1081,25 @@ mod tests {
             assert!(!error.message.contains("conflict.txt"));
             assert!(!error.message.contains(&"a".repeat(40)));
         }
+    }
+
+    #[test]
+    fn maps_conflict_save_failures_to_actionable_stable_codes() {
+        assert_eq!(
+            CommandError::from(GitConflictSaveError::ConflictStateChanged).code,
+            AppErrorCode::GitConflictStateChanged
+        );
+        assert_eq!(
+            CommandError::from(GitConflictSaveError::ResultChanged).code,
+            AppErrorCode::FileChanged
+        );
+        assert_eq!(
+            CommandError::from(GitConflictSaveError::ResultUnsupported).code,
+            AppErrorCode::GitObjectTypeUnsupported
+        );
+        assert_eq!(
+            CommandError::from(GitConflictSaveError::UnresolvedMarkers).code,
+            AppErrorCode::MergeFailed
+        );
     }
 }

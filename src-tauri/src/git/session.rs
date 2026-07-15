@@ -444,6 +444,7 @@ fn conflict_result_document(
                 kind: GitConflictResultKind::Missing,
                 size: None,
                 modified_ms: None,
+                content_hash: None,
             },
         ));
     };
@@ -463,7 +464,8 @@ fn conflict_result_document(
             GitSnapshotContentState::Submodule,
         ));
     }
-    let mut document = read_working_tree_snapshot(session, &plan, cancellation, &mut |_| {})?;
+    let (mut document, content_hash) =
+        read_working_tree_snapshot_with_hash(session, &plan, cancellation, &mut |_| {})?;
     document.label = conflict_result_label(&document.path);
     document.read_only = !matches!(
         document.content_state,
@@ -477,6 +479,7 @@ fn conflict_result_document(
         kind: GitConflictResultKind::RegularFile,
         size: Some(version.size),
         modified_ms: version.modified_ms,
+        content_hash,
     };
     Ok((document, fingerprint))
 }
@@ -507,6 +510,7 @@ fn conflict_non_text_result(
             kind,
             size: Some(metadata.len()),
             modified_ms: modified_ms(metadata),
+            content_hash: None,
         },
     )
 }
@@ -663,6 +667,14 @@ fn prepare_working_tree_path_allow_final_symlink(
     prepare_working_tree_path_inner(session, path, generation, true)
 }
 
+pub(crate) fn conflict_result_candidate(
+    session: &GitRepositorySession,
+    path: &GitPathIdentity,
+    generation: u64,
+) -> Result<PathBuf, GitSessionError> {
+    Ok(prepare_working_tree_path_allow_final_symlink(session, path, generation)?.candidate)
+}
+
 fn prepare_working_tree_path_inner(
     session: &GitRepositorySession,
     path: &GitPathIdentity,
@@ -759,11 +771,24 @@ fn read_working_tree_snapshot<Hook>(
 where
     Hook: FnMut(WorkingTreeReadStep),
 {
+    read_working_tree_snapshot_with_hash(session, plan, cancellation, hook)
+        .map(|(document, _)| document)
+}
+
+fn read_working_tree_snapshot_with_hash<Hook>(
+    session: &GitRepositorySession,
+    plan: &WorkingTreePathPlan,
+    cancellation: &CancellationToken,
+    hook: &mut Hook,
+) -> Result<(GitSnapshotDocument, Option<String>), GitSessionError>
+where
+    Hook: FnMut(WorkingTreeReadStep),
+{
     if cancellation.is_cancelled() {
         return Err(GitSessionError::Cancelled);
     }
     let Some(preflight) = working_tree_metadata(&plan.candidate)? else {
-        return Ok(missing_working_tree_document(plan.identity.clone()));
+        return Ok((missing_working_tree_document(plan.identity.clone()), None));
     };
     validate_regular_metadata(&preflight)?;
     ensure_no_symlinks(&session.identity().root, &plan.relative_path)?;
@@ -786,11 +811,14 @@ where
     verify_opened_working_tree_file(session, plan, &file)?;
 
     if before.len() > MAX_TEXT_BYTES {
-        return Ok(working_tree_document(
-            plan.identity.clone(),
-            &before,
+        return Ok((
+            working_tree_document(
+                plan.identity.clone(),
+                &before,
+                None,
+                GitSnapshotContentState::TooLarge,
+            ),
             None,
-            GitSnapshotContentState::TooLarge,
         ));
     }
 
@@ -815,8 +843,9 @@ where
         return Err(GitSessionError::Cancelled);
     }
 
-    match decode_text_bytes(&bytes) {
-        DecodedTextContent::Text(decoded) => Ok(working_tree_document(
+    let content_hash = Some(blake3::hash(&bytes).to_hex().to_string());
+    let document = match decode_text_bytes(&bytes) {
+        DecodedTextContent::Text(decoded) => working_tree_document(
             plan.identity.clone(),
             &after,
             Some(GitTextMetadata {
@@ -827,14 +856,15 @@ where
                 size: after.len(),
             }),
             GitSnapshotContentState::Text { text: decoded.text },
-        )),
-        DecodedTextContent::Binary => Ok(working_tree_document(
+        ),
+        DecodedTextContent::Binary => working_tree_document(
             plan.identity.clone(),
             &after,
             None,
             GitSnapshotContentState::Binary,
-        )),
-    }
+        ),
+    };
+    Ok((document, content_hash))
 }
 
 fn working_tree_metadata(candidate: &Path) -> Result<Option<Metadata>, GitSessionError> {

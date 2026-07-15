@@ -1,6 +1,7 @@
 use crate::domain::models::{FileBackup, FileDocument, FileVersion, WriteResult};
 use crate::error::{AppErrorCode, CommandError, CommandResult};
 use crate::text::{DecodedTextContent, MAX_TEXT_BYTES, decode_text_bytes};
+use same_file::Handle;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -134,7 +135,7 @@ pub fn restore_text_file_backup(
         )
     })?;
     write_bytes_file_atomic_inner(
-        path,
+        PathBuf::from(path),
         &bytes,
         true,
         expected_size,
@@ -163,8 +164,28 @@ pub fn write_text_file_atomic(
     )
 }
 
-fn write_text_file_atomic_inner(
+pub(crate) fn write_text_file_atomic_inner(
     path: String,
+    text: String,
+    create_backup: bool,
+    expected_size: Option<u64>,
+    expected_modified_ms: Option<u64>,
+    encoding: Option<String>,
+    before_step: impl FnMut(SaveStep) -> CommandResult<()>,
+) -> CommandResult<WriteResult> {
+    write_text_path_atomic_inner(
+        PathBuf::from(path),
+        text,
+        create_backup,
+        expected_size,
+        expected_modified_ms,
+        encoding,
+        before_step,
+    )
+}
+
+pub(crate) fn write_text_path_atomic_inner(
+    path: PathBuf,
     text: String,
     create_backup: bool,
     expected_size: Option<u64>,
@@ -184,14 +205,13 @@ fn write_text_file_atomic_inner(
 }
 
 fn write_bytes_file_atomic_inner(
-    path: String,
+    target: PathBuf,
     bytes: &[u8],
     create_backup: bool,
     expected_size: Option<u64>,
     expected_modified_ms: Option<u64>,
     mut before_step: impl FnMut(SaveStep) -> CommandResult<()>,
 ) -> CommandResult<WriteResult> {
-    let target = PathBuf::from(&path);
     let parent = target.parent().unwrap_or_else(|| Path::new("."));
     if !parent.exists() {
         return Err(CommandError::new(
@@ -211,7 +231,13 @@ fn write_bytes_file_atomic_inner(
         )
     })?;
 
-    if let Ok(metadata) = fs::metadata(&target) {
+    if let Ok(metadata) = fs::symlink_metadata(&target) {
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(CommandError::new(
+                AppErrorCode::PathConflict,
+                "저장 대상이 일반 파일이 아닙니다. 경로를 다시 확인하세요.",
+            ));
+        }
         before_step(SaveStep::PermissionCopy)?;
         temporary
             .as_file()
@@ -253,13 +279,7 @@ fn write_bytes_file_atomic_inner(
     let backup_path = if create_backup && target.exists() {
         let backup = next_backup_path(&target)?;
         before_step(SaveStep::BackupCopy)?;
-        fs::copy(&target, &backup).map_err(|error| {
-            CommandError::io(
-                AppErrorCode::WriteFailed,
-                "백업 파일을 만들지 못했습니다",
-                error,
-            )
-        })?;
+        copy_target_to_backup(&target, &backup)?;
         let _ = prune_old_backups(&target);
         Some(backup)
     } else {
@@ -322,7 +342,7 @@ fn encode_text_for_save(text: &str, encoding: Option<&str>) -> Vec<u8> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SaveStep {
+pub(crate) enum SaveStep {
     TempCreate,
     PermissionCopy,
     Write,
@@ -498,21 +518,38 @@ fn check_write_precondition(
     expected_size: Option<u64>,
     expected_modified_ms: Option<u64>,
 ) -> CommandResult<()> {
-    if expected_size.is_none() && expected_modified_ms.is_none() {
-        return Ok(());
+    let metadata = match fs::symlink_metadata(target) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            if expected_size.is_none() && expected_modified_ms.is_none() {
+                return Ok(());
+            }
+            return Err(CommandError::new(
+                AppErrorCode::FileChanged,
+                "저장 대상이 열린 뒤 삭제되거나 이동됐습니다. 다시 열거나 다른 이름으로 저장하세요.",
+            ));
+        }
+        Err(error) => {
+            return Err(CommandError::io(
+                AppErrorCode::PathConflict,
+                "저장 대상 메타데이터를 확인하지 못했습니다",
+                error,
+            ));
+        }
+    };
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(CommandError::new(
+            if expected_size.is_none() && expected_modified_ms.is_none() {
+                AppErrorCode::PathConflict
+            } else {
+                AppErrorCode::FileChanged
+            },
+            "저장 대상이 일반 파일이 아닙니다. 다시 열거나 다른 경로를 선택하세요.",
+        ));
     }
 
-    let metadata = fs::metadata(target).map_err(|_| {
-        CommandError::new(
-            AppErrorCode::FileChanged,
-            "저장 대상이 열린 뒤 삭제되거나 이동됐습니다. 다시 열거나 다른 이름으로 저장하세요.",
-        )
-    })?;
-    if !metadata.is_file() {
-        return Err(CommandError::new(
-            AppErrorCode::FileChanged,
-            "저장 대상이 일반 파일이 아니게 변경됐습니다. 다시 열거나 다른 이름으로 저장하세요.",
-        ));
+    if expected_size.is_none() && expected_modified_ms.is_none() {
+        return Ok(());
     }
 
     if let Some(size) = expected_size {
@@ -526,6 +563,121 @@ fn check_write_precondition(
         }
     }
 
+    Ok(())
+}
+
+fn copy_target_to_backup(target: &Path, backup: &Path) -> CommandResult<()> {
+    let preflight = fs::symlink_metadata(target).map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업할 파일 메타데이터를 확인하지 못했습니다",
+            error,
+        )
+    })?;
+    if preflight.file_type().is_symlink() || !preflight.is_file() {
+        return Err(CommandError::new(
+            AppErrorCode::PathConflict,
+            "백업 대상이 일반 파일이 아니어서 저장하지 않았습니다.",
+        ));
+    }
+
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    let source = options.open(target).map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업할 파일을 열지 못했습니다",
+            error,
+        )
+    })?;
+    let source_metadata = source.metadata().map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업할 파일 메타데이터를 읽지 못했습니다",
+            error,
+        )
+    })?;
+    if !source_metadata.is_file() {
+        return Err(CommandError::new(
+            AppErrorCode::PathConflict,
+            "백업 대상이 일반 파일이 아니어서 저장하지 않았습니다.",
+        ));
+    }
+    let rechecked = fs::symlink_metadata(target).map_err(|_| file_changed_error())?;
+    if rechecked.file_type().is_symlink() || !rechecked.is_file() {
+        return Err(file_changed_error());
+    }
+    let open_handle = Handle::from_file(source.try_clone().map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업 파일 handle을 복제하지 못했습니다",
+            error,
+        )
+    })?)
+    .map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업 파일 handle을 확인하지 못했습니다",
+            error,
+        )
+    })?;
+    let path_handle = Handle::from_path(target).map_err(|_| file_changed_error())?;
+    if open_handle != path_handle {
+        return Err(file_changed_error());
+    }
+
+    let parent = backup.parent().unwrap_or_else(|| Path::new("."));
+    let mut temporary = NamedTempFile::new_in(parent).map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업 임시 파일을 만들지 못했습니다",
+            error,
+        )
+    })?;
+    let mut source = source;
+    std::io::copy(&mut source, &mut temporary).map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업 파일을 만들지 못했습니다",
+            error,
+        )
+    })?;
+    temporary.flush().map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업 파일을 플러시하지 못했습니다",
+            error,
+        )
+    })?;
+    temporary.as_file().sync_all().map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업 파일을 동기화하지 못했습니다",
+            error,
+        )
+    })?;
+    temporary
+        .as_file()
+        .set_permissions(source_metadata.permissions())
+        .map_err(|error| {
+            CommandError::io(
+                AppErrorCode::WriteFailed,
+                "백업 파일 권한을 설정하지 못했습니다",
+                error,
+            )
+        })?;
+    temporary.persist_noclobber(backup).map_err(|error| {
+        CommandError::io(
+            AppErrorCode::WriteFailed,
+            "백업 파일을 확정하지 못했습니다",
+            error.error,
+        )
+    })?;
     Ok(())
 }
 
@@ -835,6 +987,41 @@ mod tests {
         assert_eq!(result.backup_path, None);
         assert_eq!(result.size, 9);
         assert!(parent_sync_attempted);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn atomic_writer_rejects_a_symlink_target_without_reading_or_replacing_it() {
+        use std::os::unix::fs::symlink;
+
+        let directory = tempfile::tempdir().expect("temp dir");
+        let outside = directory.path().join("outside.txt");
+        let target = directory.path().join("target.txt");
+        fs::write(&outside, "outside secret").expect("outside fixture");
+        symlink(&outside, &target).expect("target symlink");
+
+        let error = write_text_file_atomic(
+            target.to_string_lossy().into_owned(),
+            "replacement".to_string(),
+            true,
+            None,
+            None,
+            None,
+        )
+        .expect_err("symlink target must be rejected");
+
+        assert_eq!(error.code, AppErrorCode::PathConflict);
+        assert_eq!(
+            fs::read_to_string(&outside).expect("outside remains"),
+            "outside secret"
+        );
+        assert!(
+            fs::symlink_metadata(&target)
+                .expect("symlink remains")
+                .file_type()
+                .is_symlink()
+        );
+        assert!(backup_entries(&target).expect("backup list").is_empty());
     }
 
     #[test]
