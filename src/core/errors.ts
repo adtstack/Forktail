@@ -27,8 +27,13 @@ export function isAppError(value: unknown): value is AppError {
 export function errorMessage(value: unknown, language: AppLanguage = "en"): string {
   const text = CORE_TEXT[language].errors;
   if (isAppError(value)) {
+    if (value.code.startsWith("GIT_")) return text[value.code];
     const message = userMessage(value.message, text[value.code]);
     return language === "en" && containsKorean(message) ? text[value.code] : message;
+  }
+  if (value && typeof value === "object" && "code" in value) {
+    const code = (value as { code: unknown }).code;
+    if (typeof code === "string" && code.startsWith("GIT_")) return text.fallback;
   }
   if (value instanceof Error) return userMessage(value.message, text.fallback);
   if (typeof value === "string") return userMessage(value, text.fallback);

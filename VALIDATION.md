@@ -365,6 +365,14 @@ cargo test
 - fake-process test는 양 stream 각 128 KiB 동시 출력, stdout/stderr 개별 cap, 100 ms timeout, 1초 이내 cancel acknowledgement, forbidden/unknown operation 사전 거절, unsafe environment 제거, Unix descendant process-group 종료를 확인했다. helper test도 skip 없이 실행된다.
 - 검증: `cd src-tauri && cargo test` 60 tests 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo fmt --check` 통과. Windows Job Object runtime은 사용자 Windows 실행에서 확인할 항목이다.
 
+### GIT-002 stable error and DTO contract — 2026-07-15
+
+- 변경 파일: `src-tauri/src/error.rs`, `src-tauri/src/domain/git.rs`, `src-tauri/src/domain/mod.rs`, `src-tauri/src/lib.rs`, `src/core/models.ts`, `src/core/errors.ts`, `src/core/i18n.ts`, `src/core/gitModels.ts`와 양쪽 계약 테스트, Git 계약 문서, task 상태를 갱신했다.
+- 수용 기준: Git runner 실패를 안정된 `{ code, message }`로 변환하고 `GIT_COMMAND_FAILED`를 unknown process/parse 실패의 명시적 fallback으로 확정했다. 프런트엔드는 알려진 Git code의 backend message를 표시하지 않으며 미래의 알 수 없는 `GIT_*` code도 일반 행동 안내로 축약한다. SHA-1/SHA-256/unknown object algorithm, full hex object ID, session-scoped opaque/display/exact UTF-8 path, unborn/detached/branch HEAD와 repository summary가 Rust/TypeScript camelCase DTO로 일치한다. canonical root/git-dir/common-dir identity와 원본 path byte는 frontend DTO에 노출하지 않는다.
+- 실패/경계: known object format의 잘못된 길이, non-hex ID, unknown format의 빈 문자열·홀수 길이를 `Result`/serde 오류로 반환하고 panic하지 않는다. non-UTF-8 path는 안전한 display path와 `utf8Path: null`을 유지한다. raw stderr/stdout/argv와 runner stream 정보는 user message에 포함하지 않는다. conflict 저장 완료 copy는 Result 파일만 저장하고 `git add`/continue를 실행하지 않았음을 한·영 계약으로 고정했다.
+- 테스트 선행 증거: 구현 전 `npm test -- src/core/errors.test.ts src/core/gitModels.test.ts`는 error code/message/DTO serializer 4건이 실패했고, `cargo test git`은 미정의 Git error/DTO 26건의 compile error로 실패했다. 추가 경계 테스트도 구현 전 unknown Git code raw message 노출과 invalid object ID deserialize 허용을 각각 재현했다.
+- 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/358 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 67 tests 통과/0 ignored.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.

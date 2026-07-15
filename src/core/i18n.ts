@@ -286,6 +286,7 @@ export const CORE_TEXT = {
     },
     startupInvalidArgs:
       "Could not parse startup arguments. Usage: forktail left right, forktail --folders left right, forktail --merge base ours theirs [output], forktail --difftool local remote, forktail --mergetool base ours theirs output",
+    gitConflictSaved: "Saved the Result file only. Forktail did not run git add or continue.",
     errors: {
       fallback: "Could not complete the action. Check paths and permissions, then try again.",
       unknown: "An unknown error occurred.",
@@ -300,6 +301,44 @@ export const CORE_TEXT = {
       WRITE_FAILED: "Could not save the file. Check permissions and disk state, then try again.",
       SCAN_FAILED: "Could not scan folders. Check permissions and paths, then try again.",
       MERGE_FAILED: "Could not complete the merge. Check that all inputs are text files.",
+      GIT_NOT_FOUND: "Git was not found. Install Git or check the configured executable.",
+      GIT_VERSION_UNSUPPORTED: "This Git version is not supported. Update Git and try again.",
+      GIT_COMMAND_TIMEOUT: "The Git action timed out. Check the repository state and try again.",
+      GIT_COMMAND_CANCELLED: "Git action cancelled.",
+      GIT_OUTPUT_TOO_LARGE: "Git returned too much data to process safely. Narrow the scope and try again.",
+      GIT_COMMAND_FAILED: "Could not complete the Git action. Check the repository state and try again.",
+      GIT_NOT_REPOSITORY:
+        "This folder is not a Git repository. Choose another folder or use regular file compare.",
+      GIT_UNSAFE_REPOSITORY:
+        "Git does not trust this repository's ownership. Check the repository owner and Git settings.",
+      GIT_BARE_UNSUPPORTED:
+        "Bare Git repositories are not supported yet. Choose a repository with a worktree.",
+      GIT_INVALID_REVISION:
+        "Git revision not found. Check the branch, tag, commit hash, or HEAD~3 syntax.",
+      GIT_AMBIGUOUS_REVISION:
+        "More than one ref or object matches this name. Use a full ref name or a longer commit hash.",
+      GIT_PATH_NOT_AT_REVISION:
+        "This file does not exist at the selected revision. Choose another path or revision.",
+      GIT_OBJECT_MISSING_LOCAL:
+        "This snapshot is not available locally. Forktail does not fetch objects automatically.",
+      GIT_OBJECT_TYPE_UNSUPPORTED:
+        "This Git object type is not supported. Choose another file.",
+      GIT_BLOB_TOO_LARGE: "This Git object is too large. Choose a text object up to 64 MiB.",
+      GIT_BINARY_BLOB:
+        "This Git object cannot be opened safely as text. Only its metadata is shown.",
+      GIT_LFS_POINTER:
+        "This file is a Git LFS pointer. Forktail does not download LFS content automatically.",
+      GIT_PATH_UNSUPPORTED:
+        "This Git path cannot be opened safely on this operating system. Choose another file.",
+      GIT_PATH_OUTSIDE_ROOT: "This path points outside the repository worktree and cannot be opened.",
+      GIT_SYMLINK_UNSUPPORTED:
+        "Forktail does not follow Git symlink targets automatically. Choose a regular file.",
+      GIT_CONFLICT_STATE_CHANGED:
+        "The Git conflict state changed after it was opened. Reload it before saving.",
+      GIT_MULTIPLE_MERGE_BASES:
+        "Multiple merge bases were found, so an automatic preview is unavailable. Choose other revisions.",
+      GIT_UNRELATED_HISTORIES:
+        "These revisions have no common history. Choose other revisions.",
     },
     folderSync: {
       rootEscape: "Relative path can escape the root, so it is excluded from the copy/sync plan.",
@@ -360,6 +399,8 @@ export const CORE_TEXT = {
     },
     startupInvalidArgs:
       "시작 인자를 이해하지 못했습니다. 사용법: forktail left right, forktail --folders left right, forktail --merge base ours theirs [output], forktail --difftool local remote, forktail --mergetool base ours theirs output",
+    gitConflictSaved:
+      "결과 파일만 저장했습니다. Forktail은 git add나 continue를 실행하지 않았습니다.",
     errors: {
       fallback: "작업을 완료하지 못했습니다. 입력 경로와 권한을 확인한 뒤 다시 시도하세요.",
       unknown: "알 수 없는 오류가 발생했습니다.",
@@ -374,6 +415,44 @@ export const CORE_TEXT = {
       WRITE_FAILED: "파일을 저장하지 못했습니다. 권한과 디스크 상태를 확인한 뒤 다시 시도하세요.",
       SCAN_FAILED: "폴더를 스캔하지 못했습니다. 권한과 경로를 확인한 뒤 다시 시도하세요.",
       MERGE_FAILED: "병합을 완료하지 못했습니다. 입력 파일이 텍스트 파일인지 확인하세요.",
+      GIT_NOT_FOUND: "Git을 찾을 수 없습니다. Git을 설치하거나 실행 파일 설정을 확인하세요.",
+      GIT_VERSION_UNSUPPORTED: "지원하지 않는 Git 버전입니다. Git을 업데이트한 뒤 다시 시도하세요.",
+      GIT_COMMAND_TIMEOUT: "Git 작업 시간이 초과됐습니다. 저장소 상태를 확인한 뒤 다시 시도하세요.",
+      GIT_COMMAND_CANCELLED: "Git 작업을 취소했습니다.",
+      GIT_OUTPUT_TOO_LARGE:
+        "Git 결과가 안전한 처리 한도를 넘었습니다. 범위를 줄여 다시 시도하세요.",
+      GIT_COMMAND_FAILED: "Git 작업을 완료하지 못했습니다. 저장소 상태를 확인한 뒤 다시 시도하세요.",
+      GIT_NOT_REPOSITORY:
+        "이 폴더는 Git 저장소가 아닙니다. 다른 폴더를 선택하거나 일반 파일 비교를 사용하세요.",
+      GIT_UNSAFE_REPOSITORY:
+        "Git이 이 저장소의 소유권을 신뢰하지 않습니다. 저장소 소유권과 Git 설정을 확인하세요.",
+      GIT_BARE_UNSUPPORTED:
+        "bare Git 저장소는 아직 지원하지 않습니다. worktree가 있는 저장소를 선택하세요.",
+      GIT_INVALID_REVISION:
+        "Git revision을 찾을 수 없습니다. branch, tag, commit hash 또는 HEAD~3 형식을 확인하세요.",
+      GIT_AMBIGUOUS_REVISION:
+        "여러 ref 또는 object가 같은 이름과 일치합니다. full ref 이름이나 더 긴 commit hash를 사용하세요.",
+      GIT_PATH_NOT_AT_REVISION:
+        "이 파일은 선택한 revision에 없습니다. 다른 path 또는 revision을 선택하세요.",
+      GIT_OBJECT_MISSING_LOCAL:
+        "이 snapshot은 로컬에 없습니다. Forktail은 자동 fetch하지 않습니다.",
+      GIT_OBJECT_TYPE_UNSUPPORTED: "지원하지 않는 Git object 종류입니다. 다른 파일을 선택하세요.",
+      GIT_BLOB_TOO_LARGE: "Git object가 너무 큽니다. 64 MiB 이하의 텍스트 object를 선택하세요.",
+      GIT_BINARY_BLOB:
+        "이 Git object는 텍스트로 안전하게 열 수 없습니다. metadata만 표시합니다.",
+      GIT_LFS_POINTER:
+        "이 파일은 Git LFS pointer입니다. Forktail은 LFS 내용을 자동 다운로드하지 않습니다.",
+      GIT_PATH_UNSUPPORTED:
+        "이 Git path는 현재 운영체제에서 안전하게 열 수 없습니다. 다른 파일을 선택하세요.",
+      GIT_PATH_OUTSIDE_ROOT: "선택한 path가 저장소 worktree 밖을 가리켜 열 수 없습니다.",
+      GIT_SYMLINK_UNSUPPORTED:
+        "Git symlink 대상은 자동으로 따라가지 않습니다. 일반 파일을 선택하세요.",
+      GIT_CONFLICT_STATE_CHANGED:
+        "Git 충돌 상태가 열린 뒤 변경됐습니다. 다시 불러온 뒤 저장하세요.",
+      GIT_MULTIPLE_MERGE_BASES:
+        "merge base가 여러 개라 자동 preview를 만들 수 없습니다. revision을 다시 선택하세요.",
+      GIT_UNRELATED_HISTORIES:
+        "두 revision의 공통 history를 찾을 수 없습니다. 다른 revision을 선택하세요.",
     },
     folderSync: {
       rootEscape: "상대 경로가 root 밖으로 나갈 수 있어 copy/sync 계획에서 제외합니다.",

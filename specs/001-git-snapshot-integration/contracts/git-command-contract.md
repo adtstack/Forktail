@@ -159,6 +159,7 @@ GIT_VERSION_UNSUPPORTED
 GIT_COMMAND_TIMEOUT
 GIT_COMMAND_CANCELLED
 GIT_OUTPUT_TOO_LARGE
+GIT_COMMAND_FAILED
 GIT_NOT_REPOSITORY
 GIT_UNSAFE_REPOSITORY
 GIT_BARE_UNSUPPORTED
@@ -178,7 +179,7 @@ GIT_MULTIPLE_MERGE_BASES
 GIT_UNRELATED_HISTORIES
 ```
 
-Unknown process/parse failures map to a stable generic Git code and friendly message. They do not expose raw stderr.
+Unknown process/parse failures map to `GIT_COMMAND_FAILED` and a friendly message. They do not expose raw stderr.
 
 ## Serialization Compatibility
 

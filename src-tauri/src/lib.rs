@@ -4,6 +4,11 @@ mod error;
 pub mod git;
 mod menu;
 
+pub use domain::git::{
+    GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitPathIdentity,
+    GitRepositorySummary,
+};
+
 use commands::{files, folders, merge, startup, system};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
