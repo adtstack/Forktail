@@ -15,6 +15,7 @@ import {
   gitToolExecutablePath,
   listGitChangedFiles,
   listGitRefs,
+  openGitIndexCompare,
   openGitRevisionCompare,
   openGitWorkingTreeCompare,
   readGitStatus,
@@ -304,6 +305,34 @@ describe("Git working-tree compare bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 93,
+    });
+  });
+});
+
+describe("Git index compare bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("opens one opaque path with an explicit three-state comparison", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+    const request = {
+      opaquePathId: "repository-session-1:path:5:2",
+      comparison: "indexToWorkingTree" as const,
+      generation: 5,
+    };
+
+    await openGitIndexCompare("repository-session-1", request, 94);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("open_git_index_compare", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 94,
     });
   });
 });

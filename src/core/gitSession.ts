@@ -293,7 +293,7 @@ function gitSnapshotFileDocument(snapshot: GitSnapshotDocument): FileDocument | 
     };
   }
 
-  const committedSnapshot = snapshot.origin === "committedBlob"
+  const committedSnapshot = (snapshot.origin === "committedBlob" || snapshot.origin === "indexStage")
     && snapshot.objectId !== null
     && snapshot.workingTreeVersion === null;
   const workingTreeSnapshot = snapshot.origin === "workingTree"

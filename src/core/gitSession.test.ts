@@ -89,6 +89,31 @@ function workingTreeSession(right: GitSnapshotDocument): GitCompareSession {
 }
 
 describe("Git compare session adapter", () => {
+  it("adapts a stage-zero index text snapshot as a read-only virtual document", () => {
+    const index = {
+      ...snapshot({ kind: "text" as const, text: "index\n" }, "Index (stage 0) · src/file.txt"),
+      origin: "indexStage" as const,
+    };
+    const session = {
+      ...gitSession(snapshot({ kind: "text", text: "head\n" }, "HEAD · src/file.txt"), index),
+      sourceKind: "headIndex" as const,
+      revisionPair: null,
+      revision: {
+        rawLabel: "HEAD",
+        resolved: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+        kind: "head" as const,
+        displayName: "HEAD",
+      },
+    };
+
+    const adapted = adaptGitCompareSession(session);
+
+    expect(adapted.kind).toBe("compare");
+    if (adapted.kind !== "compare") throw new Error("expected compare state");
+    expect(adapted.session.right.text).toBe("index\n");
+    expect(adapted.session.right.path).toContain("Index (stage 0)");
+  });
+
   it("keeps working-tree disk content virtual and preserves its external-change version", () => {
     const right: GitSnapshotDocument = {
       ...snapshot({ kind: "text", text: "disk\n" }, "Working tree (disk) · src/file.txt"),

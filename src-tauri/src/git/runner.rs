@@ -22,6 +22,8 @@ pub const TREE_LIST_STDOUT_CAP: usize = 32 * 1024 * 1024;
 pub const BLOB_CONTENT_STDOUT_CAP: usize = 64 * 1024 * 1024;
 pub const CHANGED_FILES_STDOUT_CAP: usize = 32 * 1024 * 1024;
 pub const STATUS_STDOUT_CAP: usize = 32 * 1024 * 1024;
+pub const INDEX_ENTRY_STDOUT_CAP: usize = 64 * 1024;
+pub const INDEX_VISIBILITY_STDOUT_CAP: usize = 64 * 1024;
 const REF_LIST_FORMAT: &str =
     "%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00";
 
@@ -84,6 +86,15 @@ pub enum GitOperation {
     },
     Status {
         repository: PathBuf,
+    },
+    IndexEntries {
+        repository: PathBuf,
+        path: OsString,
+    },
+    IndexVisibility {
+        repository: PathBuf,
+        head_commit_id: String,
+        path: OsString,
     },
 }
 
@@ -185,6 +196,41 @@ impl GitOperation {
                     OsString::from("-z"),
                     OsString::from("--branch"),
                     OsString::from("--untracked-files=all"),
+                ]);
+            }
+            Self::IndexEntries { repository, path } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend([
+                    OsString::from("ls-files"),
+                    OsString::from("-v"),
+                    OsString::from("--stage"),
+                    OsString::from("-z"),
+                    OsString::from("--"),
+                    path.clone(),
+                ]);
+            }
+            Self::IndexVisibility {
+                repository,
+                head_commit_id,
+                path,
+            } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend([
+                    OsString::from("-c"),
+                    OsString::from("diff.autoRefreshIndex=false"),
+                    OsString::from("diff"),
+                    OsString::from("--cached"),
+                    OsString::from("--raw"),
+                    OsString::from("-z"),
+                    OsString::from("--no-ext-diff"),
+                    OsString::from("--no-textconv"),
+                    OsString::from("--no-renames"),
+                    OsString::from("--ita-invisible-in-index"),
+                    OsString::from(head_commit_id),
+                    OsString::from("--"),
+                    path.clone(),
                 ]);
             }
         }
@@ -334,6 +380,8 @@ impl RunnerLimits {
                 GitOperation::Blob { .. } => 4096,
                 GitOperation::ChangedFiles { .. } => CHANGED_FILES_STDOUT_CAP,
                 GitOperation::Status { .. } => STATUS_STDOUT_CAP,
+                GitOperation::IndexEntries { .. } => INDEX_ENTRY_STDOUT_CAP,
+                GitOperation::IndexVisibility { .. } => INDEX_VISIBILITY_STDOUT_CAP,
                 GitOperation::Version | GitOperation::Repository { .. } => 8 * 1024 * 1024,
             },
             stderr_bytes: 256 * 1024,
@@ -464,11 +512,56 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
         || validate_blob_query_arguments(query_arguments)
         || validate_changed_files_query_arguments(query_arguments)
         || validate_status_query_arguments(query_arguments)
+        || validate_index_entries_query_arguments(query_arguments)
+        || validate_index_visibility_query_arguments(query_arguments)
     {
         Ok(())
     } else {
         Err(RunnerError::ForbiddenOperation)
     }
+}
+
+fn validate_index_entries_query_arguments(arguments: &[OsString]) -> bool {
+    arguments.len() == 6
+        && arguments[0] == "ls-files"
+        && arguments[1] == "-v"
+        && arguments[2] == "--stage"
+        && arguments[3] == "-z"
+        && arguments[4] == "--"
+        && validate_literal_path_argument(&arguments[5])
+}
+
+fn validate_index_visibility_query_arguments(arguments: &[OsString]) -> bool {
+    arguments.len() == 13
+        && arguments[0] == "-c"
+        && arguments[1] == "diff.autoRefreshIndex=false"
+        && arguments[2] == "diff"
+        && arguments[3] == "--cached"
+        && arguments[4] == "--raw"
+        && arguments[5] == "-z"
+        && arguments[6] == "--no-ext-diff"
+        && arguments[7] == "--no-textconv"
+        && arguments[8] == "--no-renames"
+        && arguments[9] == "--ita-invisible-in-index"
+        && is_full_object_id(&arguments[10])
+        && arguments[11] == "--"
+        && validate_literal_path_argument(&arguments[12])
+}
+
+fn is_full_object_id(argument: &OsStr) -> bool {
+    argument.to_str().is_some_and(|object_id| {
+        matches!(object_id.len(), 40 | 64) && object_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
+fn validate_literal_path_argument(path: &OsStr) -> bool {
+    let path = Path::new(path);
+    !path.as_os_str().is_empty()
+        && path.as_os_str().len() <= 4096
+        && !path.is_absolute()
+        && path
+            .components()
+            .all(|component| matches!(component, std::path::Component::Normal(_)))
 }
 
 fn validate_status_query_arguments(arguments: &[OsString]) -> bool {
@@ -1094,9 +1187,9 @@ mod tests {
 
     use super::{
         BLOB_CONTENT_STDOUT_CAP, BlobQuery, CHANGED_FILES_STDOUT_CAP, CancellationToken,
-        GitOperation, OutputStream, ProductionGitRunner, REF_LIST_STDOUT_CAP, RefNamespace,
-        RepositoryQuery, RevisionQuery, RunnerError, RunnerLimits, SAFE_GLOBAL_ARGUMENTS,
-        STATUS_STDOUT_CAP, TREE_LIST_STDOUT_CAP,
+        GitOperation, INDEX_ENTRY_STDOUT_CAP, INDEX_VISIBILITY_STDOUT_CAP, OutputStream,
+        ProductionGitRunner, REF_LIST_STDOUT_CAP, RefNamespace, RepositoryQuery, RevisionQuery,
+        RunnerError, RunnerLimits, SAFE_GLOBAL_ARGUMENTS, STATUS_STDOUT_CAP, TREE_LIST_STDOUT_CAP,
         fixture::{FixtureGitRunner, FixtureProcess},
         safe_environment_from, validate_approved_arguments,
     };
@@ -1541,6 +1634,80 @@ mod tests {
             assert_eq!(
                 validate_approved_arguments(&arguments),
                 Err(RunnerError::ForbiddenOperation)
+            );
+        }
+    }
+
+    #[test]
+    fn index_operations_allow_only_stage_zero_metadata_and_ita_visibility_queries() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let repository = std::env::temp_dir().join("index repository 한글");
+        let path = OsString::from("dir/literal [name].txt");
+        let head = "a".repeat(40);
+
+        let entries = runner
+            .plan(GitOperation::IndexEntries {
+                repository: repository.clone(),
+                path: path.clone(),
+            })
+            .expect("typed index entry query should be approved");
+        assert_eq!(entries.limits.stdout_bytes, INDEX_ENTRY_STDOUT_CAP);
+        assert_eq!(
+            &entries.arguments[SAFE_GLOBAL_ARGUMENTS.len() + 2..],
+            [
+                OsString::from("ls-files"),
+                OsString::from("-v"),
+                OsString::from("--stage"),
+                OsString::from("-z"),
+                OsString::from("--"),
+                path.clone(),
+            ]
+        );
+
+        let visibility = runner
+            .plan(GitOperation::IndexVisibility {
+                repository: repository.clone(),
+                head_commit_id: head.clone(),
+                path: path.clone(),
+            })
+            .expect("typed intent-to-add visibility query should be approved");
+        assert_eq!(visibility.limits.stdout_bytes, INDEX_VISIBILITY_STDOUT_CAP);
+        assert_eq!(
+            &visibility.arguments[SAFE_GLOBAL_ARGUMENTS.len() + 2..],
+            [
+                OsString::from("-c"),
+                OsString::from("diff.autoRefreshIndex=false"),
+                OsString::from("diff"),
+                OsString::from("--cached"),
+                OsString::from("--raw"),
+                OsString::from("-z"),
+                OsString::from("--no-ext-diff"),
+                OsString::from("--no-textconv"),
+                OsString::from("--no-renames"),
+                OsString::from("--ita-invisible-in-index"),
+                OsString::from(&head),
+                OsString::from("--"),
+                path,
+            ]
+        );
+
+        for operation in [
+            GitOperation::IndexEntries {
+                repository: repository.clone(),
+                path: OsString::from("../escape"),
+            },
+            GitOperation::IndexVisibility {
+                repository,
+                head_commit_id: "abcd".to_string(),
+                path: OsString::from("file.txt"),
+            },
+        ] {
+            assert_eq!(
+                runner
+                    .plan(operation)
+                    .expect_err("malformed query must fail closed"),
+                RunnerError::ForbiddenOperation
             );
         }
     }

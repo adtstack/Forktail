@@ -4,11 +4,14 @@ use crate::git::changed_files::{GitChangedFilesError, list_changed_files};
 use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
+use crate::git::index::GitIndexError;
 use crate::git::jobs::{GitJobError, GitJobs};
 use crate::git::refs::{GitRefError, list_refs};
 use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
 use crate::git::revision::{GitRevisionError, resolve_revision};
-use crate::git::session::{GitSessionError, open_revision_compare, open_working_tree_compare};
+use crate::git::session::{
+    GitSessionError, open_index_compare, open_revision_compare, open_working_tree_compare,
+};
 use crate::git::status::{GitStatusError, read_status};
 use crate::git::tree::{GitTreeError, list_tree};
 use serde::{Deserialize, Serialize};
@@ -59,6 +62,14 @@ pub struct GitRevisionCompareRequest {
 pub struct GitWorkingTreeCompareRequest {
     pub revision: crate::GitRevision,
     pub path: crate::GitPathIdentity,
+    pub generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIndexCompareRequest {
+    pub opaque_path_id: String,
+    pub comparison: crate::GitIndexComparison,
     pub generation: u64,
 }
 
@@ -293,6 +304,36 @@ pub async fn open_git_working_tree_compare(
 }
 
 #[tauri::command]
+pub async fn open_git_index_compare(
+    repository_session_id: String,
+    request: GitIndexCompareRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitCompareSession> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = crate::GitPathIdentity::new(request.opaque_path_id, "", Option::<String>::None);
+        open_index_compare(
+            &session,
+            &path,
+            request.comparison,
+            request.generation,
+            lease.cancellation(),
+        )
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn cancel_git_job(
     repository_session_id: String,
     job_id: u64,
@@ -494,14 +535,48 @@ impl From<GitSessionError> for CommandError {
                 Self::git(AppErrorCode::PermissionDenied)
             }
             GitSessionError::WorkingTreeChanged => Self::git(AppErrorCode::FileChanged),
+            GitSessionError::IndexChanged | GitSessionError::UnmergedIndexPath => {
+                Self::git(AppErrorCode::GitConflictStateChanged)
+            }
+            GitSessionError::IntentToAddUnsupported => {
+                Self::git(AppErrorCode::GitObjectTypeUnsupported)
+            }
             GitSessionError::PathNotAtRevision => Self::git(AppErrorCode::GitPathNotAtRevision),
             GitSessionError::Cancelled => Self::git(AppErrorCode::GitCommandCancelled),
             GitSessionError::Tree(error) => error.into(),
             GitSessionError::Blob(error) => error.into(),
+            GitSessionError::Index(error) => error.into(),
             GitSessionError::InvalidChangedFile
             | GitSessionError::WorkingTreeReadFailed
             | GitSessionError::StaleGeneration
             | GitSessionError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
+impl From<GitIndexError> for CommandError {
+    fn from(error: GitIndexError) -> Self {
+        match error {
+            GitIndexError::Runner(error) => error.into(),
+            GitIndexError::OutputTooLarge => Self::git(AppErrorCode::GitOutputTooLarge),
+            GitIndexError::IndexChanged => Self::git(AppErrorCode::GitConflictStateChanged),
+            GitIndexError::UnknownPath
+            | GitIndexError::PathUnsupported
+            | GitIndexError::InvalidPath => Self::git(AppErrorCode::GitPathUnsupported),
+            GitIndexError::CommandFailed
+            | GitIndexError::TruncatedOutput
+            | GitIndexError::InvalidTag
+            | GitIndexError::InvalidMode
+            | GitIndexError::InvalidObjectId
+            | GitIndexError::InvalidStage
+            | GitIndexError::InvalidRecord
+            | GitIndexError::TooManyRecords
+            | GitIndexError::UnexpectedPath
+            | GitIndexError::DuplicateStage
+            | GitIndexError::UnmergedPath
+            | GitIndexError::IndexUnavailable
+            | GitIndexError::StateUnavailable
+            | GitIndexError::StaleGeneration => Self::git(AppErrorCode::GitCommandFailed),
         }
     }
 }
@@ -789,6 +864,18 @@ mod tests {
             (
                 GitSessionError::WorkingTreeChanged,
                 AppErrorCode::FileChanged,
+            ),
+            (
+                GitSessionError::IntentToAddUnsupported,
+                AppErrorCode::GitObjectTypeUnsupported,
+            ),
+            (
+                GitSessionError::UnmergedIndexPath,
+                AppErrorCode::GitConflictStateChanged,
+            ),
+            (
+                GitSessionError::IndexChanged,
+                AppErrorCode::GitConflictStateChanged,
             ),
         ];
         for (source, expected) in cases {

@@ -1,11 +1,16 @@
 use crate::domain::git::{
     GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileStatus, GitCompareCapabilities,
-    GitCompareSession, GitCompareSourceKind, GitPathIdentity, GitPathPlatform,
-    GitPathRegistryError, GitRevision, GitRevisionPair, GitSnapshotContentState,
-    GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason, GitTextMetadata,
-    GitTreeEntry, GitTreeEntryKind, GitWorkingTreeVersion,
+    GitCompareSession, GitCompareSourceKind, GitHeadState, GitIndexComparison, GitIndexEntry,
+    GitPathIdentity, GitPathPlatform, GitPathRegistryError, GitRevision, GitRevisionKind,
+    GitRevisionPair, GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin,
+    GitSnapshotUnavailableReason, GitTextMetadata, GitTreeEntry, GitTreeEntryKind,
+    GitWorkingTreeVersion,
 };
 use crate::git::blob::{GitBlobError, read_blob};
+use crate::git::index::{
+    GitIndexError, index_entry_visible_against_head, index_fingerprint_matches,
+    read_stage_zero_index_entry,
+};
 use crate::git::repository::GitRepositorySession;
 use crate::git::runner::CancellationToken;
 use crate::git::tree::{GitTreeError, list_tree};
@@ -35,10 +40,14 @@ pub enum GitSessionError {
     WorkingTreePermissionDenied,
     WorkingTreeReadFailed,
     WorkingTreeChanged,
+    IntentToAddUnsupported,
+    UnmergedIndexPath,
+    IndexChanged,
     StateUnavailable,
     Cancelled,
     Tree(GitTreeError),
     Blob(GitBlobError),
+    Index(GitIndexError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,6 +126,210 @@ pub fn open_working_tree_compare(
     cancellation: &CancellationToken,
 ) -> Result<GitCompareSession, GitSessionError> {
     open_working_tree_compare_inner(session, revision, path, generation, cancellation, |_| {})
+}
+
+pub fn open_index_compare(
+    session: &GitRepositorySession,
+    path: &GitPathIdentity,
+    comparison: GitIndexComparison,
+    generation: u64,
+    cancellation: &CancellationToken,
+) -> Result<GitCompareSession, GitSessionError> {
+    if cancellation.is_cancelled() {
+        return Err(GitSessionError::Cancelled);
+    }
+    validate_generation(session, generation)?;
+    let revision = head_revision(session)?;
+    let canonical_path = session
+        .paths()
+        .lock()
+        .map_err(|_| GitSessionError::StateUnavailable)?
+        .resolve_identity(&path.opaque_id, generation, current_path_platform())
+        .map_err(map_path_error)?;
+    let index_read =
+        read_stage_zero_index_entry(session, &canonical_path, generation, cancellation)
+            .map_err(map_index_error)?;
+    let head = read_optional_committed_snapshot(
+        session,
+        &revision,
+        canonical_path.clone(),
+        generation,
+        cancellation,
+    )?;
+
+    if matches!(head.content_state, GitSnapshotContentState::Missing)
+        && index_read.entry.is_some()
+        && !index_entry_visible_against_head(
+            session,
+            &canonical_path,
+            &revision.resolved,
+            generation,
+            &index_read.fingerprint,
+            cancellation,
+        )
+        .map_err(map_index_error)?
+    {
+        return Err(GitSessionError::IntentToAddUnsupported);
+    }
+
+    let index = if matches!(
+        comparison,
+        GitIndexComparison::HeadToIndex | GitIndexComparison::IndexToWorkingTree
+    ) {
+        Some(index_snapshot_document(
+            session,
+            &revision,
+            canonical_path.clone(),
+            index_read.entry.as_ref(),
+            cancellation,
+        )?)
+    } else {
+        None
+    };
+    let working = if matches!(
+        comparison,
+        GitIndexComparison::IndexToWorkingTree | GitIndexComparison::HeadToWorkingTree
+    ) {
+        let path_plan = prepare_working_tree_path(session, &canonical_path, generation)?;
+        let mut working =
+            read_working_tree_snapshot(session, &path_plan, cancellation, &mut |_| {})?;
+        if index_read
+            .entry
+            .as_ref()
+            .is_some_and(|entry| entry.skip_worktree)
+            && matches!(working.content_state, GitSnapshotContentState::Missing)
+        {
+            working.content_state = GitSnapshotContentState::Unavailable {
+                reason: GitSnapshotUnavailableReason::SparseWorkingTreeMissing,
+            };
+        }
+        Some(working)
+    } else {
+        None
+    };
+
+    validate_generation(session, generation)?;
+    if !index_fingerprint_matches(session, &index_read.fingerprint).map_err(map_index_error)? {
+        return Err(GitSessionError::IndexChanged);
+    }
+
+    let (left, right, source_kind) = match comparison {
+        GitIndexComparison::HeadToIndex => (
+            head,
+            index.ok_or(GitSessionError::StateUnavailable)?,
+            GitCompareSourceKind::HeadIndex,
+        ),
+        GitIndexComparison::IndexToWorkingTree => (
+            index.ok_or(GitSessionError::StateUnavailable)?,
+            working.ok_or(GitSessionError::StateUnavailable)?,
+            GitCompareSourceKind::IndexWorkingTree,
+        ),
+        GitIndexComparison::HeadToWorkingTree => (
+            head,
+            working.ok_or(GitSessionError::StateUnavailable)?,
+            GitCompareSourceKind::RevisionWorkingTree,
+        ),
+    };
+    let export_patch = is_patch_source(&left) && is_patch_source(&right);
+    Ok(GitCompareSession {
+        repository_id: session.summary().session_id.clone(),
+        left,
+        right,
+        source_kind,
+        revision_pair: None,
+        revision: Some(revision),
+        capabilities: GitCompareCapabilities {
+            edit: false,
+            save: false,
+            hunk_copy: false,
+            export_patch,
+        },
+        generation,
+    })
+}
+
+fn head_revision(session: &GitRepositorySession) -> Result<GitRevision, GitSessionError> {
+    let resolved = match &session.summary().head {
+        GitHeadState::Unborn => return Err(GitSessionError::InvalidRevision),
+        GitHeadState::Detached { object_id } | GitHeadState::Branch { object_id, .. } => {
+            object_id.clone()
+        }
+    };
+    Ok(GitRevision {
+        raw_label: "HEAD".to_string(),
+        resolved,
+        kind: GitRevisionKind::Head,
+        display_name: "HEAD".to_string(),
+    })
+}
+
+fn index_snapshot_document(
+    session: &GitRepositorySession,
+    revision: &GitRevision,
+    path: GitPathIdentity,
+    entry: Option<&GitIndexEntry>,
+    cancellation: &CancellationToken,
+) -> Result<GitSnapshotDocument, GitSessionError> {
+    let Some(entry) = entry else {
+        return Ok(GitSnapshotDocument {
+            origin: GitSnapshotOrigin::Missing,
+            label: index_label(&path),
+            read_only: true,
+            object_id: None,
+            path: Some(path),
+            mode: None,
+            text_metadata: None,
+            working_tree_version: None,
+            content_state: GitSnapshotContentState::Missing,
+        });
+    };
+    let mut document = match entry.mode.as_str() {
+        "100644" | "100755" => match read_blob(session, &entry.object_id, cancellation) {
+            Ok(blob) => snapshot_document_from_blob(revision, path, entry.mode.clone(), blob),
+            Err(GitBlobError::ObjectMissingLocal) => unavailable_snapshot_document(
+                revision,
+                path,
+                entry.mode.clone(),
+                entry.object_id.clone(),
+            ),
+            Err(error) => return Err(GitSessionError::Blob(error)),
+        },
+        "120000" => GitSnapshotDocument {
+            origin: GitSnapshotOrigin::IndexStage,
+            label: index_label(&path),
+            read_only: true,
+            object_id: Some(entry.object_id.clone()),
+            path: Some(path),
+            mode: Some(entry.mode.clone()),
+            text_metadata: None,
+            working_tree_version: None,
+            content_state: GitSnapshotContentState::Symlink,
+        },
+        "160000" => GitSnapshotDocument {
+            origin: GitSnapshotOrigin::IndexStage,
+            label: index_label(&path),
+            read_only: true,
+            object_id: Some(entry.object_id.clone()),
+            path: Some(path),
+            mode: Some(entry.mode.clone()),
+            text_metadata: None,
+            working_tree_version: None,
+            content_state: GitSnapshotContentState::Submodule,
+        },
+        _ => return Err(GitSessionError::StateUnavailable),
+    };
+    document.origin = GitSnapshotOrigin::IndexStage;
+    document.label = index_label(
+        document
+            .path
+            .as_ref()
+            .ok_or(GitSessionError::StateUnavailable)?,
+    );
+    Ok(document)
+}
+
+fn index_label(path: &GitPathIdentity) -> String {
+    format!("Index (stage 0) · {}", path.display_path)
 }
 
 fn open_working_tree_compare_inner<Hook>(
@@ -835,6 +1048,22 @@ fn map_tree_error(error: GitTreeError) -> GitSessionError {
         GitTreeError::StalePath => GitSessionError::StaleGeneration,
         GitTreeError::PathUnsupported => GitSessionError::PathUnsupported,
         other => GitSessionError::Tree(other),
+    }
+}
+
+fn map_index_error(error: GitIndexError) -> GitSessionError {
+    match error {
+        GitIndexError::UnmergedPath => GitSessionError::UnmergedIndexPath,
+        GitIndexError::IndexChanged => GitSessionError::IndexChanged,
+        GitIndexError::UnknownPath => GitSessionError::UnknownPath,
+        GitIndexError::StaleGeneration => GitSessionError::StaleGeneration,
+        GitIndexError::PathUnsupported | GitIndexError::InvalidPath => {
+            GitSessionError::PathUnsupported
+        }
+        GitIndexError::Runner(crate::git::runner::RunnerError::Cancelled) => {
+            GitSessionError::Cancelled
+        }
+        other => GitSessionError::Index(other),
     }
 }
 

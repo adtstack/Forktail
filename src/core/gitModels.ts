@@ -196,8 +196,8 @@ export interface GitStatusRequest {
   requestGeneration: number;
 }
 
-export type GitSnapshotOrigin = "committedBlob" | "workingTree" | "missing";
-export type GitSnapshotUnavailableReason = "objectMissingLocal";
+export type GitSnapshotOrigin = "committedBlob" | "indexStage" | "workingTree" | "missing";
+export type GitSnapshotUnavailableReason = "objectMissingLocal" | "sparseWorkingTreeMissing";
 
 export interface GitTextMetadata {
   encoding: string;
@@ -257,7 +257,7 @@ export interface GitCompareSession {
   repositoryId: string;
   left: GitSnapshotDocument;
   right: GitSnapshotDocument;
-  sourceKind: "revisionPair" | "revisionWorkingTree";
+  sourceKind: "revisionPair" | "headIndex" | "indexWorkingTree" | "revisionWorkingTree";
   revisionPair: GitRevisionPair | null;
   revision: GitRevision | null;
   capabilities: GitCompareCapabilities;
@@ -267,6 +267,14 @@ export interface GitCompareSession {
 export interface GitWorkingTreeCompareRequest {
   revision: GitRevision;
   path: GitPathIdentity;
+  generation: number;
+}
+
+export type GitIndexComparison = "headToIndex" | "indexToWorkingTree" | "headToWorkingTree";
+
+export interface GitIndexCompareRequest {
+  opaquePathId: string;
+  comparison: GitIndexComparison;
   generation: number;
 }
 

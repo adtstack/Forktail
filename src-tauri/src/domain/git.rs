@@ -340,6 +340,7 @@ pub struct GitStatusSnapshot {
 #[serde(rename_all = "camelCase")]
 pub enum GitSnapshotOrigin {
     CommittedBlob,
+    IndexStage,
     WorkingTree,
     Missing,
 }
@@ -348,6 +349,7 @@ pub enum GitSnapshotOrigin {
 #[serde(rename_all = "camelCase")]
 pub enum GitSnapshotUnavailableReason {
     ObjectMissingLocal,
+    SparseWorkingTreeMissing,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -409,7 +411,27 @@ pub struct GitSnapshotDocument {
 #[serde(rename_all = "camelCase")]
 pub enum GitCompareSourceKind {
     RevisionPair,
+    HeadIndex,
+    IndexWorkingTree,
     RevisionWorkingTree,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitIndexComparison {
+    HeadToIndex,
+    IndexToWorkingTree,
+    HeadToWorkingTree,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitIndexEntry {
+    pub path: GitPathIdentity,
+    pub mode: String,
+    pub object_id: GitObjectId,
+    pub skip_worktree: bool,
+    pub assume_unchanged: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -707,13 +729,13 @@ mod tests {
     use super::{
         GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
         GitChangedFileStatus, GitCompareCapabilities, GitCompareSession, GitCompareSourceKind,
-        GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
-        GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
-        GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
-        GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState,
-        GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus,
-        GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry,
-        GitWorkingTreeVersion,
+        GitHeadState, GitIndexComparison, GitObjectAlgorithm, GitObjectId, GitObjectIdError,
+        GitObjectType, GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef,
+        GitRepositorySummary, GitRevision, GitRevisionKind, GitRevisionPair,
+        GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch,
+        GitStatusBranchState, GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot,
+        GitSubmoduleStatus, GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList,
+        GitUnmergedStatusEntry, GitWorkingTreeVersion,
     };
     use serde_json::json;
 
@@ -1316,6 +1338,23 @@ mod tests {
             json!({ "size": 5, "modifiedMs": 1_700_000_000_000_u64 })
         );
         assert_eq!(value["right"]["objectId"], json!(null));
+    }
+
+    #[test]
+    fn serializes_index_comparison_and_stage_origin_contract() {
+        assert_eq!(
+            serde_json::to_value([
+                GitIndexComparison::HeadToIndex,
+                GitIndexComparison::IndexToWorkingTree,
+                GitIndexComparison::HeadToWorkingTree,
+            ])
+            .expect("serialize index comparisons"),
+            json!(["headToIndex", "indexToWorkingTree", "headToWorkingTree"])
+        );
+        assert_eq!(
+            serde_json::to_value(GitSnapshotOrigin::IndexStage).expect("serialize index origin"),
+            json!("indexStage")
+        );
     }
 
     #[test]

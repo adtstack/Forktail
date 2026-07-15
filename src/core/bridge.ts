@@ -12,6 +12,7 @@ import type {
 import type { WritePrecondition } from "./mergeSave";
 import type {
   GitCompareSession,
+  GitIndexCompareRequest,
   GitChangedFileList,
   GitChangedFilesRequest,
   GitRefKind,
@@ -101,6 +102,19 @@ export async function openGitWorkingTreeCompare(
 ): Promise<GitCompareSession> {
   requireTauri();
   return invoke<GitCompareSession>("open_git_working_tree_compare", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
+}
+
+export async function openGitIndexCompare(
+  repositorySessionId: string,
+  request: GitIndexCompareRequest,
+  jobId: number,
+): Promise<GitCompareSession> {
+  requireTauri();
+  return invoke<GitCompareSession>("open_git_index_compare", {
     repositorySessionId,
     request,
     jobId,
