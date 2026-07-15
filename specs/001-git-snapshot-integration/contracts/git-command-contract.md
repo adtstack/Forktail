@@ -10,6 +10,17 @@
 
 ## Command Inventory
 
+### `check_git_availability`
+
+**Request**: none. The frontend cannot provide an executable path, command, option, environment, or argv.
+
+**Response**: selected and minimum `GitVersion` numbers. The canonical executable path remains backend-only.
+
+**Errors**: `GIT_NOT_FOUND`, `GIT_VERSION_UNSUPPORTED`, `GIT_COMMAND_TIMEOUT`,
+`GIT_COMMAND_CANCELLED`, `GIT_OUTPUT_TOO_LARGE`, `GIT_COMMAND_FAILED`.
+
+**Mutation contract**: none. The probe runs only the safe-global `version` operation.
+
 ### `detect_git_repository`
 
 **Request**

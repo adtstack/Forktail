@@ -9,7 +9,7 @@ pub use domain::git::{
     GitRepositorySummary,
 };
 
-use commands::{files, folders, merge, startup, system};
+use commands::{files, folders, git as git_commands, merge, startup, system};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -25,6 +25,7 @@ pub fn run() {
             files::write_text_file_atomic,
             folders::cancel_folder_scan,
             folders::scan_directories,
+            git_commands::check_git_availability,
             merge::merge_texts,
             startup::exit_external_git_tool,
             startup::startup_args,

@@ -373,6 +373,15 @@ cargo test
 - 테스트 선행 증거: 구현 전 `npm test -- src/core/errors.test.ts src/core/gitModels.test.ts`는 error code/message/DTO serializer 4건이 실패했고, `cargo test git`은 미정의 Git error/DTO 26건의 compile error로 실패했다. 추가 경계 테스트도 구현 전 unknown Git code raw message 노출과 invalid object ID deserialize 허용을 각각 재현했다.
 - 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/358 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 67 tests 통과/0 ignored.
 
+### GIT-003 executable discovery and capability gate — 2026-07-15
+
+- 변경 파일: `src-tauri/src/git/executable.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/commands/mod.rs`, `src-tauri/src/lib.rs`, Git command contract와 task/검증 기록을 갱신했다.
+- 수용 기준: configured executable은 absolute path만 받고 실패 시 PATH로 fallback하지 않는다. 기본 discovery는 앱 PATH의 absolute directory만 순서대로 검사하며 Windows는 `git.exe`, macOS/Linux는 `git` 후보만 만든다. 후보는 canonical regular executable로 확인하고 Unix execute bit를 검사한다. canonical path, parsed version, production runner는 `ValidatedGitExecutable` 한 객체에 고정된다. frontend command는 경로/argv를 받거나 canonical executable path를 반환하지 않는다.
+- capability gate: production runner의 safe-global `version` operation이 성공하고 parse한 semantic version이 2.45.0 이상일 때만 runtime을 반환한다. Apple/Windows/release-candidate vendor suffix는 숫자 3개 뒤에서만 허용하며 malformed/multi-line/non-UTF-8 output, 구버전, non-zero capability probe는 `GIT_VERSION_UNSUPPORTED`로 fail closed한다. stderr는 parse하거나 사용자 메시지에 포함하지 않는다.
+- 실패/경계: missing/relative configured path, directory, non-executable file, relative PATH entry, 공백·Unicode directory, PATH 후보 우선순위, 이후 search input과 무관한 owned selection, old/malformed/failed version probe를 테스트했다. discovery/version/runner 오류는 `GIT_NOT_FOUND`, `GIT_VERSION_UNSUPPORTED`, timeout/cancel/output-cap/generic Git code로 안정적으로 변환한다.
+- 테스트 선행 증거: 구현 전 `cargo test executable`은 executable/version/discovery API 미정의 compile error로 실패했다. 구현 후 Windows/macOS/Linux candidate와 fake version/capability fixture가 통과했다.
+- 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/358 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 75 tests 통과/0 ignored. macOS 실제 probe는 `/usr/bin/git`의 safe-global invocation에서 `git version 2.50.1 (Apple Git-155)`로 통과했다. Windows/Linux packaged Git probe는 사용자가 실행할 항목으로 남긴다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.
