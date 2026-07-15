@@ -7,4 +7,8 @@ describe("modeAfterCompareBack", () => {
     expect(modeAfterCompareBack("folders", false)).toBe("home");
     expect(modeAfterCompareBack("home", true)).toBe("home");
   });
+
+  it("returns read-only Git snapshots to the active repository review", () => {
+    expect(modeAfterCompareBack("git", false)).toBe("git");
+  });
 });

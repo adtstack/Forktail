@@ -13,6 +13,7 @@ import {
   detectGitRepository,
   exitExternalGitTool,
   gitToolExecutablePath,
+  listGitChangedFiles,
   listGitRefs,
   openGitRevisionCompare,
   resolveGitRevision,
@@ -203,6 +204,35 @@ describe("Git revision selector bridge", () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith("cancel_git_job", {
       repositorySessionId: "repository-session-1",
       jobId: 81,
+    });
+  });
+});
+
+describe("Git changed-file bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("lists one bounded immutable revision pair with a stale-response generation", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ entries: [], truncated: false, generation: 4 });
+    const request = {
+      leftCommit: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+      rightCommit: { algorithm: "sha1" as const, hex: "b".repeat(40) },
+      hardLimit: 10_000,
+      requestGeneration: 21,
+    };
+
+    await listGitChangedFiles("repository-session-1", request, 91);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("list_git_changed_files", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 91,
     });
   });
 });

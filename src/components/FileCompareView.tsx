@@ -110,6 +110,7 @@ export function FileCompareView({
   const text = FILE_COMPARE_TEXT[languageMode];
   const capabilities = compareSessionCapabilities(session);
   const difftoolSession = session.origin === "difftool";
+  const gitSnapshotSession = session.origin === "git";
   const [viewSettings, setViewSettings] = useState(() => loadCompareViewSettings());
   const [editableSide, setEditableSide] = useState<CompareSide | "none">("none");
   const activeEditableSide = capabilities.edit ? editableSide : "none";
@@ -152,6 +153,7 @@ export function FileCompareView({
     right: isMissingFileDocument(session.right),
   }), [session.left, session.right]);
   const hasVirtualSide = virtualSides.left || virtualSides.right;
+  const hasMissingSide = missingSides.left || missingSides.right;
   const activeVirtual = activeEditableSide !== "none" && virtualSides[activeEditableSide];
   const activeDirty = activeEditableSide === "none" || activeVirtual
     ? false
@@ -621,10 +623,10 @@ export function FileCompareView({
             >
               <option value="none">{text.readOnly}</option>
               <option value="left" disabled={virtualSides.left}>
-                {virtualSides.left ? `${text.left} (${text.missingFile})` : text.left}
+                {missingSides.left ? `${text.left} (${text.missingFile})` : text.left}
               </option>
               <option value="right" disabled={virtualSides.right}>
-                {virtualSides.right ? `${text.right} (${text.missingFile})` : text.right}
+                {missingSides.right ? `${text.right} (${text.missingFile})` : text.right}
               </option>
             </select>
           </label>
@@ -711,6 +713,9 @@ export function FileCompareView({
         </div>
         {difftoolSession && (
           <span className="badge" aria-label={text.difftoolSessionAria}>{text.difftool}</span>
+        )}
+        {gitSnapshotSession && (
+          <span className="badge" aria-label={text.gitSnapshotSessionAria}>{text.gitSnapshot}</span>
         )}
         <span className="badge" aria-label={text.languageAria(language)}>{language}</span>
       </header>
@@ -876,6 +881,11 @@ export function FileCompareView({
           {text.difftoolReadOnlyNote}
         </div>
       )}
+      {gitSnapshotSession && (
+        <div className="metadata-warning" role="status">
+          {text.gitSnapshotReadOnlyNote}
+        </div>
+      )}
       {pathCopyState && (
         <div className="path-copy-status" role="status">
           <span>{pathCopyState.message}</span>
@@ -921,7 +931,7 @@ export function FileCompareView({
           {newlineDifferenceLabel}
         </div>
       )}
-      {hasVirtualSide && (
+      {hasMissingSide && (
         <div className="metadata-warning" role="status">
           {text.missingSideNote}
         </div>

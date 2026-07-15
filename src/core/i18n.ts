@@ -494,6 +494,10 @@ export const FILE_COMPARE_TEXT = {
     difftoolSessionAria: "Git difftool session",
     difftoolReadOnlyNote:
       "Git difftool inputs are temporary read-only snapshots. Export is available; editing, saving, swapping, and replacing inputs are disabled.",
+    gitSnapshot: "GIT SNAPSHOT",
+    gitSnapshotSessionAria: "Committed Git snapshot compare",
+    gitSnapshotReadOnlyNote:
+      "Committed snapshots are read-only. Export is available; editing, saving, swapping, and replacing inputs are disabled.",
     swap: "Swap",
     changeNavigationAria: "Change navigation",
     previousChange: "Prev",
@@ -566,6 +570,10 @@ export const FILE_COMPARE_TEXT = {
     difftoolSessionAria: "Git difftool 세션",
     difftoolReadOnlyNote:
       "Git difftool 입력은 임시 읽기 전용 snapshot입니다. 리포트 저장만 가능하며 편집, 저장, 좌우 교환, 입력 교체는 비활성화됩니다.",
+    gitSnapshot: "GIT SNAPSHOT",
+    gitSnapshotSessionAria: "commit된 Git snapshot 비교",
+    gitSnapshotReadOnlyNote:
+      "Commit된 snapshot은 읽기 전용입니다. 리포트 저장만 가능하며 편집, 저장, 좌우 교환, 입력 교체는 비활성화됩니다.",
     swap: "좌우 교환",
     changeNavigationAria: "변경 탐색",
     previousChange: "이전 변경",

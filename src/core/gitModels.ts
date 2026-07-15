@@ -120,6 +120,13 @@ export interface GitChangedFileList {
   generation: number;
 }
 
+export interface GitChangedFilesRequest {
+  leftCommit: GitObjectId;
+  rightCommit: GitObjectId;
+  hardLimit: number;
+  requestGeneration: number;
+}
+
 export type GitSnapshotOrigin = "committedBlob" | "missing";
 export type GitSnapshotUnavailableReason = "objectMissingLocal";
 

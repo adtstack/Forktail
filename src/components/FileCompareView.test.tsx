@@ -267,6 +267,99 @@ describe("FileCompareView TXT controls", () => {
     expect(isFileCompareCommandAllowed(session, "swapSides")).toBe(false);
     expect(isFileCompareCommandAllowed(session, "nextDiff")).toBe(true);
   });
+
+  it("labels committed Git snapshots and keeps every mutation control disabled", () => {
+    const left = {
+      ...document,
+      path: "main~1 (aaaaaaaaaaaa) · src/feature.ts",
+      name: "feature.ts",
+      text: "left\n",
+      virtual: { kind: "gitSnapshot" as const, contentState: "text" as const },
+    };
+    const right = {
+      ...document,
+      path: "main (bbbbbbbbbbbb) · src/feature.ts",
+      name: "feature.ts",
+      text: "right\n",
+      virtual: { kind: "gitSnapshot" as const, contentState: "text" as const },
+    };
+    const session = {
+      origin: "git" as const,
+      left,
+      right,
+      snapshot: {
+        repositoryId: "repository-session-1",
+        left: {
+          origin: "committedBlob" as const,
+          label: left.path,
+          readOnly: true,
+          objectId: { algorithm: "sha1" as const, hex: "c".repeat(40) },
+          path: { opaqueId: "path:left", displayPath: "src/feature.ts", utf8Path: "src/feature.ts" },
+          mode: "100644",
+          textMetadata: {
+            encoding: "UTF-8",
+            lineEnding: "lf" as const,
+            hadFinalNewline: true,
+            decodeHadErrors: false,
+            size: 5,
+          },
+          contentState: { kind: "text" as const, text: "left\n" },
+        },
+        right: {
+          origin: "committedBlob" as const,
+          label: right.path,
+          readOnly: true,
+          objectId: { algorithm: "sha1" as const, hex: "d".repeat(40) },
+          path: { opaqueId: "path:right", displayPath: "src/feature.ts", utf8Path: "src/feature.ts" },
+          mode: "100644",
+          textMetadata: {
+            encoding: "UTF-8",
+            lineEnding: "lf" as const,
+            hadFinalNewline: true,
+            decodeHadErrors: false,
+            size: 6,
+          },
+          contentState: { kind: "text" as const, text: "right\n" },
+        },
+        sourceKind: "revisionPair" as const,
+        revisionPair: {
+          left: {
+            rawLabel: "main~1",
+            resolved: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+            kind: "symbolic" as const,
+            displayName: "main~1",
+          },
+          right: {
+            rawLabel: "main",
+            resolved: { algorithm: "sha1" as const, hex: "b".repeat(40) },
+            kind: "branch" as const,
+            displayName: "main",
+          },
+        },
+        capabilities: {
+          edit: false,
+          save: false,
+          hunkCopy: false,
+          exportPatch: true,
+        },
+        generation: 4,
+      },
+    } satisfies CompareSession;
+    const markup = renderCompareView(session, null, "Repository review");
+
+    expect(markup).toContain("GIT SNAPSHOT");
+    expect(markup).toContain("Committed snapshots are read-only");
+    expect(markup).toContain("main~1 (aaaaaaaaaaaa) · src/feature.ts");
+    expect(markup).toContain(">Repository review</button>");
+    expect(markup).toContain('data-original-editable="false"');
+    expect(markup).toContain('data-modified-read-only="true"');
+    for (const label of ["Swap", "L -&gt; R", "R -&gt; L", "Undo hunk", "Save", "Save As", "Backups"]) {
+      expect(buttonMarkup(markup, label)).toContain("disabled");
+    }
+    expect(buttonMarkup(markup, "Export")).not.toContain("disabled");
+    expect(isFileCompareCommandAllowed(session, "save")).toBe(false);
+    expect(isFileCompareCommandAllowed(session, "swapSides")).toBe(false);
+  });
 });
 
 describe("activeChangedCompareSide", () => {

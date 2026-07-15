@@ -1,6 +1,15 @@
 import type { GitRepositorySummary } from "../core/gitModels";
-import type { GitRefLoadState, GitRevisionFieldState } from "../core/gitSession";
+import type { GitChangedFile } from "../core/gitModels";
+import type {
+  GitChangedFileFilter,
+  GitChangedFileLoadState,
+  GitChangedFileStatusFilter,
+  GitRefLoadState,
+  GitRevisionFieldState,
+  GitSnapshotSelectionState,
+} from "../core/gitSession";
 import type { AppLanguage } from "../core/settings";
+import { GitChangedFiles } from "./GitChangedFiles";
 import { GitRevisionSelector } from "./GitRevisionSelector";
 
 export type GitRepositoryScreenState =
@@ -39,11 +48,15 @@ interface GitCompareViewProps {
   state: GitRepositoryScreenState;
   languageMode?: AppLanguage;
   revisionReview?: GitRevisionReviewState;
+  changedFilesReview?: GitChangedFilesReviewState;
   onBack: () => void;
   onOpenRepository: () => void;
   onCancelOpen: () => void;
   onRevisionInputChange?: (side: "left" | "right", input: string) => void;
   onValidateRevision?: (side: "left" | "right", input: string) => void;
+  onChangedFileFilterChange?: (query: string) => void;
+  onChangedFileStatusFilterChange?: (status: GitChangedFileStatusFilter) => void;
+  onSelectChangedFile?: (entry: GitChangedFile) => void;
 }
 
 export interface GitRevisionReviewState {
@@ -51,6 +64,14 @@ export interface GitRevisionReviewState {
   right: GitRevisionFieldState;
   references: GitRefLoadState;
   pairError: string | null;
+}
+
+export interface GitChangedFilesReviewState {
+  state: GitChangedFileLoadState;
+  filter: GitChangedFileFilter;
+  selectedKey: string | null;
+  viewedKeys: ReadonlySet<string>;
+  snapshotState: GitSnapshotSelectionState;
 }
 
 const GIT_COMPARE_TEXT = {
@@ -106,11 +127,15 @@ export function GitCompareView({
   state,
   languageMode = "en",
   revisionReview,
+  changedFilesReview,
   onBack,
   onOpenRepository,
   onCancelOpen,
   onRevisionInputChange,
   onValidateRevision,
+  onChangedFileFilterChange,
+  onChangedFileStatusFilterChange,
+  onSelectChangedFile,
 }: GitCompareViewProps) {
   const text = GIT_COMPARE_TEXT[languageMode];
 
@@ -219,6 +244,25 @@ export function GitCompareView({
         <section className="git-review-empty" role="status">
           <p>{text.readyPrompt}</p>
         </section>
+      )}
+
+      {repository.head.kind !== "unborn"
+        && changedFilesReview
+        && changedFilesReview.state.kind !== "idle"
+        && onChangedFileFilterChange
+        && onChangedFileStatusFilterChange
+        && onSelectChangedFile && (
+        <GitChangedFiles
+          state={changedFilesReview.state}
+          filter={changedFilesReview.filter}
+          selectedKey={changedFilesReview.selectedKey}
+          viewedKeys={changedFilesReview.viewedKeys}
+          snapshotState={changedFilesReview.snapshotState}
+          languageMode={languageMode}
+          onFilterChange={onChangedFileFilterChange}
+          onStatusFilterChange={onChangedFileStatusFilterChange}
+          onSelect={onSelectChangedFile}
+        />
       )}
     </main>
   );

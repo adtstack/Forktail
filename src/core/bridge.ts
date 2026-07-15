@@ -12,6 +12,8 @@ import type {
 import type { WritePrecondition } from "./mergeSave";
 import type {
   GitCompareSession,
+  GitChangedFileList,
+  GitChangedFilesRequest,
   GitRefKind,
   GitRefList,
   GitRepositorySummary,
@@ -133,6 +135,19 @@ export async function cancelGitJob(
 ): Promise<void> {
   requireTauri();
   return invoke<void>("cancel_git_job", { repositorySessionId, jobId });
+}
+
+export async function listGitChangedFiles(
+  repositorySessionId: string,
+  request: GitChangedFilesRequest,
+  jobId: number,
+): Promise<GitChangedFileList> {
+  requireTauri();
+  return invoke<GitChangedFileList>("list_git_changed_files", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
 }
 
 export async function statTextFileVersion(path: string): Promise<FileVersion> {

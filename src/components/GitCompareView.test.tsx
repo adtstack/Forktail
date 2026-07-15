@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { GitRepositorySummary } from "../core/gitModels";
-import type { GitRevisionReviewState } from "./GitCompareView";
+import type {
+  GitChangedFilesReviewState,
+  GitRevisionReviewState,
+} from "./GitCompareView";
 import {
   GitCompareView,
   isCurrentGitRepositoryRequest,
@@ -29,17 +32,22 @@ function renderGitCompareView(
   state: GitRepositoryScreenState,
   languageMode: "en" | "ko" = "en",
   revisionReview?: GitRevisionReviewState,
+  changedFilesReview?: GitChangedFilesReviewState,
 ): string {
   return renderToStaticMarkup(
     <GitCompareView
       state={state}
       languageMode={languageMode}
       revisionReview={revisionReview}
+      changedFilesReview={changedFilesReview}
       onBack={() => {}}
       onOpenRepository={() => {}}
       onCancelOpen={() => {}}
       onRevisionInputChange={() => {}}
       onValidateRevision={() => {}}
+      onChangedFileFilterChange={() => {}}
+      onChangedFileStatusFilterChange={() => {}}
+      onSelectChangedFile={() => {}}
     />,
   );
 }
@@ -162,6 +170,89 @@ describe("GitCompareView repository shell", () => {
     expect(markup).toContain("aria-label=\"Right revision choices\"");
     expect(markup).toContain("role=\"alert\"");
     expect(markup).toContain("Choose two different revisions.");
+  });
+
+  it("keeps the default HEAD side and automatically exposes changed files within the short review journey", () => {
+    const left = {
+      input: "main~1",
+      phase: "resolved" as const,
+      revision: {
+        rawLabel: "main~1",
+        resolved: { algorithm: "sha1" as const, hex: "b".repeat(40) },
+        kind: "symbolic" as const,
+        displayName: "main~1",
+      },
+      error: null,
+      requestGeneration: 4,
+    };
+    const right = {
+      input: "HEAD",
+      phase: "resolved" as const,
+      revision: {
+        rawLabel: "HEAD",
+        resolved: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+        kind: "head" as const,
+        displayName: "HEAD",
+      },
+      error: null,
+      requestGeneration: 4,
+    };
+    const changedFile = {
+      status: "modified" as const,
+      oldPath: {
+        opaqueId: "repository-session-1:path:1",
+        displayPath: "src/feature.ts",
+        utf8Path: "src/feature.ts",
+      },
+      newPath: {
+        opaqueId: "repository-session-1:path:1",
+        displayPath: "src/feature.ts",
+        utf8Path: "src/feature.ts",
+      },
+      similarityScore: null,
+    };
+    const markup = renderGitCompareView(
+      { kind: "ready", repository: branchRepository },
+      "en",
+      {
+        left,
+        right,
+        references: { kind: "ready", list: { refs: [], truncated: false } },
+        pairError: null,
+      },
+      {
+        state: {
+          kind: "ready",
+          requestGeneration: 7,
+          list: {
+            entries: [changedFile],
+            counts: {
+              added: 0,
+              deleted: 0,
+              modified: 1,
+              typeChanged: 0,
+              renamed: 0,
+              copied: 0,
+              unmerged: 0,
+              unknown: 0,
+              total: 1,
+            },
+            truncated: false,
+            generation: 4,
+          },
+        },
+        filter: { query: "", status: "all" },
+        selectedKey: null,
+        viewedKeys: new Set(),
+        snapshotState: { kind: "idle" },
+      },
+    );
+
+    expect(markup).toContain("value=\"HEAD\"");
+    expect(markup).toContain("main~1");
+    expect(markup).toContain("Changed files");
+    expect(markup).toContain("src/feature.ts");
+    expect(markup).toContain("role=\"option\"");
   });
 
   it("uses wrapping and scroll containment needed at 200 percent zoom", () => {

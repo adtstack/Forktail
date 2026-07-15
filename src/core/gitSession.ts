@@ -1,6 +1,9 @@
 import type { FileDocument, GitFileCompareSession } from "./models";
 import type {
   GitCompareSession,
+  GitChangedFile,
+  GitChangedFileList,
+  GitChangedFileStatus,
   GitRefList,
   GitRepositorySummary,
   GitRevision,
@@ -36,6 +39,103 @@ export type GitRevisionValidationResult =
       requestGeneration: number;
       error: string;
     };
+
+export type GitChangedFileStatusFilter =
+  | "all"
+  | "added"
+  | "deleted"
+  | "modified"
+  | "typeChanged"
+  | "renamed";
+
+export interface GitChangedFileFilter {
+  query: string;
+  status: GitChangedFileStatusFilter;
+}
+
+export type GitChangedFileLoadState =
+  | { kind: "idle" }
+  | { kind: "loading"; requestGeneration: number }
+  | {
+      kind: "ready";
+      requestGeneration: number;
+      list: GitChangedFileList;
+    }
+  | {
+      kind: "error";
+      requestGeneration: number;
+      message: string;
+    };
+
+export type GitSnapshotNoticeKind = GitSnapshotContentState["kind"];
+
+export type GitSnapshotSelectionState =
+  | { kind: "idle" }
+  | { kind: "loading"; fileKey: string; requestGeneration: number }
+  | {
+      kind: "notice";
+      fileKey: string;
+      requestGeneration: number;
+      contentStates: GitSnapshotNoticeKind[];
+    }
+  | {
+      kind: "error";
+      fileKey: string;
+      requestGeneration: number;
+      message: string;
+    };
+
+const REVIEWABLE_GIT_STATUSES = new Set<GitChangedFileStatus>([
+  "added",
+  "deleted",
+  "modified",
+  "typeChanged",
+  "renamed",
+]);
+
+export function isReviewableGitChangedFile(entry: GitChangedFile): boolean {
+  return REVIEWABLE_GIT_STATUSES.has(entry.status);
+}
+
+export function gitChangedFileKey(entry: GitChangedFile): string {
+  return [
+    entry.status,
+    entry.oldPath?.opaqueId ?? "-",
+    entry.newPath?.opaqueId ?? "-",
+  ].join("\u001f");
+}
+
+export function filterGitChangedFiles(
+  entries: GitChangedFile[],
+  filter: GitChangedFileFilter,
+): GitChangedFile[] {
+  const query = filter.query.trim().toLocaleLowerCase();
+  return entries.filter((entry) => {
+    if (!isReviewableGitChangedFile(entry)) return false;
+    if (filter.status !== "all" && entry.status !== filter.status) return false;
+    if (!query) return true;
+    return [entry.oldPath?.displayPath, entry.newPath?.displayPath]
+      .some((path) => path?.toLocaleLowerCase().includes(query));
+  });
+}
+
+export function selectedGitChangedFileKeyAfterRefresh(
+  selectedKey: string | null,
+  list: GitChangedFileList,
+): string | null {
+  if (selectedKey === null) return null;
+  return list.entries.some((entry) =>
+    isReviewableGitChangedFile(entry) && gitChangedFileKey(entry) === selectedKey)
+    ? selectedKey
+    : null;
+}
+
+export function isCurrentGitRequest(
+  activeRequestGeneration: number,
+  responseRequestGeneration: number,
+): boolean {
+  return activeRequestGeneration === responseRequestGeneration;
+}
 
 export function emptyGitRevisionField(
   requestGeneration = 0,
