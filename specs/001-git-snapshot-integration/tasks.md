@@ -39,8 +39,8 @@
 
 **⚠️ CRITICAL**: 이 phase가 완료되기 전에는 Git user story UI를 구현하지 않는다.
 
-- [ ] T010 GIT-001 fake runner의 argv/env/stdout-stderr drain/timeout/cancel/cap/forbidden-operation 실패 테스트를 `src-tauri/src/git/runner.rs`에 먼저 추가한다
-- [ ] T011 GIT-001 positive-allowlisted production runner와 fixture-only mutation helper 분리를 `src-tauri/src/git/runner.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/lib.rs`에 구현한다
+- [X] T010 GIT-001 fake runner의 argv/env/stdout-stderr drain/timeout/cancel/cap/forbidden-operation 실패 테스트를 `src-tauri/src/git/runner.rs`에 먼저 추가한다
+- [X] T011 GIT-001 positive-allowlisted production runner와 fixture-only mutation helper 분리를 `src-tauri/src/git/runner.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/lib.rs`에 구현한다
 - [ ] T012 [P] GIT-002 Git error/DTO camelCase 직렬화와 friendly message 계약 테스트를 `src-tauri/src/error.rs`, `src-tauri/src/domain/git.rs`, `src/core/errors.test.ts`, `src/core/gitModels.test.ts`에 먼저 추가한다
 - [ ] T013 GIT-002 stable Git error와 object/path/repository DTO를 `src-tauri/src/error.rs`, `src-tauri/src/domain/git.rs`, `src/core/errors.ts`, `src/core/gitModels.ts`에 구현한다
 - [ ] T014 [P] GIT-003 Git discovery/version/capability와 공백·Unicode executable path 테스트를 `src-tauri/src/git/executable.rs`에 먼저 추가한다

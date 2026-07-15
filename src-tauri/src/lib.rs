@@ -1,6 +1,7 @@
 mod commands;
 mod domain;
 mod error;
+pub mod git;
 mod menu;
 
 use commands::{files, folders, merge, startup, system};

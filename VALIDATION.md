@@ -355,6 +355,16 @@ cargo test
 - Manual-not-run: native save dialog에서 difftool report의 명시적 output path를 최종 확정하는 조작은 이 자동화 환경에서 완료하지 못했다. Export button 활성화와 Git temp path 재사용 금지 source/unit 계약으로 이를 대체하지 않으므로 macOS Difftool cell은 `pending`이다.
 - 판정: macOS Mergetool은 `pass`, Difftool은 report export 한 사례 때문에 `pending`이다. Windows/Linux는 사용자가 직접 실행하기로 한 항목이며 표에서 `pending`을 유지한다. 따라서 T009 task checkbox는 아직 완료로 바꾸지 않는다.
 
+## Repository-aware Git snapshot integration
+
+### GIT-001 production runner — 2026-07-15
+
+- production Rust API는 현재 typed `Version` operation만 노출하고, exact safe global argv prefix 외의 subcommand/option 조합은 spawn 전에 거절한다. frontend/Tauri command에는 executable, argv, environment를 받는 generic IPC를 추가하지 않았다.
+- child는 shell 없이 absolute regular executable과 argv 배열로 실행한다. inherited environment를 clear한 뒤 OS home/boot/temp/locale allowlist와 `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`, `GIT_NO_LAZY_FETCH=1`, `GIT_LITERAL_PATHSPECS=1`, `GIT_PAGER=cat`만 구성한다. PATH, repository/index/object/config, SSH/askpass, trace, external-diff override는 상속하지 않는다.
+- stdout/stderr는 별도 thread로 동시에 drain하고 각각 독립 byte cap을 적용한다. timeout/cancel/cap은 child와 process tree를 종료하고 wait한다. Unix는 spawn 전 전용 process group, Windows source는 kill-on-job-close Job Object를 사용하며 다른 platform은 child kill로 fail closed한다. arbitrary fixture process helper는 `cfg(test)` module에만 존재한다.
+- fake-process test는 양 stream 각 128 KiB 동시 출력, stdout/stderr 개별 cap, 100 ms timeout, 1초 이내 cancel acknowledgement, forbidden/unknown operation 사전 거절, unsafe environment 제거, Unix descendant process-group 종료를 확인했다. helper test도 skip 없이 실행된다.
+- 검증: `cd src-tauri && cargo test` 60 tests 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo fmt --check` 통과. Windows Job Object runtime은 사용자 Windows 실행에서 확인할 항목이다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.
