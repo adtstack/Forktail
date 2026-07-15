@@ -81,6 +81,11 @@ export interface GitTreeList {
   generation: number;
 }
 
+export interface GitTreePathRequest {
+  opaqueId: string;
+  generation: number;
+}
+
 export type GitBlobContent =
   | {
       kind: "text";

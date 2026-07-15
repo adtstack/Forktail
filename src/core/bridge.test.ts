@@ -17,6 +17,7 @@ import {
   listGitChangedFiles,
   listGitConflicts,
   listGitRefs,
+  listGitTree,
   openGitConflict,
   openGitIndexCompare,
   openGitMergePreview,
@@ -241,6 +242,33 @@ describe("Git changed-file bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 91,
+    });
+  });
+});
+
+describe("Git tree bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("loads one bounded immutable revision tree with an optional opaque prefix", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ entries: [], truncated: false, generation: 4 });
+    const commit = { algorithm: "sha1" as const, hex: "a".repeat(40) };
+    const pathPrefix = { opaqueId: "repository-session-1:path:4:1", generation: 4 };
+
+    await listGitTree("repository-session-1", commit, pathPrefix, 100_000, 90);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("list_git_tree", {
+      repositorySessionId: "repository-session-1",
+      commit,
+      pathPrefix,
+      hardLimit: 100_000,
+      jobId: 90,
     });
   });
 });

@@ -32,6 +32,8 @@ import type {
   GitRevisionCompareRequest,
   GitStatusRequest,
   GitStatusSnapshot,
+  GitTreeList,
+  GitTreePathRequest,
   GitWorkingTreeCompareRequest,
 } from "./gitModels";
 
@@ -151,6 +153,23 @@ export async function listGitRefs(
   return invoke<GitRefList>("list_git_refs", {
     repositorySessionId,
     kinds,
+    hardLimit,
+    jobId,
+  });
+}
+
+export async function listGitTree(
+  repositorySessionId: string,
+  commit: GitRevision["resolved"],
+  pathPrefix: GitTreePathRequest | null,
+  hardLimit: number,
+  jobId: number,
+): Promise<GitTreeList> {
+  requireTauri();
+  return invoke<GitTreeList>("list_git_tree", {
+    repositorySessionId,
+    commit,
+    pathPrefix,
     hardLimit,
     jobId,
   });

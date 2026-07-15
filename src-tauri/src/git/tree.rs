@@ -297,7 +297,7 @@ fn parse_tree_size(value: &[u8], kind: GitTreeEntryKind) -> Result<Option<u64>, 
 
 #[cfg(test)]
 mod tests {
-    use super::{GitTreeError, list_tree, parse_tree_records};
+    use super::{GitTreeError, MAX_TREE_LIST_LIMIT, list_tree, parse_tree_records};
     use crate::domain::git::{GitObjectAlgorithm, GitObjectId, GitPathPlatform, GitTreeEntryKind};
     use crate::git::executable::ValidatedGitExecutable;
     use crate::git::repository::GitRepositorySession;
@@ -435,6 +435,31 @@ mod tests {
             .expect("limit plus one becomes truncated");
         assert!(parsed.truncated);
         assert_eq!(parsed.entries.len(), 1);
+    }
+
+    #[test]
+    fn bounds_a_hundred_thousand_entry_tree_and_validates_the_overflow_record() {
+        let mut output = Vec::with_capacity(8 * 1024 * 1024);
+        for index in 0..=MAX_TREE_LIST_LIMIT {
+            output.extend(tree_record(
+                "100644",
+                "blob",
+                SHA1,
+                "1",
+                format!("src/generated/file-{index:06}.txt").as_bytes(),
+            ));
+        }
+
+        let parsed = parse_tree_records(&output, GitObjectAlgorithm::Sha1, MAX_TREE_LIST_LIMIT)
+            .expect("bounded large tree");
+
+        assert_eq!(parsed.entries.len(), MAX_TREE_LIST_LIMIT);
+        assert!(parsed.truncated);
+        assert_eq!(parsed.entries[0].path, b"src/generated/file-000000.txt");
+        assert_eq!(
+            parsed.entries[MAX_TREE_LIST_LIMIT - 1].path,
+            b"src/generated/file-099999.txt"
+        );
     }
 
     #[test]

@@ -26,6 +26,7 @@ import type {
   GitSnapshotUnavailableReason,
   GitStatusEntry,
   GitStatusSnapshot,
+  GitTreeEntry,
   GitUnmergedStatusEntry,
 } from "./gitModels";
 
@@ -319,6 +320,69 @@ export function filterGitChangedFiles(
     return [entry.oldPath?.displayPath, entry.newPath?.displayPath]
       .some((path) => path?.toLocaleLowerCase().includes(query));
   });
+}
+
+export function gitTreeEntryKey(entry: GitTreeEntry): string {
+  return entry.path.opaqueId;
+}
+
+export function fuzzyFilterGitTreeEntries(
+  entries: GitTreeEntry[],
+  rawQuery: string,
+): GitTreeEntry[] {
+  const query = rawQuery.trim().toLocaleLowerCase();
+  if (!query) return entries;
+  return entries.filter((entry) => fuzzyPathMatches(entry.path.displayPath, query));
+}
+
+function fuzzyPathMatches(path: string, query: string): boolean {
+  const candidate = path.toLocaleLowerCase();
+  if (candidate.includes(query)) return true;
+  let queryIndex = 0;
+  for (const character of candidate) {
+    if (character === query[queryIndex]) queryIndex += 1;
+    if (queryIndex === query.length) return true;
+  }
+  return false;
+}
+
+export function nextGitTreeEntryKey(
+  entries: GitTreeEntry[],
+  selectedKey: string | null,
+  key: "ArrowUp" | "ArrowDown" | "Home" | "End",
+): string | null {
+  if (entries.length === 0) return null;
+  const current = selectedKey === null
+    ? -1
+    : entries.findIndex((entry) => gitTreeEntryKey(entry) === selectedKey);
+  const index = key === "Home"
+    ? 0
+    : key === "End"
+      ? entries.length - 1
+      : key === "ArrowUp"
+        ? Math.max(0, current < 0 ? 0 : current - 1)
+        : Math.min(entries.length - 1, current + 1);
+  return gitTreeEntryKey(entries[index]!);
+}
+
+export function gitChangedFileFromTreeSelection(
+  left: GitTreeEntry | null,
+  right: GitTreeEntry | null,
+): GitChangedFile | null {
+  if (!left && !right) return null;
+  if (!left && right) {
+    return { status: "added", oldPath: null, newPath: right.path, similarityScore: null };
+  }
+  if (left && !right) {
+    return { status: "deleted", oldPath: left.path, newPath: null, similarityScore: null };
+  }
+  if (!left || !right) return null;
+  return {
+    status: left.path.opaqueId === right.path.opaqueId ? "modified" : "renamed",
+    oldPath: left.path,
+    newPath: right.path,
+    similarityScore: null,
+  };
 }
 
 export function selectedGitChangedFileKeyAfterRefresh(

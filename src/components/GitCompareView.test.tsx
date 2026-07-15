@@ -6,6 +6,7 @@ import type {
   GitChangedFilesReviewState,
   GitConflictReviewState,
   GitRevisionReviewState,
+  GitTreePickerReviewState,
   GitWorkingTreeReviewState,
 } from "./GitCompareView";
 import {
@@ -37,6 +38,7 @@ function renderGitCompareView(
   changedFilesReview?: GitChangedFilesReviewState,
   workingTreeReview?: GitWorkingTreeReviewState,
   conflictReview?: GitConflictReviewState,
+  treePickerReview?: GitTreePickerReviewState,
 ): string {
   return renderToStaticMarkup(
     <GitCompareView
@@ -46,6 +48,7 @@ function renderGitCompareView(
       changedFilesReview={changedFilesReview}
       workingTreeReview={workingTreeReview}
       conflictReview={conflictReview}
+      treePickerReview={treePickerReview}
       onBack={() => {}}
       onOpenRepository={() => {}}
       onCancelOpen={() => {}}
@@ -54,6 +57,12 @@ function renderGitCompareView(
       onChangedFileFilterChange={() => {}}
       onChangedFileStatusFilterChange={() => {}}
       onSelectChangedFile={() => {}}
+      onLoadTrackedTrees={() => {}}
+      onCancelTrackedTrees={() => {}}
+      onCloseTrackedTrees={() => {}}
+      onTrackedTreeQueryChange={() => {}}
+      onSelectTrackedTreePath={() => {}}
+      onCompareTrackedTreePaths={() => {}}
       onRefreshWorkingTree={() => {}}
       onWorkingTreeFilterChange={() => {}}
       onWorkingTreeSectionFilterChange={() => {}}
@@ -324,6 +333,27 @@ describe("GitCompareView repository shell", () => {
     expect(styles).toMatch(/\.git-revision-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2/s);
     expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*\.git-revision-grid/s);
     expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*\.git-conflict-row/s);
+  });
+
+  it("keeps changed files primary and makes the full tracked tree explicitly opt-in", () => {
+    const markup = renderGitCompareView(
+      { kind: "ready", repository: branchRepository },
+      "en",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        state: { kind: "idle" },
+        query: "",
+        leftSelection: null,
+        rightSelection: null,
+        openState: { kind: "idle" },
+      },
+    );
+
+    expect(markup).toContain("Browse all tracked files");
+    expect(markup).toContain("Changed files remain the default review list");
   });
 });
 

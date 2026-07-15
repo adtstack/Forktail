@@ -23,6 +23,11 @@ import type { AppLanguage } from "../core/settings";
 import { GitChangedFiles } from "./GitChangedFiles";
 import { GitConflictView } from "./GitConflictView";
 import { GitRevisionSelector } from "./GitRevisionSelector";
+import {
+  GitTreePicker,
+  type GitTreePickerState,
+  type GitTreeSelectionKey,
+} from "./GitTreePicker";
 import { GitWorkingTreeFiles } from "./GitWorkingTreeFiles";
 
 export type GitRepositoryScreenState =
@@ -64,6 +69,7 @@ interface GitCompareViewProps {
   changedFilesReview?: GitChangedFilesReviewState;
   workingTreeReview?: GitWorkingTreeReviewState;
   conflictReview?: GitConflictReviewState;
+  treePickerReview?: GitTreePickerReviewState;
   onBack: () => void;
   onOpenRepository: () => void;
   onCancelOpen: () => void;
@@ -73,6 +79,12 @@ interface GitCompareViewProps {
   onChangedFileStatusFilterChange?: (status: GitChangedFileStatusFilter) => void;
   onChangedFileOpenModeChange?: (mode: GitChangedFileOpenMode) => void;
   onSelectChangedFile?: (entry: GitChangedFile) => void;
+  onLoadTrackedTrees?: () => void;
+  onCancelTrackedTrees?: () => void;
+  onCloseTrackedTrees?: () => void;
+  onTrackedTreeQueryChange?: (query: string) => void;
+  onSelectTrackedTreePath?: (side: "left" | "right", selection: GitTreeSelectionKey) => void;
+  onCompareTrackedTreePaths?: () => void;
   onRefreshWorkingTree?: () => void;
   onWorkingTreeFilterChange?: (query: string) => void;
   onWorkingTreeSectionFilterChange?: (section: GitWorkingTreeSection) => void;
@@ -110,6 +122,14 @@ export interface GitConflictReviewState {
   state: GitConflictLoadState;
   selectedKey: string | null;
   openState: GitConflictOpenState;
+}
+
+export interface GitTreePickerReviewState {
+  state: GitTreePickerState;
+  query: string;
+  leftSelection: GitTreeSelectionKey;
+  rightSelection: GitTreeSelectionKey;
+  openState: GitSnapshotSelectionState;
 }
 
 const GIT_COMPARE_TEXT = {
@@ -168,6 +188,7 @@ export function GitCompareView({
   changedFilesReview,
   workingTreeReview,
   conflictReview,
+  treePickerReview,
   onBack,
   onOpenRepository,
   onCancelOpen,
@@ -177,6 +198,12 @@ export function GitCompareView({
   onChangedFileStatusFilterChange,
   onChangedFileOpenModeChange,
   onSelectChangedFile,
+  onLoadTrackedTrees,
+  onCancelTrackedTrees,
+  onCloseTrackedTrees,
+  onTrackedTreeQueryChange,
+  onSelectTrackedTreePath,
+  onCompareTrackedTreePaths,
   onRefreshWorkingTree,
   onWorkingTreeFilterChange,
   onWorkingTreeSectionFilterChange,
@@ -265,6 +292,30 @@ export function GitCompareView({
           languageMode={languageMode}
           onRefresh={onRefreshConflicts}
           onSelect={onSelectConflict}
+        />
+      )}
+
+      {repository.head.kind !== "unborn"
+        && treePickerReview
+        && onLoadTrackedTrees
+        && onCancelTrackedTrees
+        && onCloseTrackedTrees
+        && onTrackedTreeQueryChange
+        && onSelectTrackedTreePath
+        && onCompareTrackedTreePaths && (
+        <GitTreePicker
+          state={treePickerReview.state}
+          query={treePickerReview.query}
+          leftSelection={treePickerReview.leftSelection}
+          rightSelection={treePickerReview.rightSelection}
+          openState={treePickerReview.openState}
+          languageMode={languageMode}
+          onLoad={onLoadTrackedTrees}
+          onCancel={onCancelTrackedTrees}
+          onClose={onCloseTrackedTrees}
+          onQueryChange={onTrackedTreeQueryChange}
+          onSelect={onSelectTrackedTreePath}
+          onCompare={onCompareTrackedTreePaths}
         />
       )}
 
