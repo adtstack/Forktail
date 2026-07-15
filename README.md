@@ -117,6 +117,8 @@ difftool은 `$LOCAL`/`$REMOTE`를 read-only로 열며 added/deleted file의 `/de
 
 T009 packaged lifecycle을 검증할 때는 Git 2.45.0 이상에서 격리 fixture와 체크리스트를 생성합니다. 출력된 config template에는 테스트할 packaged 앱의 **Git tool setup**에서 복사한 두 snippet만 붙여 넣습니다.
 
+macOS artifact를 공백/apostrophe/Unicode가 있는 검증 경로로 옮길 때는 `forktail.app` 전체를 복사하고 그 복사본의 `Contents/MacOS/forktail`을 설정합니다. 내부 실행 파일만 bundle 밖으로 복사한 것은 packaged `.app` 검증으로 취급하지 않습니다.
+
 ```bash
 npm run smoke:git-tools:prepare
 npm run smoke:git-tools:install -- "<manifest.json>" "<GIT_TOOL_CONFIG.gitconfig>"

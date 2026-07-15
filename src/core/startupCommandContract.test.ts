@@ -16,7 +16,15 @@ describe("startup command contract", () => {
     expect(bridge).toContain('invoke<string[]>("startup_args")');
     expect(commandModule).toContain("pub mod startup;");
     expect(startupCommand).toContain("pub fn startup_args() -> Vec<String>");
-    expect(startupCommand).toContain("std::env::args().skip(1).collect()");
+    expect(startupCommand).toContain("std::env::args().skip(1).collect");
+    expect(startupCommand).toContain("normalize_startup_args(args, &directory)");
     expect(tauriLib).toContain("startup::startup_args");
+  });
+
+  it("wires an explicit process exit for external Git tool sessions", () => {
+    expect(bridge).toContain('invoke<void>("exit_external_git_tool")');
+    expect(startupCommand).toContain("pub fn exit_external_git_tool");
+    expect(startupCommand).toContain("app.exit(0)");
+    expect(tauriLib).toContain("startup::exit_external_git_tool");
   });
 });

@@ -1,5 +1,4 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   FileDocument,
@@ -38,9 +37,9 @@ export async function chooseTextFile(title: string): Promise<string | null> {
   return typeof selected === "string" ? selected : null;
 }
 
-export async function closeCurrentWindow(): Promise<void> {
+export async function exitExternalGitTool(): Promise<void> {
   requireTauri();
-  await getCurrentWindow().close();
+  await invoke<void>("exit_external_git_tool");
 }
 
 export async function chooseDirectory(title: string): Promise<string | null> {

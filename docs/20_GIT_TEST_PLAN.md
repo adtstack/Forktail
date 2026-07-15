@@ -711,7 +711,7 @@ npm run smoke:git-tools:verify -- "<manifest.json>" <checkpoint>
 npm run smoke:git-tools:cleanup -- "<manifest.json>"
 ```
 
-`scripts/git-tool-smoke.mjs`는 공백·apostrophe·Unicode가 있는 root 아래 A/D/M repository, modify/modify conflict, stage 1 없는 add/add, 실제 empty stage-1 blob conflict를 만든다. HOME/XDG/global config와 system attributes를 격리하고 system config, optional lock refresh, credential prompt를 비활성화하며 remote를 만들지 않는다. 생성 직후 manifest 전체 hash를 별도 provenance marker에 봉인해 baseline/path/expected 배열 변조로 verifier를 약화할 수 없게 한다. Git tool setup에서 복사한 정확한 두 tool section만 모든 fixture에 설치하고 `diff.tool`/`merge.tool`은 전체 repository 사전 검사 후 건드리지 않는다. 설치 뒤 네 tool value hash와 각 `.git/config` 전체 bytes hash를 receipt에 고정한다. 외부 writer race는 Save 시도 전에 Result hash/size/mtime/permission을 별도 일회성 receipt로 고정한다. 생성된 `GIT_TOOL_SMOKE_CHECKLIST.md`가 UI 조작, disposable failure/race fixture, OS별 gate와 checkpoint 순서의 기준이다. setup 중 실패하면 새 root를 제거한다. cleanup은 sealed manifest/provenance와 root identity만 검증하므로 index 같은 mutable fixture state가 손상돼도 root를 제거한다. manifest/provenance 자체가 손상되면 준비 시 기록한 exact disposable root를 독립 확인한 뒤 수동 정리와 그 근거를 기록한다.
+`scripts/git-tool-smoke.mjs`는 공백·apostrophe·Unicode가 있는 root 아래 A/D/M repository, modify/modify conflict, stage 1 없는 add/add, 실제 empty stage-1 blob conflict를 만든다. HOME/XDG/global config와 system attributes를 격리하고 system config, optional lock refresh, credential prompt를 비활성화하며 remote를 만들지 않는다. 생성 직후 manifest 전체 hash를 별도 provenance marker에 봉인해 baseline/path/expected 배열 변조로 verifier를 약화할 수 없게 한다. Git tool setup에서 복사한 정확한 두 tool section만 모든 fixture에 설치하고 `diff.tool`/`merge.tool`은 전체 repository 사전 검사 후 건드리지 않는다. 설치 뒤 각 repository에서 Git으로 실제 재조회한 네 tool value가 모두 같은지 확인하고 그 installed value hash와 각 `.git/config` 전체 bytes hash를 receipt에 고정한다. 이 방식은 macOS NFD path 입력을 Git이 NFC-equivalent value로 저장·재조회하는 경우에도 요청 문자열이 아니라 실제 실행 계약을 봉인한다. 외부 writer race는 Save 시도 전에 Result hash/size/mtime/permission을 별도 일회성 receipt로 고정한다. 생성된 `GIT_TOOL_SMOKE_CHECKLIST.md`가 UI 조작, disposable failure/race fixture, OS별 gate와 checkpoint 순서의 기준이다. setup 중 실패하면 새 root를 제거한다. cleanup은 sealed manifest/provenance와 root identity만 검증하므로 index 같은 mutable fixture state가 손상돼도 root를 제거한다. manifest/provenance 자체가 손상되면 준비 시 기록한 exact disposable root를 독립 확인한 뒤 수동 정리와 그 근거를 기록한다.
 
 자동 integration test는 fixture stage, config allowlist/raw bytes, revision argv injection, 저장 전후 Result/backup/index/refs/Git state/lock/temp 불변식을 검사한다. 일반 frontend suite와 process 경합하지 않도록 `npm run test:git-tools`에서 직렬 실행하며 `npm run check`와 CI가 이를 별도 gate로 호출한다. 이 test는 packaged app이나 UI를 실행하지 않는다.
 
@@ -754,6 +754,8 @@ temp repo에 실제 conflict 생성
 
 초기 계약은 `trustExitCode = false`와 tool-specific `hideResolved = false`를 유지한다. 앱 lifecycle과 저장 여부를 신뢰 가능한 exit code로 전달하는 별도 이슈와 세 OS smoke가 완료되기 전에는 `true`로 바꾸지 않는다.
 
+Git wrapper가 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 상대 경로로 전달할 수 있으므로 packaged startup command는 command flag와 missing sentinel을 보존하면서 path slot만 최초 working directory 기준 absolute path로 바꾼다. symlink canonicalize는 하지 않는다. UI read와 safe-save가 같은 absolute identity를 사용해야 하며, 상대 `$MERGED`를 읽을 수 있었다는 이유로 write path 검증을 완화하지 않는다. Close Forktail은 마지막 window만 숨기거나 destroy하지 않고 external-tool app process를 종료해야 Git wait가 풀린다.
+
 필수 사례:
 
 - save 후 MERGED만 변경
@@ -774,7 +776,7 @@ temp repo에 실제 conflict 생성
 | macOS | `.app` 내부 실제 executable 또는 검증된 `--wait` launcher, notarized/ad-hoc artifact, NFC/NFD path |
 | Linux | AppImage/지원 binary, executable bit, desktop 환경과 무관한 process wait; minimum glibc 결정은 `REL-004` release gate |
 
-macOS의 단순 `open App.app`처럼 즉시 반환하는 launcher는 Git tool 계약으로 인정하지 않는다. Git이 session window 종료까지 기다릴 수 있는 실행 경로를 검증해야 한다.
+macOS의 단순 `open App.app`처럼 즉시 반환하는 launcher는 Git tool 계약으로 인정하지 않는다. Git이 session window 종료까지 기다릴 수 있는 실행 경로를 검증해야 한다. 격리 경로에 artifact를 복사할 때는 내부 Mach-O 파일만 떼어내지 않고 전체 `.app` bundle을 복사한 뒤 `Contents/MacOS/<executable>`을 config에 사용한다. bundle 밖 단독 복사본은 WebView/resource context를 잃을 수 있어 packaged evidence가 아니다.
 
 ### 12.5 T009 evidence record
 

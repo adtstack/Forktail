@@ -6,7 +6,7 @@ import {
   chooseDirectory,
   chooseSavePath,
   chooseTextFile,
-  closeCurrentWindow,
+  exitExternalGitTool,
   isTauriRuntime,
   listFileBackups,
   mergeTexts,
@@ -800,7 +800,7 @@ export default function App() {
   const closeExternalGitToolWindow = () => {
     requestLeaveActiveSession(() => {
       allowWindowClose.current = true;
-      void closeCurrentWindow().catch((caught) => {
+      void exitExternalGitTool().catch((caught) => {
         allowWindowClose.current = false;
         setError(errorMessage(caught, languageMode));
       });

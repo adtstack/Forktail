@@ -266,6 +266,49 @@ describe.sequential("T009 Git tool smoke harness", () => {
     },
   );
 
+  it.runIf(process.platform === "darwin")(
+    "seals the Git-normalized installed tool values instead of the NFD config input",
+    { timeout: 60_000 },
+    () => {
+      const normalizationRoot = join(parent, "receipt normalization fixture");
+      const normalization = prepareGitToolSmoke({ root: normalizationRoot });
+      const configPath = join(normalizationRoot, "nfd-generated.gitconfig");
+      const nfdExecutablePath = "/opt/Forktail 한글/forktail".normalize("NFD");
+      writeFileSync(
+        configPath,
+        validToolConfig().replaceAll("/opt/forktail", nfdExecutablePath),
+      );
+
+      try {
+        installToolConfig({ manifestPath: normalization.paths.manifest, configPath });
+        const configured = gitFor(normalization, normalizationRoot, [
+          "config",
+          "--file",
+          configPath,
+          "--get",
+          "difftool.forktail.cmd",
+        ]).trimEnd();
+        const installed = gitFor(normalization, normalization.repositories.difftool.path, [
+          "config",
+          "--local",
+          "--get",
+          "difftool.forktail.cmd",
+        ]).trimEnd();
+
+        expect(configured).not.toBe(installed);
+        expect(configured.normalize("NFC")).toBe(installed);
+        expect(
+          verifyGitToolSmoke({
+            manifestPath: normalization.paths.manifest,
+            scenario: "difftool-pristine",
+          }).ok,
+        ).toBe(true);
+      } finally {
+        rmSync(normalizationRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
   it("removes only a validated disposable fixture through the cleanup command", { timeout: 60_000 }, () => {
     const cleanupRoot = join(parent, "cleanup O'Brien 한글 fixture");
     const cleanupManifest = prepareGitToolSmoke({ root: cleanupRoot });

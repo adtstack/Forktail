@@ -202,13 +202,18 @@ export function installToolConfig({ manifestPath, configPath }) {
       }
     }
   }
-  const existingReceipt = existingToolConfigReceiptForInstall(manifest, values);
+  const existingReceipt = existingToolConfigReceiptForInstall(
+    manifest,
+    values,
+    repositories,
+    environment,
+  );
   for (const repository of repositories) {
     for (const key of CONFIG_KEYS) {
       git(repository.path, ["config", "--local", key, values[key]], environment);
     }
   }
-  finalizeToolConfigReceipt(manifest, values, existingReceipt);
+  finalizeToolConfigReceipt(manifest, repositories, environment, existingReceipt);
 
   return { repositories: repositories.map(({ path }) => path), installedKeys: [...CONFIG_KEYS] };
 }
@@ -1150,10 +1155,11 @@ function toolConfigEntries(values) {
   }));
 }
 
-function existingToolConfigReceiptForInstall(manifest, values) {
+function existingToolConfigReceiptForInstall(manifest, values, repositories, environment) {
   if (!existsSync(manifest.paths.toolConfigReceipt)) return null;
   const existing = readToolConfigReceipt(manifest);
-  if (JSON.stringify(existing.entries) !== JSON.stringify(toolConfigEntries(values))) {
+  const canonicalValues = canonicalizeToolConfigValues(manifest, values, environment);
+  if (JSON.stringify(existing.entries) !== JSON.stringify(toolConfigEntries(canonicalValues))) {
     throw new Error("Git tool config differs from the existing fixture receipt");
   }
   for (const key of REPOSITORY_KEYS) {
@@ -1162,10 +1168,15 @@ function existingToolConfigReceiptForInstall(manifest, values) {
       throw new Error("repository-local config bytes differ from the existing fixture receipt");
     }
   }
+  const installedValues = consistentInstalledToolConfigValues(repositories, environment);
+  if (JSON.stringify(existing.entries) !== JSON.stringify(toolConfigEntries(installedValues))) {
+    throw new Error("installed Git tool config differs from the existing fixture receipt");
+  }
   return existing;
 }
 
-function finalizeToolConfigReceipt(manifest, values, existing) {
+function finalizeToolConfigReceipt(manifest, repositories, environment, existing) {
+  const values = consistentInstalledToolConfigValues(repositories, environment);
   const receipt = {
     issue: ISSUE,
     schemaVersion: SCHEMA_VERSION,
@@ -1186,6 +1197,43 @@ function finalizeToolConfigReceipt(manifest, values, existing) {
     return;
   }
   writeNewReceipt(manifest.paths.toolConfigReceipt, receipt);
+}
+
+function canonicalizeToolConfigValues(manifest, values, environment) {
+  const directory = mkdtempSync(join(manifest.root, ".tool-config-canonical-"));
+  const configPath = join(directory, "config");
+  try {
+    for (const key of CONFIG_KEYS) {
+      git(manifest.root, ["config", "--file", configPath, key, values[key]], environment);
+    }
+    return Object.fromEntries(
+      CONFIG_KEYS.map((key) => [
+        key,
+        readSingleConfigValue(manifest.root, configPath, key, environment),
+      ]),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+function consistentInstalledToolConfigValues(repositories, environment) {
+  let expected = null;
+  for (const repository of repositories) {
+    const values = Object.fromEntries(
+      CONFIG_KEYS.map((key) => [
+        key,
+        readSingleLocalConfigValue(repository.path, key, environment),
+      ]),
+    );
+    validateToolConfig(values);
+    if (expected != null && JSON.stringify(values) !== JSON.stringify(expected)) {
+      throw new Error("installed Git tool config differs across fixture repositories");
+    }
+    expected = values;
+  }
+  if (expected == null) throw new Error("fixture has no repositories for Git tool config");
+  return expected;
 }
 
 function readToolConfigReceipt(manifest) {

@@ -295,11 +295,11 @@ cargo test
 
 실행 결과:
 
-- `npm run check`: typecheck 통과, frontend Vitest 54 files/350 tests와 T009 Git harness Vitest 1 file/15 tests 통과, production build 통과
-- `npm run tauri build`: release binary와 macOS `.app` bundle 생성 통과
+- `npm run check`: typecheck 통과, frontend Vitest 54 files/351 tests와 T009 Git harness Vitest 1 file/16 tests 통과, production build 통과
+- `npm run tauri -- build --bundles app`: release binary와 macOS `.app` bundle 생성 통과
 - `cd src-tauri && cargo fmt --all --check`: 통과
 - `cd src-tauri && cargo clippy --all-targets -- -D warnings`: 통과
-- `cd src-tauri && cargo test`: 44 tests 통과
+- `cd src-tauri && cargo test`: 47 tests 통과
 - production build의 기존 Monaco large-chunk warning은 유지되며 실패가 아니다.
 
 - `--difftool "$LOCAL" "$REMOTE"`은 두 positional slot을 보존하고, 빈 인자와 정확한 `/dev/null`을 missing side로 분류하며 두 쪽이 모두 missing이면 거절한다.
@@ -316,6 +316,8 @@ cargo test
 - 생성 결과는 tool-specific `[difftool "forktail"]`, `[mergetool "forktail"]` section만 제공한다. `.gitconfig`를 자동 수정하거나 `diff.tool`/`merge.tool` 기본값을 바꾸지 않는다.
 - mergetool snippet은 `trustExitCode = false`, `hideResolved = false`를 고정한다. GUI 종료 code가 저장 성공을 신뢰성 있게 전달하지 않으므로 사용자는 `git mergetool --tool=forktail`의 후속 확인 흐름을 사용한다.
 - `%O/%A/%B/%P` custom merge driver와 자동 `git add`/continue는 생성하거나 실행하지 않는다.
+- packaged external-tool argv의 상대 경로는 Rust startup command 경계에서 Git이 Forktail을 실행한 working directory 기준 absolute path로 변환한다. command flag, 빈 missing-Base slot, `/dev/null`, 기존 absolute path는 보존한다. 따라서 Git이 전달한 상대 `$MERGED`를 read한 뒤에도 safe-save path 검증을 통과한다.
+- **Close Forktail**은 window 객체만 닫지 않고 전용 Rust command로 app process를 exit한다. macOS에서 마지막 window close 뒤 event loop가 남아 Git이 무기한 기다리는 경로를 막는다.
 
 ### T009 INT-002/MRG-014 Git external tool 검증
 
@@ -324,31 +326,34 @@ cargo test
 | OS | Artifact | Git version | Difftool | Mergetool | Evidence |
 |---|---|---|---|---|---|
 | Windows | installed `.exe` | pending | pending | pending | 사용자 실행 예정 |
-| macOS | release `.app` 0.2.2 arm64, executable SHA-256 `f4a4401081bb…` | 2.50.1 (Apple Git-155) | pending | pending | 2026-07-15 harness/process-level 부분 실행; UI manual-not-run |
+| macOS | release `.app` 0.2.2 arm64, executable SHA-256 `e9a317a84c3a31e3cec1c1c3b197c9072425b8d500442f77592942b8b2019ddd` | 2.50.1 (Apple Git-155) | pending | pass | 2026-07-15 schema 2 packaged UI/harness 실행; difftool report export만 manual-not-run |
 | Linux | AppImage/지원 binary | pending | pending | pending | 사용자 실행 예정 |
 
 #### T009 격리 fixture/verifier 하네스 — 2026-07-15
 
 - `scripts/git-tool-smoke.mjs`는 fixture root를 만들기 전에 Git 2.45.0 이상을 확인하고 공백, apostrophe, Unicode가 포함된 임시 root에 파일명 자체도 세 문자를 포함하는 A/D/M difftool repository, modify/modify conflict, stage 1 없는 add/add, 실제 empty stage-1 blob conflict를 생성한다. HOME/XDG/global config는 비어 있는 임시 경로로 격리하고 system config, system attributes, optional lock refresh, credential prompt는 비활성화하며 실제 remote는 사용하지 않는다. inherited `GIT_*` 변수는 Windows 대소문자 차이까지 제거한다. setup 도중 실패하면 하네스가 새로 만든 root를 제거한다.
-- config install은 Git tool setup에서 복사한 정확한 `difftool.forktail.*`/`mergetool.forktail.*` 네 key만 허용한다. 네 repository의 금지 default, non-tool config, tool key cardinality를 모두 먼저 검사한 뒤 repo-local key를 설치하며, 설치된 exact value hash와 각 `.git/config` 전체 bytes hash를 root 안의 일회성 receipt에 고정한다.
+- config install은 Git tool setup에서 복사한 정확한 `difftool.forktail.*`/`mergetool.forktail.*` 네 key만 허용한다. 네 repository의 금지 default, non-tool config, tool key cardinality를 모두 먼저 검사한 뒤 repo-local key를 설치한다. macOS filesystem/Git의 NFC·NFD 정규화 차이를 고려해 Git이 실제 설치·재조회한 네 value가 모든 repository에서 같은지 확인하고, 그 installed value hash와 각 `.git/config` 전체 bytes hash를 root 안의 일회성 receipt에 고정한다.
 - manifest 전체 hash는 생성 직후 root 안의 provenance marker에 봉인된다. verifier는 이 sealed baseline을 기준으로 HEAD object와 symbolic/detached/merge operation state, refs, tracked file hash/size/mtime/permission, index bytes/mtime/stages/mode/object/flags와 `.lock`, exact tool config/receipt, Result fingerprint, 모든 regular non-symlink Forktail backup의 원본 일치, external-writer fingerprint receipt, unexpected sidecar와 mergetool repo-local temp residue를 checkpoint별로 검사한다. no-save/unresolved Result는 실제 Git wrapper가 바꿀 수 있는 mtime을 제외하고 hash/size/permission을 비교하며 external capture 이후에는 mtime까지 고정한다. `.orig`는 post-confirm에서만 허용하고 존재하면 원본 Result hash와 일치해야 한다.
 - install/run/capture/verify는 현재 Git version이 manifest에 기록된 지원 version과 같은지 다시 확인하고, run 직전 exact receipt와 네 tool config single-value/false 계약 및 금지 default를 검증한다. manifest는 정확한 네 repository key와 full object ID revision만 허용하고 filesystem identity를 사용해 NFC/NFD manifest alias를 받아들이되 fixture root 밖 HOME/XDG/config/receipt/repository, 중복 repository, remapped Result, revision option injection, symlink/non-empty global config를 거절한다. cleanup은 별도 sealed provenance/root 검증만 사용하므로 index 같은 mutable fixture state가 손상돼도 disposable root를 제거한다.
 - 외부 MERGED 변경과 Save race는 second writer 변경 직후 `smoke:git-tools:capture-external`로 Result hash/size/mtime/permission을 일회성 receipt에 기록한다. 그 뒤 verifier가 receipt와 다른 Result, backup/index/config/Git-state 변경을 거절한다.
-- `npm run test:git-tools`: Vitest 1 file/15 tests 통과. `npm run check`와 `.github/workflows/ci.yml`은 일반 frontend test와 process 경합하지 않도록 이 suite를 별도 직렬 gate로 실행하고, watch suite에서는 제외한다. CI source는 Ubuntu frontend job과 별도 Windows 2022 job에서 실행하며 macOS NFC/NFD 분기는 이 로컬 macOS 실행으로 확인했다. GitHub Actions hosted runner에서의 실제 workflow 실행은 아직 확인하지 않았다.
+- `npm run test:git-tools`: Vitest 1 file/16 tests 통과. 추가된 macOS test는 NFD executable 입력과 Git이 재조회한 NFC-equivalent installed value가 달라도 receipt가 실제 installed bytes를 봉인하고 pristine verifier가 통과하는지 확인한다. `npm run check`와 `.github/workflows/ci.yml`은 일반 frontend test와 process 경합하지 않도록 이 suite를 별도 직렬 gate로 실행하고, watch suite에서는 제외한다. CI source는 Ubuntu frontend job과 별도 Windows 2022 job에서 실행하며 macOS NFC/NFD 분기는 이 로컬 macOS 실행으로 확인했다. GitHub Actions hosted runner에서의 실제 workflow 실행은 아직 확인하지 않았다.
 - 이 하네스는 repository/process 불변식과 실행 순서용 checklist를 제공하지만 packaged UI를 실행하지 않는다. 자동 test의 save lifecycle은 Result/backup/index 전환을 모사해 verifier를 검증하는 것이며 실제 Forktail Save 증거가 아니다.
 - HOME/XDG 격리는 native platform known-folder API가 만드는 모든 app/WebView state를 fixture 안에 가둔다는 보장이 아니다. 실제 packaged UI evidence는 disposable OS account/VM/profile에서 다시 실행한다.
 - cleanup 전에 sanitized summary와 artifact identity를 이 문서에 전사한다. manifest/provenance 자체가 손상돼 CLI cleanup이 거절되면 준비 시 기록한 exact disposable root를 독립 확인해 수동 폐기하고 그 근거를 남긴다.
-- 현재 하네스 manifest schema는 2다. 아래 macOS process 관찰은 hardening 전 schema 1 fixture로 수집한 부분 증거이므로 해당 fixture를 현재 보존하고 있으며 schema 2 cleanup 명령의 대상이 아니다. evidence 정리 뒤 수동 폐기해야 한다. 어느 cell도 pass로 바꾸기 전에 schema 2가 생성한 최신 failure/race/OS/cleanup checklist 전체를 새 fixture에서 다시 실행해야 한다. Linux minimum glibc 결정은 `REL-004` 범위이며 T009는 실제 실행 환경만 기록한다.
+- 현재 하네스 manifest schema는 2다. 아래 macOS 결과는 schema 2 primary fixture와 사례별 disposable failure/race fixture로 다시 수집했다. Linux minimum glibc 결정은 `REL-004` 범위이며 T009는 실제 실행 환경만 기록한다.
 
-#### macOS process-level 부분 실행 — 2026-07-15
+#### macOS packaged UI/harness 실행 — 2026-07-15
 
-- 환경: macOS 26.4.1 arm64, Git 2.50.1 (Apple Git-155), Forktail 0.2.2 release `.app`. 임시 HOME, global/system config 비활성화, repository-local tool config를 사용했다.
-- artifact/config quoting: executable을 공백, apostrophe, Unicode가 모두 포함된 격리 경로에 복사했다. generated command가 그 실제 executable을 실행했으며 `.gitconfig`나 default tool은 바꾸지 않았다.
-- Difftool process-level: 하네스의 한 `git difftool` 호출이 added → deleted → modified를 순차 실행했다. added는 빈 LOCAL, deleted는 빈 REMOTE, modified는 두 temp path로 전달됐다. 각 창이 열린 동안 Git이 대기하고 해당 temp가 존재했으며, 일반 macOS app terminate 뒤 직전 temp가 정리되고 다음 path가 시작됐다. 마지막 종료 뒤 Git은 exit 0이었고 모든 관찰 temp가 정리됐으며 `difftool-pristine` verifier가 통과했다.
-- Mergetool missing-Base process-level: 실제 add/add conflict에는 index stage 1이 없지만 Git이 0-byte BASE temp를 만들었다. `base_present=false` wrapper가 최종 packaged process에 빈 BASE slot과 LOCAL/REMOTE/MERGED 네 위치를 정확히 전달했다. 실행 중 MERGED hash와 index의 stage 2/3 두 entry는 유지됐다. 저장 없이 일반 종료하고 Git 질문에 `n`을 답한 뒤 예상대로 exit 1이었으며, MERGED hash와 unresolved index가 그대로이고 temp가 정리돼 `mergetool-missing-base-no-save` verifier가 통과했다.
-- Mergetool real-empty-Base process-level: 실제 empty stage-1 object가 있는 conflict에서는 Git의 0-byte BASE temp 경로가 빈 slot으로 축약되지 않고 packaged process에 전달됐다. 저장 없이 일반 종료하고 Git 질문에 `n`을 답한 뒤 예상대로 exit 1이었으며 `mergetool-empty-base-no-save` verifier가 통과했다. 이는 argv/path 보존 증거이며 UI에서 빈 Base pane을 직접 본 증거는 아니다.
-- Manual-not-run: 이 실행 환경의 macOS desktop이 `loginwindow`에 잠겨 있어 pane 매핑, missing badge, read-only controls, report export, 실제 Save, unresolved Save hard-block, dirty-close UI를 조작하지 못했다. process/argv/temp 관찰이나 component test로 이를 대체하지 않는다.
-- 판정: Difftool과 Mergetool은 모두 `pending`, T009는 미완료다. Windows/Linux 전체와 macOS UI 사례가 모두 실행되기 전 Phase 2 gate를 열지 않는다.
+- 환경: macOS 26.4.1 arm64, Git 2.50.1 (Apple Git-155), Forktail 0.2.2 release `.app`, executable SHA-256 `e9a317a84c3a31e3cec1c1c3b197c9072425b8d500442f77592942b8b2019ddd`. 임시 HOME, global/system config 비활성화, repository-local tool config를 사용했다. 전체 `.app`을 공백, apostrophe, Unicode가 포함된 staging 경로에 복사하고 그 내부 actual executable을 사용했다. 내부 executable만 bundle 밖으로 복사하는 형태는 macOS bundle/WebView context를 잃으므로 evidence로 사용하지 않았다.
+- Artifact/config/NFC-NFD: packaged **Git tool setup**이 생성한 두 section만 설치했고 default tool은 만들지 않았다. UI가 반환한 NFD path와 Git config 재조회 값의 NFC-equivalent 차이는 installed-value receipt로 봉인됐다. 이 설정이 실제 staged `.app` executable을 launch하고 wait했으며 artifact hash가 source bundle과 일치했다.
+- Difftool process/temp/UI: 한 `git difftool` 호출이 added → deleted → modified 순서로 서로 겹치지 않게 실행됐다. added는 missing LOCAL, deleted는 missing REMOTE, modified는 두 문서를 표시했다. 각 Git temp는 해당 창이 열린 동안 존재했고 Close Forktail 뒤 제거됐으며 다음 process가 그 뒤에만 시작됐다. 두 pane drop과 edit/Save/Save As/hunk/swap/backup은 disabled/read-only였고 Export와 diff navigation은 enabled였다. F7/Shift+F7 trusted key input 뒤 1/1 hunk UI가 정상 유지됐다. 마지막 종료 뒤 Git exit 0과 `difftool-pristine` verifier가 통과했다.
+- Difftool failure: 별도 fixture에서 executable mode를 `0755 → 0644`로 바꾸면 launch가 Git exit 128로 실패했다. 즉시 mode와 같은 artifact SHA-256을 복원한 뒤 `difftool-pristine`이 통과했다. 다른 별도 fixture에서는 실행 중 확인한 Forktail PID 하나만 SIGKILL했고 Git exit 128, 관찰 temp 제거, `difftool-pristine` 통과를 확인했다. content-bearing crash dump는 수집하지 않았다.
+- Mergetool unresolved/no-save: modify/modify Result에 marker가 남은 동안 Save가 disabled였고 `mergetool-unresolved-blocked`가 통과했다. 저장 없이 Close한 뒤 Git unchanged 질문에 `n`을 답해 exit 1이었으며 `mergetool-no-save`가 Result/index/backup/temp 불변을 확인했다.
+- Mergetool safe-save: 모든 conflict를 OURS로 해결한 뒤 Save했다. 앱이 열린 동안 `mergetool-save-during-app`이 MERGED-only 변경, 원본과 일치하는 Forktail backup, unmerged index 유지, Git wait/temp 유지를 확인했다. Close Forktail 뒤 Git은 질문 없이 exit 0으로 stage했고 `mergetool-save-post-confirm`이 stage-0 object/mode와 Result 일치, 다른 index/refs 불변, backup 및 temp/sidecar 계약을 확인했다. 이 과정에서 Git이 전달한 상대 `$MERGED`가 저장 경계에서 거절되던 결함을 재현해 startup path absolute 변환을 추가한 뒤 같은 packaged 시나리오로 재검증했다.
+- Mergetool Base 경계: add/add는 UI에 `BASE (missing)`으로, 실제 empty stage-1 blob은 존재하는 0-byte BASE path와 `Empty` 문서로 표시됐다. 두 실행 모두 Save 없이 exit 1 후 각각 `mergetool-missing-base-no-save`, `mergetool-empty-base-no-save`가 통과했다.
+- Mergetool external race: 새 disposable fixture에서 second writer가 MERGED를 변경한 뒤 일회성 capture가 통과했다. Forktail Save는 “The file changed after it was opened. Reload or save as a copy.”로 실패했고 `mergetool-external-change-blocked`가 writer bytes/metadata 유지, Forktail backup 없음, index/stage/continue 없음과 Git wait를 확인했다. Forktail 종료 뒤 Git이 더 새로운 external-writer 파일을 stage한 동작은 Forktail 저장과 분리 기록하고 fixture를 폐기했다.
+- Manual-not-run: native save dialog에서 difftool report의 명시적 output path를 최종 확정하는 조작은 이 자동화 환경에서 완료하지 못했다. Export button 활성화와 Git temp path 재사용 금지 source/unit 계약으로 이를 대체하지 않으므로 macOS Difftool cell은 `pending`이다.
+- 판정: macOS Mergetool은 `pass`, Difftool은 report export 한 사례 때문에 `pending`이다. Windows/Linux는 사용자가 직접 실행하기로 한 항목이며 표에서 `pending`을 유지한다. 따라서 T009 task checkbox는 아직 완료로 바꾸지 않는다.
 
 ## 관찰된 경고
 
@@ -374,13 +379,13 @@ cargo test
 - `TXT-010` diff report 실제 파일 저장은 Tauri file dialog와 `write_text_file_atomic` runtime이 필요해 브라우저에서 버튼/오류 경로와 순수 report 생성까지만 확인했다.
 - `TXT-007` 양방향 hunk copy는 브라우저에서 좌/우 편집 대상 전환, `왼쪽→오른쪽`/`오른쪽→왼쪽` 적용, 마지막 적용 undo, dirty/save 상태까지 확인했다. 실제 Tauri file dialog를 통한 좌/우 Save/Save As 파일 쓰기는 Rust/Tauri runtime에서 추가 smoke가 필요하다.
 - `TXT-008` Drag & Drop은 브라우저 자동화가 OS 파일 경로를 담은 실제 file-drop 이벤트를 만들 수 없어 순수 경로 추출/개수 검증과 화면 회귀까지만 확인했다. 실제 Tauri WebView에서 파일 2개 drop 및 한쪽 pane 1파일 drop으로 `read_text_file` command가 호출되는지는 `npm run tauri dev`에서 수동/자동 smoke가 필요하다.
-- `TXT-009`/`MRG-009`/`MRG-014`/`INT-002` CLI open은 parser, session capability, Tauri command wiring, config quote snapshot을 확인했다. macOS packaged Git tool은 위 T009 절의 process/argv/temp/no-save 범위만 부분 확인했다. 실제 pane의 read-only/missing 표시, report export, mergetool Save/unresolved/dirty-close UI와 Windows/Linux 전체 lifecycle, 일반 `forktail left right`/`forktail --merge ...`는 여전히 실제 OS smoke가 필요하다. `%O/%A/%B/%P` custom merge driver는 현재 범위가 아니다.
+- `TXT-009`/`MRG-009`/`MRG-014`/`INT-002` CLI open은 parser, session capability, Tauri command wiring, config quote snapshot을 확인했다. macOS packaged Git tool은 위 T009 절의 실제 pane/read-only/missing, wait/temp, mergetool save/no-save/unresolved/external race/Base 경계, launch/forced-exit까지 확인했다. 남은 항목은 native dialog를 통한 difftool report export, Windows/Linux 전체 lifecycle, 일반 `forktail left right`/`forktail --merge ...` OS smoke다. `%O/%A/%B/%P` custom merge driver는 현재 범위가 아니다.
 - `UX-006` native reveal은 source/contract test로만 확인했다. 실제 Finder/Explorer/file manager가 선택 항목 또는 폴더를 여는지는 `npm run tauri dev` 가능한 OS별 환경에서 smoke가 필요하다.
 - `MRG-010` opt-in draft recovery는 브라우저 localStorage와 새 탭 재진입으로 확인했다. 실제 데스크톱 앱 crash 후 WebView storage 유지, 큰 draft 한도 안내, OS별 storage persistence는 `npm run tauri dev` 환경에서 추가 smoke가 필요하다.
 - 마지막 화면 자동 복원은 브라우저 데모 세션 reload와 active session 저장소 단위 테스트로 확인했다. 실제 사용자 파일 경로의 자동 재열기와 폴더 rescan은 Tauri runtime에서 `read_text_file`/`scan_directories`를 통한 추가 smoke가 필요하다.
 - Linux Tauri용 WebKitGTK 4.1 개발 패키지는 macOS 로컬 실행에서는 해당 없음. Linux CI/스모크에서 별도 확인한다.
 
-따라서 현재 macOS 개발 환경에서는 frontend/Rust 검증, Tauri `.app` bundle build, Git external-tool process lifecycle 일부까지 확인됐다. 남은 항목은 T009의 macOS UI 및 Windows/Linux 전체 사례, 세 OS 패키징, 실제 file dialog/native menu/reveal/일반 CLI/저장 smoke, packaged WebView runtime smoke다.
+따라서 현재 macOS 개발 환경에서는 frontend/Rust 검증, Tauri `.app` bundle build, Git external-tool의 packaged UI/process 및 mergetool 저장 lifecycle까지 확인됐다. 남은 T009 항목은 macOS difftool report native-dialog 확정과 사용자가 실행할 Windows/Linux 전체 사례다. 그 밖에 세 OS 패키징, 실제 file dialog/native menu/reveal/일반 CLI smoke와 일부 packaged WebView runtime smoke가 남아 있다.
 
 ## 첫 로컬 검증 순서
 

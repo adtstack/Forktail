@@ -20,6 +20,7 @@ pub fn run() {
             folders::cancel_folder_scan,
             folders::scan_directories,
             merge::merge_texts,
+            startup::exit_external_git_tool,
             startup::startup_args,
             system::git_tool_executable_path,
             system::reveal_path,

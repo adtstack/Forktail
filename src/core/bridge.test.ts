@@ -1,39 +1,35 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  close: vi.fn(async () => {}),
   invoke: vi.fn(),
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
-vi.mock("@tauri-apps/api/window", () => ({
-  getCurrentWindow: () => ({ close: mocks.close }),
-}));
 
-import { closeCurrentWindow, gitToolExecutablePath } from "./bridge";
+import { exitExternalGitTool, gitToolExecutablePath } from "./bridge";
 
-describe("desktop window lifecycle bridge", () => {
+describe("external Git tool lifecycle bridge", () => {
   afterEach(() => {
-    mocks.close.mockClear();
     mocks.invoke.mockReset();
     Reflect.deleteProperty(globalThis, "window");
   });
 
-  it("closes the current Tauri window so an external Git tool can continue", async () => {
+  it("terminates the desktop process so Git can continue on macOS too", async () => {
     Object.defineProperty(globalThis, "window", {
       configurable: true,
       value: { __TAURI_INTERNALS__: {} },
     });
+    mocks.invoke.mockResolvedValue(undefined);
 
-    await closeCurrentWindow();
+    await exitExternalGitTool();
 
-    expect(mocks.close).toHaveBeenCalledOnce();
+    expect(mocks.invoke).toHaveBeenCalledWith("exit_external_git_tool");
   });
 
-  it("does not pretend to close a window outside the desktop runtime", async () => {
-    await expect(closeCurrentWindow()).rejects.toThrow("Tauri desktop runtime");
-    expect(mocks.close).not.toHaveBeenCalled();
+  it("does not pretend to terminate outside the desktop runtime", async () => {
+    await expect(exitExternalGitTool()).rejects.toThrow("Tauri desktop runtime");
+    expect(mocks.invoke).not.toHaveBeenCalled();
   });
 });
 
