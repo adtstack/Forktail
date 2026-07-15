@@ -1,9 +1,9 @@
 # 20. Git Test Plan
 
-Status: **Post-Phase 1 candidate**
+Status: **Active — source implementation complete, packaged OS evidence pending**
 Scope: Git snapshot compare, working tree compare, conflict opening, difftool/mergetool integration
 
-이 문서는 Git 기능을 구현하기로 결정한 뒤 적용할 전용 테스트 계획이다. 현재 Phase 1의 출시 범위를 넓히거나 `docs/07_TEST_PLAN.md`의 공통 품질 gate를 대체하지 않는다. Git 기능이 시작되더라도 로컬 텍스트 비교, 결정론적 병합, 안전 저장이 먼저 안정되어 있어야 한다.
+이 문서는 구현된 repository-aware Git 기능에 적용하는 전용 테스트 계획이다. `docs/07_TEST_PLAN.md`의 공통 품질 gate를 대체하지 않으며 source 자동 검증과 OS별 packaged 수동 증적을 명확히 분리한다.
 
 관련 문서:
 
@@ -14,6 +14,19 @@ Scope: Git snapshot compare, working tree compare, conflict opening, difftool/me
 - `docs/17_GIT_INTEGRATION.md` — Git 기능 제품·기술 명세
 - `docs/18_GIT_BACKLOG.md` — Git 이슈와 의존 관계
 - `docs/21_GIT_REFERENCES.md` — Git command와 환경 변수 공식 근거
+
+## 0. 현재 적용 상태
+
+2026-07-15 기준 source 구현에는 다음 상시 gate가 적용된다.
+
+- Rust pure byte/parser, exact-argv fake runner, timeout/cancel/cap, `tempfile` 실제 repository 불변식 테스트
+- TypeScript DTO/bridge/session reducer와 React revision/conflict/review/history UI contract 테스트
+- `src/core/networkPolicy.test.ts`의 network/mutation command, safe global argument, cleared Git environment allowlist 회귀 검사
+- `src/core/privacyLoggingPolicy.test.ts`의 영속 저장 writer allowlist와 Git history content/body 비영속화 검사
+- `src/core/securityConfig.test.ts`의 release CSP, 최소 capability/plugin, generic shell/Git command 부재 검사
+- `npm run test:git-tools`의 격리 external-tool fixture/verifier 16개
+
+macOS Git 2.50.1에서 temp repository integration과 새 release `.app` build/launch는 실행됐다. 접근성·화면 캡처 제어를 사용할 수 없어 repository-aware revision compare/conflict save의 packaged UI 조작은 `manual-not-run`이다. Windows/Linux packaged smoke도 사용자가 실행할 후속 항목이며, 어느 항목도 통과로 간주하지 않는다. artifact identity와 최신 명령 결과는 `VALIDATION.md`에 기록한다.
 
 ## 1. 테스트 목표
 

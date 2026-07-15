@@ -468,7 +468,8 @@ fn sanitize_subject(subject: &str) -> String {
 mod tests {
     use super::{
         GitHistoryError, MAX_HISTORY_LIMIT, MAX_HISTORY_SUBJECT_CHARS, list_file_history,
-        list_recent_commits, parse_file_history_records, parse_recent_commit_records,
+        list_recent_commits, materialize_file_history, parse_file_history_records,
+        parse_recent_commit_records,
     };
     use crate::domain::git::{
         GitFileHistoryBoundary, GitObjectAlgorithm, GitObjectId, GitPathPlatform,
@@ -481,6 +482,7 @@ mod tests {
     use std::path::PathBuf;
     use std::process::{Command, Output, Stdio};
     use std::sync::MutexGuard;
+    use std::time::{Duration, Instant};
     use tempfile::{TempDir, tempdir};
 
     const FIRST_ID: &str = "1111111111111111111111111111111111111111";
@@ -750,6 +752,52 @@ mod tests {
                     | GitHistoryError::TruncatedOutput)
             ));
         }
+    }
+
+    #[test]
+    fn rename_heavy_maximum_file_history_stays_inside_the_performance_baseline() {
+        let _fixture_guard = git_fixture_guard();
+        let fixture = HistoryFixture::new();
+        let session = fixture.session("file-history-performance-session");
+        let mut output = Vec::new();
+        for index in 0..=MAX_HISTORY_LIMIT {
+            let object_id = format!("{:040x}", index + 1);
+            let new_path = format!("src/renamed-{}.txt", MAX_HISTORY_LIMIT + 1 - index);
+            let old_path = format!("src/renamed-{}.txt", MAX_HISTORY_LIMIT - index);
+            output.extend(file_history_record(
+                &object_id,
+                "1700000000",
+                b"rename",
+                Some(b"R100"),
+                &[old_path.as_bytes(), new_path.as_bytes()],
+            ));
+        }
+
+        let started = Instant::now();
+        let parsed = parse_file_history_records(
+            &output,
+            GitObjectAlgorithm::Sha1,
+            b"src/renamed-501.txt",
+            MAX_HISTORY_LIMIT,
+            false,
+        )
+        .expect("bounded rename-heavy history");
+        let materialized =
+            materialize_file_history(&session, 0, parsed).expect("bounded history path identities");
+        let elapsed = started.elapsed();
+
+        assert!(materialized.truncated);
+        assert_eq!(materialized.entries.len(), MAX_HISTORY_LIMIT);
+        assert!(
+            materialized
+                .entries
+                .iter()
+                .all(|entry| entry.boundary == GitFileHistoryBoundary::RenameBoundary)
+        );
+        assert!(
+            elapsed < Duration::from_millis(250),
+            "maximum rename-heavy history parse/materialization exceeded the 250 ms baseline: {elapsed:?}"
+        );
     }
 
     #[test]

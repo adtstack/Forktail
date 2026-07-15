@@ -9,6 +9,8 @@ const gitRunnerSource = readFileSync(
   new URL("../../src-tauri/src/git/runner.rs", import.meta.url),
   "utf8",
 );
+const gitRunnerTestModuleStart = gitRunnerSource.lastIndexOf("#[cfg(test)]\nmod tests");
+const productionGitRunnerSource = gitRunnerSource.slice(0, gitRunnerTestModuleStart);
 
 interface PackageManifest {
   dependencies?: Record<string, string>;
@@ -94,6 +96,63 @@ describe("network and AI policy", () => {
     const blobQuerySource = gitRunnerSource.slice(blobQueryStart, blobQueryEnd);
     expect(blobQuerySource).toContain('Self::Content => "blob"');
     expect(blobQuerySource).not.toMatch(/--filters|--textconv|smudge|git-lfs|\blfs\b/i);
+  });
+
+  it("pins Git to local-only arguments and a cleared environment allowlist", () => {
+    for (const argument of [
+      "--no-pager",
+      "--no-optional-locks",
+      "--no-lazy-fetch",
+      "--no-replace-objects",
+      "--literal-pathspecs",
+    ]) {
+      expect(productionGitRunnerSource).toContain(`"${argument}"`);
+    }
+    expect(productionGitRunnerSource).toContain(".env_clear()");
+
+    const environmentBlock = productionGitRunnerSource.match(
+      /const SAFE_GIT_ENVIRONMENT:[\s\S]*?= \[([\s\S]*?)\];/,
+    )?.[1];
+    expect(environmentBlock).toBeDefined();
+    const environment = Array.from(
+      environmentBlock?.matchAll(/\("([^"]+)", "([^"]+)"\)/g) ?? [],
+      (match) => [match[1], match[2]],
+    );
+    expect(environment).toEqual([
+      ["GIT_TERMINAL_PROMPT", "0"],
+      ["GIT_OPTIONAL_LOCKS", "0"],
+      ["GIT_NO_LAZY_FETCH", "1"],
+      ["GIT_LITERAL_PATHSPECS", "1"],
+      ["GIT_PAGER", "cat"],
+    ]);
+  });
+
+  it("does not construct network or repository-mutating Git commands", () => {
+    const forbiddenCommands = [
+      "add",
+      "apply",
+      "checkout",
+      "clean",
+      "clone",
+      "commit",
+      "fetch",
+      "gc",
+      "merge",
+      "pull",
+      "push",
+      "rebase",
+      "reset",
+      "restore",
+      "rm",
+      "stash",
+      "switch",
+      "update-index",
+      "worktree",
+    ];
+
+    for (const command of forbiddenCommands) {
+      expect(productionGitRunnerSource).not.toContain(`OsString::from("${command}")`);
+    }
   });
 });
 

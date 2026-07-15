@@ -1,4 +1,9 @@
+/// <reference types="node" />
+
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import packageJson from "../../package.json";
+import defaultCapability from "../../src-tauri/capabilities/default.json";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 
 interface TauriSecurityConfig {
@@ -11,6 +16,15 @@ interface TauriSecurityConfig {
 }
 
 const config = tauriConfig as TauriSecurityConfig;
+const rustEntrySource = readFileSync(new URL("../../src-tauri/src/lib.rs", import.meta.url), "utf8");
+const completeGitRunnerSource = readFileSync(
+  new URL("../../src-tauri/src/git/runner.rs", import.meta.url),
+  "utf8",
+);
+const gitRunnerSource = completeGitRunnerSource.slice(
+  0,
+  completeGitRunnerSource.lastIndexOf("#[cfg(test)]\nmod tests"),
+);
 
 describe("Tauri security config", () => {
   it("pins a release CSP instead of disabling it", () => {
@@ -35,5 +49,33 @@ describe("Tauri security config", () => {
     expect(devCsp).toContain("http://localhost:1420");
     expect(devCsp).toContain("ws://localhost:1420");
     expect(csp).not.toContain("ws://localhost:1420");
+  });
+
+  it("keeps desktop permissions and plugins on the reviewed minimum", () => {
+    expect(defaultCapability.windows).toEqual(["main"]);
+    expect(defaultCapability.permissions).toEqual([
+      "core:default",
+      "dialog:allow-open",
+      "dialog:allow-save",
+    ]);
+
+    const dependencies = Object.keys(packageJson.dependencies);
+    for (const plugin of [
+      "@tauri-apps/plugin-fs",
+      "@tauri-apps/plugin-http",
+      "@tauri-apps/plugin-opener",
+      "@tauri-apps/plugin-process",
+      "@tauri-apps/plugin-shell",
+      "@tauri-apps/plugin-updater",
+    ]) {
+      expect(dependencies).not.toContain(plugin);
+    }
+  });
+
+  it("exposes typed Git commands without a generic shell or Git escape hatch", () => {
+    expect(rustEntrySource).not.toMatch(/run_(?:shell|git)_command|execute_(?:shell|git)/);
+    expect(gitRunnerSource).toContain("Command::new(&plan.executable)");
+    expect(gitRunnerSource).not.toMatch(/Command::new\(["'](?:sh|bash|zsh|cmd|powershell)/);
+    expect(gitRunnerSource).not.toMatch(/\.arg\(["'](?:-c|\/C)["']\)/);
   });
 });

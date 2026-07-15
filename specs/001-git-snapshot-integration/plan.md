@@ -1,15 +1,16 @@
 # Implementation Plan: Local Git Snapshot Review
 
-**Branch**: `001-git-snapshot-integration` (spec identity; branch not created) | **Date**: 2026-07-15 | **Spec**: [spec.md](./spec.md)
+**Branch**: `codex/GIT-000-git-runner-adr` | **Date**: 2026-07-15 | **Spec**: [spec.md](./spec.md) | **Status**: source implemented, packaged OS evidence pending
 
 **Input**: Feature specification from `specs/001-git-snapshot-integration/spec.md`
 
 ## Summary
 
 기존 file/folder/merge 화면을 바꾸는 대신, local Git executable이 제공하는 immutable snapshot과
-index metadata를 좁은 Rust service로 읽어 typed session으로 변환한다. 첫 deliverable은 두 revision의
-changed-file 목록과 read-only text compare다. working tree/index 비교, conflict Result 저장,
-merge-base preview, review productivity 기능은 각각 독립 `GIT-*` 이슈로 뒤따른다.
+index metadata를 좁은 Rust service로 읽어 typed session으로 변환했다. revision compare,
+working tree/index 비교, conflict Result 저장, merge-base preview, review productivity, bounded file
+history를 각각 독립 `GIT-*` 이슈로 구현했다. Windows/Linux와 남은 macOS packaged 수동 증적은
+source 완료와 분리해 `VALIDATION.md`에서 추적한다.
 
 이 plan은 umbrella delivery plan이다. 한 PR로 구현하지 않으며 `tasks.md`의 각 `GIT-*` 단위를
 하나의 이슈·하나의 PR로 실행한다.
@@ -126,7 +127,7 @@ runner와 fixture mutation helper를 타입·모듈 수준에서 분리한다. U
 
 | Phase | Backlog scope | Exit evidence |
 |---|---|---|
-| 0. Gate | `MRG-014`, `INT-002`, `GIT-000` | packaged lifecycle, approved CLI-first ADR |
+| 0. Gate | `MRG-014`, `INT-002`, `GIT-000` | source safety/CLI-first ADR 완료; packaged lifecycle은 release evidence로 계속 추적 |
 | 1. Foundation | `GIT-001`~`005` | allowlist/env/cap/cancel, stable DTO/error, byte/NUL parser |
 | 2. Revision MVP | `GIT-101`~`103`, `201`~`203`, `301`~`302`, `601`~`603` | branch/commit read-only compare and mutation fingerprint |
 | 3. Working/index | `GIT-401`~`403`, `GIT-605` | HEAD/index/working-tree pair compare without index change |
@@ -135,8 +136,9 @@ runner와 fixture mutation helper를 타입·모듈 수준에서 분리한다. U
 | 6. Review productivity | `GIT-606`, `GIT-607`~`609` | large-list review state, patch export, bounded file history |
 | 7. Release evidence | `GIT-801` | docs, privacy/no-network proof, three-OS smoke record |
 
-`GIT-403`, `GIT-607`, `GIT-608`, `GIT-609` are additions proposed by this specification and must remain
-candidate backlog items until the preceding gate is satisfied.
+`GIT-403`, `GIT-607`, `GIT-608`, `GIT-609`는 이 specification에서 추가돼 source 구현과 자동
+검증을 완료했다. 승격 뒤에도 T009/SC-007 packaged release evidence는 별도 미완료 상태를 유지하며,
+Windows/Linux `manual-not-run`은 사용자가 직접 확인할 항목이다.
 
 ## Complexity Tracking
 

@@ -16,6 +16,12 @@ const runtimeSourceRoots = [
   new URL("../../src-tauri/src/", import.meta.url),
 ];
 const runtimeExtensions = new Set([".ts", ".tsx", ".rs"]);
+const settingsSource = readFileSync(new URL("./settings.ts", import.meta.url), "utf8");
+const mergeRecoverySource = readFileSync(
+  new URL("./mergeRecovery.ts", import.meta.url),
+  "utf8",
+);
+const gitModelsSource = readFileSync(new URL("./gitModels.ts", import.meta.url), "utf8");
 const forbiddenRuntimeLogPatterns = [
   { label: "browser console logging", pattern: /\bconsole\.(debug|info|log|warn|error)\s*\(/ },
   { label: "Rust stdout logging", pattern: /\bprintln!\s*\(/ },
@@ -67,6 +73,31 @@ describe("privacy logging policy", () => {
 
     expect(forbiddenNpm).toEqual([]);
     expect(forbiddenCargo).toEqual([]);
+  });
+
+  it("keeps persistent content writes inside the reviewed settings and recovery modules", () => {
+    const storageWriters = runtimeSourceFiles()
+      .filter((file) => readFileSync(file, "utf8").includes(".setItem("))
+      .map(relativePolicyPath);
+
+    expect(storageWriters).toEqual([
+      "src/core/mergeRecovery.ts",
+      "src/core/settings.ts",
+    ]);
+    expect(settingsSource).toContain('if (session.origin !== "files") return null;');
+    expect(mergeRecoverySource).toContain('if (session.origin !== "files") return false;');
+    expect(mergeRecoverySource).toContain('if (session.origin !== "files") return null;');
+  });
+
+  it("keeps bounded Git history metadata free of file content and commit bodies", () => {
+    const historyModels = gitModelsSource.slice(
+      gitModelsSource.indexOf("export interface GitRecentCommitEntry"),
+      gitModelsSource.indexOf("export type GitTreeEntryKind"),
+    );
+
+    expect(historyModels).not.toMatch(/\b(text|content|body|diff|patch)\s*:/);
+    expect(historyModels).toContain("subject: string;");
+    expect(historyModels).toContain("opaquePathId: string;");
   });
 });
 

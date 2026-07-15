@@ -31,6 +31,7 @@ Beyond Compare에서 자주 쓰는 핵심 흐름을 무료·로컬 우선 데스
 - CLI 시작 인자 parser와 Tauri startup command scaffold: `forktail left right`, `--folders`, `--merge`, `--difftool`, `--mergetool`
 - Git difftool 입력의 read-only 비교와 mergetool `$MERGED`-only safe-save adapter
 - 시작 화면의 copy-only Git difftool/mergetool config generator
+- 로컬 Git repository의 revision/working tree/index 비교, conflict Result 저장, merge-base preview, review queue, patch export, bounded file history
 - 최근 세션, 마지막 화면 자동 복원, 테마 설정, 경로 복사 fallback, native reveal scaffold, 외부 변경 감지 배너
 - 3-way 병합 결과 draft opt-in 복구
 - 공통 command registry 기반 키보드 단축키, 접근성 shortcut 속성, native menu scaffold
@@ -56,6 +57,7 @@ Beyond Compare에서 자주 쓰는 핵심 흐름을 무료·로컬 우선 데스
 - 실제 OS native menu smoke: Rust menu scaffold와 프런트엔드 event bridge는 있음
 - 실제 OS 파일 관리자 reveal smoke: Rust command와 UI 버튼은 있음
 - 실제 packaged binary CLI open smoke: startup command와 parser 테스트는 있음
+- repository-aware Git 화면의 Windows/Linux packaged smoke와 macOS 수동 UI smoke
 - 실제 bundle icon/metadata smoke
 - OS별 설치 프로그램 검증·코드 서명
 - 접근성·키보드 단축키 최종 수동 smoke
@@ -95,6 +97,18 @@ npm run dev
 ```
 
 브라우저에서는 로컬 파일 접근 대신 시작 화면의 데모 버튼을 사용합니다.
+
+### 로컬 Git repository 검토
+
+시작 화면의 **Open Git Repository**는 Git 2.45.0 이상이 설치된 로컬 working-tree repository를 엽니다. local branch, 로컬에 이미 존재하는 remote-tracking branch, tag, commit/`HEAD~n` 사이의 changed-file 목록과 immutable blob을 checkout 없이 비교할 수 있습니다. working tree와 index의 `HEAD ↔ index`, `index ↔ working tree`, `HEAD ↔ working tree` 비교, unmerged stage 1/2/3 conflict, read-only merge-base preview, viewed/unviewed review queue, 명시적 output 경로로의 plain unified patch export, 선택 path의 최대 500개 bounded history도 같은 화면에서 제공합니다.
+
+이 기능은 로컬 조회 전용입니다. Forktail은 `fetch`, `pull`, `push`, `clone`, checkout/switch, stage/add, commit, merge/rebase/continue를 실행하지 않으며 credential prompt나 lazy object download를 허용하지 않습니다. remote-tracking branch는 현재 로컬 ref일 뿐 원격의 최신 상태를 뜻하지 않습니다. partial/shallow repository에 로컬 object가 없으면 자동 다운로드하지 않고 unavailable/boundary 상태로 표시합니다.
+
+binary, symlink, submodule/gitlink는 일반 텍스트 파일로 열지 않습니다. Git LFS pointer는 pointer metadata로만 표시하며 LFS object를 받거나 smudge/textconv/filter helper를 실행하지 않습니다. non-UTF-8 path는 backend의 byte identity로 보존하고, 지원 플랫폼에서 안전하게 왕복할 수 없으면 명시적으로 거절합니다.
+
+Repository conflict에서 저장하는 대상은 현재 working-tree Result 파일 하나뿐이며 기존 임시 파일·sync·backup·atomic replace·외부 변경 방지 흐름을 사용합니다. 저장 뒤에도 Forktail은 index를 stage하거나 Git 작업을 계속하지 않습니다. 사용자가 terminal에서 결과를 검토하고 `git add`와 해당 merge/rebase 후속 명령을 직접 실행해야 합니다. merge-base preview와 commit snapshot은 편집·저장할 수 없습니다.
+
+자동 parser/runner/temp-repository 검증은 macOS에서 실행됐습니다. 현재 packaged repository-aware UI의 macOS 수동 조작과 Windows/Linux 전체 smoke는 `VALIDATION.md`에 `manual-not-run`으로 남아 있으며 통과로 간주하지 않습니다.
 
 ### Git external tool 수동 설정
 
@@ -192,7 +206,7 @@ npm run doctor
 16. `docs/14_PRODUCT_GAP_ROADMAP.md` — 실사용 제품 갭과 추가 기능 후보
 17. `docs/15_COMMERCIAL_COMPETITIVE_ROADMAP.md` — 상용 도구 대비 우선순위와 장기 제품 전략
 18. `docs/16_R2_UPDATER_RUNBOOK.md` — Phase 1 이후 opt-in updater 실행 계약
-19. `docs/17_GIT_INTEGRATION.md` — Phase 1 이후 read-only Git integration 제안
+19. `docs/17_GIT_INTEGRATION.md` — 구현된 read-only Git integration 계약과 출시 증적 상태
 20. `docs/18_GIT_BACKLOG.md` — Git 후보 이슈와 의존 순서
 21. `docs/19_GIT_PROMPT_PACK.md` — Git 이슈별 AI 구현 프롬프트
 22. `docs/20_GIT_TEST_PLAN.md` — Git parser·service·실제 repository 검증 계획

@@ -449,6 +449,32 @@ cargo test
 - 테스트 선행 증거: 구현 전 `cargo test changed_files`는 parser/error/status/runner operation 미정의 compile error로 실패했고 `npm run typecheck`는 `GitChangedFileList` 미정의 TS2305로 실패했다. pure byte fixture는 space/tab/newline/Unicode/non-UTF-8, A/D/M/T/R/C/U/X/unknown, R000/R100/C score, rewrite M score, truncation/missing/duplicate/invalid path를 검증했다. temp repository는 added/deleted/modified/R100 rename과 Git-index metadata로 만든 regular→symlink type change를 한 목록에서 확인했고 same-commit empty, missing ID, pre-cancel도 검증했다. 조회 전후 HEAD, branch ref, index, config와 tracked working-file bytes fingerprint가 동일했다.
 - 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/364 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 142 tests 통과/0 ignored. 실제 temp repository integration은 macOS Git 2.50.1에서 수행했으며 Windows/Linux 실행은 사용자 확인 항목으로 남긴다.
 
+### GIT-801 security, documentation, and release evidence — 2026-07-15
+
+- 변경 파일: `src/core/networkPolicy.test.ts`, `src/core/privacyLoggingPolicy.test.ts`, `src/core/securityConfig.test.ts`, `README.md`, `docs/17_GIT_INTEGRATION.md`, `docs/20_GIT_TEST_PLAN.md`, `specs/001-git-snapshot-integration/tasks.md`, `VALIDATION.md`.
+- 수용 기준: production Git runner의 local-only global option, cleared environment와 정확한 `GIT_*` allowlist, network/repository mutation command 부재를 회귀 테스트로 고정한다. persistent storage writer를 검토된 settings/recovery 모듈로 제한하고 Git history DTO가 file content/commit body를 보관하지 않게 한다. Tauri release CSP, main-window 최소 permission/plugin, generic shell/Git IPC 부재를 고정한다. 사용자 문서는 구현된 repository/revision/working tree/index/conflict/merge-base/review/patch/history 범위와 no-network/no-mutation, LFS/submodule/binary 정책, conflict 저장 뒤 사용자의 `git add`/후속 작업 책임을 설명한다.
+- 실패/경계 조건: `fetch`/`pull`/`push`/`clone` 또는 checkout/add/commit/merge 계열 command 구성, 위험한 inherited Git environment, broad Tauri fs/http/shell/process plugin, 새 persistent content writer, Git history text/body field가 생기면 frontend policy test가 실패한다. release evidence는 source/temp-repository 자동화, packaged build/launch, 실제 UI 수동 조작을 별도 상태로 기록하며 `manual-not-run`을 pass로 바꾸지 않는다.
+- 테스트: 지정된 security policy 3파일의 targeted Vitest 14개가 통과했다. 전체 frontend Vitest는 64 files/472 tests, Git-tool harness는 1 file/16 tests, Rust는 convergence baseline 추가 후 226 tests/0 ignored가 통과했다. temp repository tests는 revision/tree/blob/status/index/conflict/merge-base/history 조회와 conflict Result safe-save 전후 HEAD/refs/index/working files 불변식을 macOS Git 2.50.1에서 검증한다.
+- 전체 검증: `npm run typecheck` 통과, `npm test` 통과(64 files/472 tests), `npm run build` 통과, `npm run test:git-tools` 통과(1 file/16 tests), `cd src-tauri && cargo fmt --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 최종 재실행 통과(226 tests, 0 failed, 0 ignored), `npm run tauri -- build --bundles app` 통과. production build의 기존 Monaco large-chunk warning은 실패가 아니다. 격리 T009 fixture는 검증 뒤 `npm run smoke:git-tools:cleanup`으로 제거했다.
+
+#### GIT-801 packaged repository-aware smoke status
+
+아래 `manual-not-run`은 미실행이며 통과를 뜻하지 않는다. 기존 external-tool 상세 증적은 위 `T009 INT-002/MRG-014 Git external tool 검증` 절을 참조한다.
+
+| OS | Artifact / Git | Build·launch | Revision compare | Conflict save | Evidence |
+|---|---|---|---|---|---|
+| Windows | installed `.exe` / pending | manual-not-run | manual-not-run | manual-not-run | 실행 환경 없음; 사용자 직접 확인 예정 |
+| macOS | release `.app` 0.2.2 arm64, executable SHA-256 `4cd11c76f3205e10aa5009329669df5c63493a8a02f9796a0cfc77dbbe27a32e`; Git 2.50.1 (Apple Git-155) | pass | manual-not-run | manual-not-run | 2026-07-15 fresh source로 `.app` build와 launch 요청 성공. `orca` CLI가 없고 macOS 접근성/화면 캡처 질의가 응답 없이 대기해 repository 선택 이후 UI 조작은 증적화하지 못함 |
+| Linux | AppImage/지원 binary / pending | manual-not-run | manual-not-run | manual-not-run | 실행 환경 없음; 사용자 직접 확인 예정 |
+
+macOS packaged UI 미실행은 React contract test나 Rust temp-repository test로 대체하지 않는다. Windows/Linux는 사용자가 직접 실행하겠다는 명시적 환경 예외에 따라 구현 완료를 막지 않지만, release matrix에는 계속 `manual-not-run`으로 남긴다. 기존 T009도 macOS difftool native report Save dialog와 Windows/Linux lifecycle가 남아 있으므로 해당 checkbox를 완료로 바꾸지 않는다.
+
+#### GIT-801 convergence baseline and artifact alignment
+
+- SC-010 file-history baseline: `MAX_HISTORY_LIMIT + 1`인 501개 unique commit record를 모두 `R100` rename chain으로 생성하고, 최대 500개 응답의 byte parser와 session path identity materialization을 함께 측정한다. 결과는 정확히 500개, 모두 `renameBoundary`, `truncated=true`여야 하며 debug test profile에서 250ms 미만이어야 한다.
+- targeted 검증: `cargo test rename_heavy_maximum_file_history_stays_inside_the_performance_baseline` 통과(1 passed, 225 filtered out). fixture repository 준비 시간은 측정 구간에서 제외하고 parser/materialization만 baseline에 포함한다.
+- artifact 정렬: `spec.md`와 `plan.md`를 실제 branch/source 구현 완료 상태로 갱신하고, T001~T008 source safety gate와 T009/SC-007 packaged release evidence gate를 분리했다. T071은 실제 smoke pass가 아니라 OS별 `pass`/`manual-not-run` 상태를 정확히 기록하는 task임을 명시했다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.

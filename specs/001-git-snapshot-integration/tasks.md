@@ -29,7 +29,7 @@
 - [X] T008 INT-002 difftool/mergetool config 출력, `trustExitCode=false`, `hideResolved=false`, 자동 config/default tool 수정 금지 안내를 `docs/14_PRODUCT_GAP_ROADMAP.md`, `README.md`, `VALIDATION.md`에 확정한다
 - [ ] T009 INT-002/MRG-014 `scripts/git-tool-smoke.mjs`, `scripts/git-tool-smoke.integration.test.mjs`, `package.json`, `.github/workflows/ci.yml`의 격리 fixture/verifier/checklist를 사용해 Windows/macOS/Linux packaged difftool wait/temp/modified/added/deleted/read-only/launch-failure/crash와 mergetool save/no-save/unresolved/external-change-race/missing-Base/empty-Base/temp/wait, Windows UNC/file-lock, macOS NFC/NFD, Linux executable/runtime 증거를 `VALIDATION.md`와 `docs/20_GIT_TEST_PLAN.md`에 기록한다
 
-**Checkpoint**: 시작 gate가 통과되지 않으면 Phase 2 이후 이슈를 승격하지 않는다.
+**Checkpoint**: T001~T008 source safety gate가 통과되지 않으면 Phase 2 이후 이슈를 승격하지 않는다. T009 packaged lifecycle은 release evidence gate로 별도 추적하며 미실행 항목을 pass로 간주하지 않는다.
 
 ---
 
@@ -204,10 +204,10 @@
 
 **Purpose**: cross-cutting privacy, packaged lifecycle, documentation, final gates
 
-- [ ] T070 [P] GIT-801 user-facing Git scope/no-network/no-mutation/LFS/submodule/conflict-next-step 문서를 `README.md`, `docs/17_GIT_INTEGRATION.md`, `docs/20_GIT_TEST_PLAN.md`에 동기화한다
-- [ ] T071 GIT-801 Windows/macOS/Linux packaged repository-aware revision compare/conflict-save smoke와 T009 external-tool evidence 참조를 `VALIDATION.md`에 기록한다
-- [ ] T072 [P] GIT-801 forbidden command/environment/content persistence 회귀 gate를 `src/core/networkPolicy.test.ts`, `src/core/privacyLoggingPolicy.test.ts`, `src/core/securityConfig.test.ts`에 추가한다
-- [ ] T073 GIT-801 전체 frontend/Rust 검증과 미실행 OS 항목을 `VALIDATION.md`에 실제 결과로 기록한다
+- [X] T070 [P] GIT-801 user-facing Git scope/no-network/no-mutation/LFS/submodule/conflict-next-step 문서를 `README.md`, `docs/17_GIT_INTEGRATION.md`, `docs/20_GIT_TEST_PLAN.md`에 동기화한다
+- [X] T071 GIT-801 Windows/macOS/Linux packaged repository-aware revision compare/conflict-save의 OS별 `pass`/`manual-not-run` 상태와 T009 external-tool evidence 참조를 `VALIDATION.md`에 기록한다
+- [X] T072 [P] GIT-801 forbidden command/environment/content persistence 회귀 gate를 `src/core/networkPolicy.test.ts`, `src/core/privacyLoggingPolicy.test.ts`, `src/core/securityConfig.test.ts`에 추가한다
+- [X] T073 GIT-801 전체 frontend/Rust 검증과 미실행 OS 항목을 `VALIDATION.md`에 실제 결과로 기록한다
 
 ---
 
@@ -215,7 +215,7 @@
 
 ### Phase Dependencies
 
-- **Phase 1 Gate**: 시작점. `T001`~`T009`가 승인/검증되기 전 candidate implementation을 승격하지 않는다. T002→T003, T004→T005, T006→T007→T008 순서를 지키고 T009는 T005와 T008 뒤에 실행한다.
+- **Phase 1 Source Gate**: 시작점. `T001`~`T008`이 승인/검증되기 전 candidate source implementation을 승격하지 않는다. T002→T003, T004→T005, T006→T007→T008 순서를 지킨다. T009는 T005와 T008 뒤의 packaged release evidence gate이며 별도 완료 상태를 유지한다.
 - **Phase 2 Foundation**: Phase 1에 의존하며 모든 user story를 block한다.
 - **US1 / Phase 3**: Foundation 뒤 시작하며 제품 MVP다.
 - **US2 / Phase 4**: US1 snapshot/session primitives에 의존한다.
@@ -285,3 +285,10 @@ test가 실패하는 것을 확인한 뒤에만 시작한다.
 - 실제 user repository나 global Git config를 test fixture로 사용하지 않는다.
 - Git이 없거나 capability가 부족한 환경에서도 parser/fake runner tests는 skip하지 않는다.
 - 실행하지 않은 packaged/manual 검증은 통과로 기록하지 않는다.
+
+---
+
+## Phase 10: Convergence
+
+- [X] T074 GIT-801 rename-heavy bounded file-history parser/service 성능 baseline과 실행 증적을 `src-tauri/src/git/history.rs`, `VALIDATION.md`에 추가한다 per SC-010 (partial)
+- [X] T075 GIT-801 source 구현 완료와 packaged release evidence gate를 분리하고 실제 branch/status 및 T071의 status-record 의미를 `specs/001-git-snapshot-integration/spec.md`, `specs/001-git-snapshot-integration/plan.md`, `specs/001-git-snapshot-integration/tasks.md`에 정렬한다 per plan: Gate/status metadata (contradicts)

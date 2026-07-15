@@ -1,6 +1,6 @@
 # 17. Git Integration Roadmap
 
-> **상태:** Proposed — Phase 1 이후 후보
+> **상태:** Source implemented — 세 OS packaged repository-aware UI 증적은 진행 중
 >
 > **대상:** Windows, macOS, Linux의 Tauri 2 + React/TypeScript + Rust 앱
 >
@@ -8,7 +8,7 @@
 
 ## 1. 문서 역할과 우선순위
 
-이 문서는 branch, tag, commit, working tree, index stage를 기존 2-way/3-way 화면에 연결하는 후속 제품·기술 명세다. 현재 Phase 1 범위를 넓히거나 `docs/04_BACKLOG.md`에 있는 확정 이슈를 자동으로 승격하지 않는다.
+이 문서는 branch, tag, commit, working tree, index stage를 기존 2-way/3-way 화면에 연결한 repository-aware Git 기능의 제품·기술 계약이다. 실행 범위와 완료 추적은 `specs/001-git-snapshot-integration/`, 실제 검증 결과는 `VALIDATION.md`가 담당한다. 세 OS packaged smoke가 남아 있다는 사실과 source 구현 완료를 같은 의미로 취급하지 않는다.
 
 문서 간 역할은 다음과 같다.
 
@@ -18,7 +18,7 @@
 | `docs/02_ARCHITECTURE.md` | 현재 앱과 외부 mergetool의 최소 계약 |
 | `docs/04_BACKLOG.md` | 확정된 Phase 1 이슈 |
 | `docs/14_PRODUCT_GAP_ROADMAP.md` | 후속 기능 후보와 우선순위 |
-| `docs/17_GIT_INTEGRATION.md` | repository-aware Git 기능의 제안 명세 |
+| `docs/17_GIT_INTEGRATION.md` | repository-aware Git 기능의 구현 계약과 범위 |
 | `docs/18_GIT_BACKLOG.md` | Git 후보를 구현 가능한 작업으로 나눈 목록 |
 | `docs/20_GIT_TEST_PLAN.md` | Git 전용 검증 계약 |
 | `specs/001-git-snapshot-integration/` | Spec Kit 기반 사용자 시나리오, 구현 계획, 계약, 작업 추적 |
@@ -38,25 +38,26 @@ index stage 1/2/3 → conflict result
 
 Forktail은 새 Git 클라이언트를 만드는 대신, Git이 이미 보관한 immutable snapshot을 읽어 기존 비교·병합 화면에 연결한다. 핵심 가치는 history 탐색의 폭이 아니라 **working tree를 건드리지 않는 빠른 검토**다.
 
-## 3. 시작 게이트
+## 3. 구현·출시 게이트 상태
 
-repository-aware Git 작업은 다음 조건을 만족한 뒤 시작한다.
+repository-aware Git source 구현은 `GIT-000`의 fail-closed 결정을 기준으로 진행됐다. 다음 기반 계약은 구현·자동 검증됐다.
 
-- `RTM-001`, `RTM-002`: 실제 Tauri runtime과 packaged WebView smoke가 안정됨
-- `SAV-007`, `SAV-008`: Windows atomic replace와 외부 변경 precondition이 검증됨
-- `MRG-012`: 기본 Git marker와 base 없는 marker를 안전하게 파싱함
-- `MRG-014`/`INT-002`: 세 OS packaged `git difftool`/`git mergetool` lifecycle smoke가 끝남
-- `INT-002`: 자동 `.gitconfig` 수정이나 default tool 변경 없이 안전한 설정 안내가 확정됨
-- `GIT-000`: Git CLI 2.45.0+와 fail-closed capability gate, positive allowlist,
-  no-network/no-mutation runner 결정을 `ADR-010`으로 승인함
+- `SAV-007`, `SAV-008`: atomic replace와 외부 변경 precondition을 conflict Result 저장에도 재사용한다.
+- `MRG-012`: 기본 Git marker와 base 없는 marker를 안전하게 파싱한다.
+- `INT-002`: `.gitconfig` 자동 수정이나 default tool 변경 없이 copy-only 설정을 제공한다.
+- `GIT-000`: Git CLI 2.45.0+, positive allowlist, no-network/no-mutation runner 결정을 `ADR-010`으로 고정한다.
+- `GIT-001`~`GIT-609`: repository/revision/tree/blob/status/index/conflict/merge-base/review/patch/history service와 UI를 구현하고 parser, fake runner, temp repository, React contract test를 둔다.
 
-현재 코드는 `--difftool` read-only adapter와 `--mergetool` `$MERGED`-only adapter의 source/unit 계약까지 구현했다. 다음 source 계약은 고정됐지만, 세 OS packaged lifecycle evidence가 끝나기 전에는 완성된 Git integration으로 표시하지 않는다.
+출시 증적은 별도다. macOS `.app` build/launch와 기존 external-tool 일부 lifecycle은 확인됐지만 repository-aware revision compare/conflict save의 macOS 수동 UI, Windows/Linux packaged 전체 lifecycle은 아직 `manual-not-run`이다. 이 항목을 통과로 간주하거나 세 OS 완료로 표시하지 않는다.
 
-- session origin을 일반 merge와 구분한다.
-- Git이 만든 `$MERGED`를 초기 Result로 읽고 fingerprint를 보관한다.
-- Git 임시 파일을 recent session, active-session restore, recovery draft에 저장하지 않는다.
-- 미해결 conflict를 성공 저장으로 오인하지 않도록 mergetool 전용 저장·종료 흐름을 둔다.
-- Git의 `.orig`와 Forktail의 `.bak.*`가 함께 생길 수 있음을 UI와 문서에서 설명한다.
+구현된 source 계약은 다음과 같다.
+
+- Git snapshot/session origin을 일반 파일 비교·병합과 구분하고 persistent session으로 변환하지 않는다.
+- repository conflict는 stage 1/2/3을 immutable Base/Ours/Theirs로 열고 working-tree Result fingerprint를 보관한다.
+- Git blob, diff, opaque path identity, 임시 파일을 recent session, active-session restore, recovery draft에 저장하지 않는다.
+- 미해결 conflict 저장을 차단하고 Result 파일 하나만 safe-save한다. `git add`, continue, commit은 실행하지 않는다.
+- Git LFS pointer, binary, symlink, submodule, missing local object를 일반 text로 위장하거나 자동 다운로드하지 않는다.
+- 외부 mergetool에서는 Git의 `.orig`와 Forktail의 `.bak.*`가 함께 생길 수 있음을 UI와 문서에서 설명한다.
 
 ## 4. 단계별 범위
 
@@ -747,18 +748,18 @@ Phase 1 안정화
 
 ## 17. 최소 완료 기준
 
-- [ ] Git이 없거나 버전이 낮을 때 행동 가능한 오류를 낸다.
-- [ ] 어떤 Git compare도 network 요청, optional index write, credential prompt를 만들지 않는다.
-- [ ] raw revision은 검증 후 full object ID로 고정한다.
-- [ ] checkout 없이 두 revision의 changed-file 목록과 selected blob을 연다.
-- [ ] raw blob에 기존 64 MiB, binary, encoding 정책을 적용한다.
-- [ ] rename, added, deleted, type-changed entry를 구분한다.
-- [ ] path byte identity를 lossy string으로 왕복하지 않는다.
-- [ ] working tree 비교가 root escape와 symlink를 거절한다.
-- [ ] HEAD/index/working-tree pair 비교가 staged/unstaged 상태를 정확히 분리하고 index를 바꾸지 않는다.
-- [ ] conflict stage 1/2/3과 Result를 정확히 구성한다.
-- [ ] conflict save는 Result 파일만 안전 저장하고 index/HEAD/refs를 바꾸지 않는다.
-- [ ] LFS object, submodule, missing partial-clone object를 자동 다운로드하지 않는다.
-- [ ] parser, fake runner, temp repository, 세 OS packaged smoke가 `docs/20_GIT_TEST_PLAN.md`를 통과한다.
-- [ ] checkout/switch/fetch/push/add/commit 계열 command가 운영 runner allowlist에 존재하지 않는다.
-- [ ] review state와 recent session에 blob/diff/Git 임시 path가 남지 않는다.
+- [x] Git이 없거나 버전이 낮을 때 행동 가능한 오류를 낸다.
+- [x] 어떤 Git compare도 network 요청, optional index write, credential prompt를 만들지 않는다.
+- [x] raw revision은 검증 후 full object ID로 고정한다.
+- [x] checkout 없이 두 revision의 changed-file 목록과 selected blob을 연다.
+- [x] raw blob에 기존 64 MiB, binary, encoding 정책을 적용한다.
+- [x] rename, added, deleted, type-changed entry를 구분한다.
+- [x] path byte identity를 lossy string으로 왕복하지 않는다.
+- [x] working tree 비교가 root escape와 symlink를 거절한다.
+- [x] HEAD/index/working-tree pair 비교가 staged/unstaged 상태를 정확히 분리하고 index를 바꾸지 않는다.
+- [x] conflict stage 1/2/3과 Result를 정확히 구성한다.
+- [x] conflict save는 Result 파일만 안전 저장하고 index/HEAD/refs를 바꾸지 않는다.
+- [x] LFS object, submodule, missing partial-clone object를 자동 다운로드하지 않는다.
+- [ ] Windows/macOS/Linux packaged repository-aware UI smoke가 `docs/20_GIT_TEST_PLAN.md`를 통과한다. source/parser/fake runner/temp repository 자동 검증은 통과했지만 이 수동 release evidence는 남아 있다.
+- [x] checkout/switch/fetch/push/add/commit 계열 command가 운영 runner allowlist에 존재하지 않는다.
+- [x] review state와 recent session에 blob/diff/Git 임시 path가 남지 않는다.

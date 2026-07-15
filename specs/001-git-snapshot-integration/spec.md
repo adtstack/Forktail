@@ -1,10 +1,10 @@
 # Feature Specification: Local Git Snapshot Review
 
-**Feature Branch**: Not created (spec-only documentation change)
+**Feature Branch**: `codex/GIT-000-git-runner-adr`
 
 **Created**: 2026-07-15
 
-**Status**: Proposed — post-Phase 1 candidate
+**Status**: Implemented in source — packaged OS release evidence pending
 
 **Input**: User description: "Git 관련 문서를 바탕으로 Spec Kit을 활용해 전체 스펙과 이후 개발 범위, 추가하기 좋은 기능을 정의한다."
 
@@ -213,7 +213,8 @@ plain unified patch로 내보낼 수 있다.
 
 ## Dependencies and Out of Scope *(mandatory)*
 
-- **Dependencies**: `RTM-001`, `RTM-002`, `SAV-007`, `SAV-008`, `MRG-012`, `MRG-014`, `INT-002`, `GIT-000`의 시작 gate와 ADR 결정.
+- **Source dependencies**: `SAV-007`, `SAV-008`, `MRG-012`, `INT-002`, `GIT-000`의 safe-save, external-tool, CLI-first, allowlist ADR 결정.
+- **Release evidence dependencies**: `RTM-001`, `RTM-002`, `MRG-014`, `INT-002`의 지원 OS packaged lifecycle. 이 증적은 source 구현 완료와 분리하며 미실행 항목을 pass로 간주하지 않는다.
 - **Out of scope**: checkout/switch/restore/reset, clone/fetch/pull/push, stage/unstage/add, commit, merge/rebase/cherry-pick 실행 또는 continue, branch/tag mutation, stash apply/pop, automatic `.gitconfig`/`.gitattributes` changes, LFS download, submodule recursion/update, remote authentication, full history graph, custom merge driver, AI review/merge, headless blob-content export.
 
 ## Delivery Scope and Future Opportunities
