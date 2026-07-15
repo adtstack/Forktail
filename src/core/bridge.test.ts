@@ -9,10 +9,13 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 
 import {
   closeGitRepository,
+  cancelGitJob,
   detectGitRepository,
   exitExternalGitTool,
   gitToolExecutablePath,
+  listGitRefs,
   openGitRevisionCompare,
+  resolveGitRevision,
 } from "./bridge";
 import type { GitRevisionCompareRequest } from "./gitModels";
 
@@ -150,6 +153,56 @@ describe("Git repository lifecycle bridge", () => {
 
     expect(mocks.invoke).toHaveBeenCalledWith("close_git_repository", {
       repositorySessionId: "repository-session-8",
+    });
+  });
+});
+
+describe("Git revision selector bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("lists only typed local ref namespaces with a bounded job", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ refs: [], truncated: false });
+
+    await listGitRefs(
+      "repository-session-1",
+      ["localBranch", "remoteTrackingBranch", "tag"],
+      10_000,
+      81,
+    );
+
+    expect(mocks.invoke).toHaveBeenCalledWith("list_git_refs", {
+      repositorySessionId: "repository-session-1",
+      kinds: ["localBranch", "remoteTrackingBranch", "tag"],
+      hardLimit: 10_000,
+      jobId: 81,
+    });
+  });
+
+  it("resolves manual input with a stale-response generation and cancels typed jobs", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await resolveGitRevision("repository-session-1", "HEAD@{1}", 17);
+    expect(mocks.invoke).toHaveBeenLastCalledWith("resolve_git_revision", {
+      repositorySessionId: "repository-session-1",
+      rawRevision: "HEAD@{1}",
+      requestGeneration: 17,
+    });
+
+    await cancelGitJob("repository-session-1", 81);
+    expect(mocks.invoke).toHaveBeenLastCalledWith("cancel_git_job", {
+      repositorySessionId: "repository-session-1",
+      jobId: 81,
     });
   });
 });

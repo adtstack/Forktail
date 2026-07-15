@@ -1,5 +1,7 @@
 import type { GitRepositorySummary } from "../core/gitModels";
+import type { GitRefLoadState, GitRevisionFieldState } from "../core/gitSession";
 import type { AppLanguage } from "../core/settings";
+import { GitRevisionSelector } from "./GitRevisionSelector";
 
 export type GitRepositoryScreenState =
   | { kind: "loading"; requestId: number }
@@ -36,9 +38,19 @@ export function planGitRepositoryExit(
 interface GitCompareViewProps {
   state: GitRepositoryScreenState;
   languageMode?: AppLanguage;
+  revisionReview?: GitRevisionReviewState;
   onBack: () => void;
   onOpenRepository: () => void;
   onCancelOpen: () => void;
+  onRevisionInputChange?: (side: "left" | "right", input: string) => void;
+  onValidateRevision?: (side: "left" | "right", input: string) => void;
+}
+
+export interface GitRevisionReviewState {
+  left: GitRevisionFieldState;
+  right: GitRevisionFieldState;
+  references: GitRefLoadState;
+  pairError: string | null;
 }
 
 const GIT_COMPARE_TEXT = {
@@ -63,6 +75,7 @@ const GIT_COMPARE_TEXT = {
     localOnly: "Local snapshots only",
     readOnly: "Read-only review",
     readyPrompt: "Choose two local revisions to start reviewing committed changes.",
+    revisions: "Compare revisions",
   },
   ko: {
     aria: "저장소 검토",
@@ -85,15 +98,19 @@ const GIT_COMPARE_TEXT = {
     localOnly: "로컬 snapshot 전용",
     readOnly: "읽기 전용 검토",
     readyPrompt: "검토할 로컬 revision 두 개를 선택하세요.",
+    revisions: "Revision 비교",
   },
 } as const;
 
 export function GitCompareView({
   state,
   languageMode = "en",
+  revisionReview,
   onBack,
   onOpenRepository,
   onCancelOpen,
+  onRevisionInputChange,
+  onValidateRevision,
 }: GitCompareViewProps) {
   const text = GIT_COMPARE_TEXT[languageMode];
 
@@ -167,6 +184,36 @@ export function GitCompareView({
         <section className="git-review-empty" role="status">
           <strong>{text.noCommits}</strong>
           <p>{text.noCommitsDetail}</p>
+        </section>
+      ) : revisionReview && onRevisionInputChange && onValidateRevision ? (
+        <section className="git-revision-review" aria-label={text.revisions}>
+          <h2>{text.revisions}</h2>
+          <p>{text.readyPrompt}</p>
+          <div className="git-revision-grid">
+            <GitRevisionSelector
+              side="left"
+              repository={repository}
+              references={revisionReview.references}
+              state={revisionReview.left}
+              languageMode={languageMode}
+              onInputChange={(input) => onRevisionInputChange("left", input)}
+              onSubmit={(input) => onValidateRevision("left", input)}
+            />
+            <GitRevisionSelector
+              side="right"
+              repository={repository}
+              references={revisionReview.references}
+              state={revisionReview.right}
+              languageMode={languageMode}
+              onInputChange={(input) => onRevisionInputChange("right", input)}
+              onSubmit={(input) => onValidateRevision("right", input)}
+            />
+          </div>
+          {revisionReview.pairError && (
+            <p className="git-revision-pair-error" role="alert">
+              {revisionReview.pairError}
+            </p>
+          )}
         </section>
       ) : (
         <section className="git-review-empty" role="status">

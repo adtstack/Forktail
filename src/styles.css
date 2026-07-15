@@ -627,6 +627,7 @@ input, select {
 }
 .git-repository-state,
 .git-repository-summary,
+.git-revision-review,
 .git-review-empty {
   max-width: 1120px;
   margin: 18px auto 0;
@@ -665,6 +666,47 @@ input, select {
   font-size: 11px;
   font-weight: 700;
 }
+.git-revision-review > h2 { margin: 0; }
+.git-revision-review > p {
+  color: var(--muted-text);
+  line-height: 1.5;
+}
+.git-revision-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+.git-revision-selector {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.git-revision-selector h2 { margin: 0 0 12px; font-size: 16px; }
+.git-revision-field { display: grid; gap: 6px; min-width: 0; }
+.git-revision-field > span { color: var(--muted-text); font-size: 12px; line-height: 1.4; }
+.git-revision-field select,
+.git-revision-field input { width: 100%; min-width: 0; }
+.git-revision-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+  margin-top: 12px;
+}
+.git-revision-note,
+.git-revision-resolved,
+.git-revision-error,
+.git-revision-pair-error {
+  overflow-wrap: anywhere;
+  color: var(--muted-text);
+  font-size: 12px;
+  line-height: 1.4;
+}
+.git-revision-resolved { color: var(--good); }
+.git-revision-error,
+.git-revision-pair-error { color: var(--danger); }
 
 .git-tool-setup {
   display: grid;
@@ -1340,6 +1382,8 @@ input, select {
   .git-repository-header { grid-template-columns: 1fr; align-items: start; }
   .git-repository-actions { justify-content: flex-start; }
   .git-repository-summary dl { grid-template-columns: 1fr; }
+  .git-revision-grid,
+  .git-revision-form { grid-template-columns: 1fr; }
   .start-lower-grid { grid-template-columns: 1fr; }
   .git-tool-controls,
   .git-tool-snippets { grid-template-columns: 1fr; }

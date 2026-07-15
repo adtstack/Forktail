@@ -1,9 +1,138 @@
 import type { FileDocument, GitFileCompareSession } from "./models";
 import type {
   GitCompareSession,
+  GitRefList,
+  GitRepositorySummary,
+  GitRevision,
   GitSnapshotContentState,
   GitSnapshotDocument,
 } from "./gitModels";
+
+export type GitRevisionValidationPhase = "idle" | "validating" | "resolved" | "error";
+export type GitRevisionSide = "left" | "right";
+
+export interface GitRevisionFieldState {
+  input: string;
+  phase: GitRevisionValidationPhase;
+  revision: GitRevision | null;
+  error: string | null;
+  requestGeneration: number;
+}
+
+export type GitRefLoadState =
+  | { kind: "idle" }
+  | { kind: "loading" }
+  | { kind: "ready"; list: GitRefList }
+  | { kind: "error"; message: string };
+
+export type GitRevisionValidationResult =
+  | {
+      kind: "resolved";
+      requestGeneration: number;
+      revision: GitRevision;
+    }
+  | {
+      kind: "error";
+      requestGeneration: number;
+      error: string;
+    };
+
+export function emptyGitRevisionField(
+  requestGeneration = 0,
+): GitRevisionFieldState {
+  return {
+    input: "",
+    phase: "idle",
+    revision: null,
+    error: null,
+    requestGeneration,
+  };
+}
+
+export function gitRevisionFieldWithInput(
+  state: GitRevisionFieldState,
+  input: string,
+  requestGeneration: number,
+): GitRevisionFieldState {
+  if (state.input === input && state.phase === "resolved") {
+    return { ...state, requestGeneration };
+  }
+  return {
+    input,
+    phase: "idle",
+    revision: null,
+    error: null,
+    requestGeneration,
+  };
+}
+
+export function beginGitRevisionValidation(
+  state: GitRevisionFieldState,
+  rawInput: string,
+  requestGeneration: number,
+): GitRevisionFieldState {
+  return {
+    ...state,
+    input: rawInput,
+    phase: "validating",
+    revision: null,
+    error: null,
+    requestGeneration,
+  };
+}
+
+export function applyGitRevisionValidationResult(
+  state: GitRevisionFieldState,
+  result: GitRevisionValidationResult,
+): GitRevisionFieldState {
+  if (state.requestGeneration !== result.requestGeneration) return state;
+  if (result.kind === "error") {
+    return {
+      ...state,
+      phase: "error",
+      revision: null,
+      error: result.error,
+    };
+  }
+  return {
+    ...state,
+    phase: "resolved",
+    revision: result.revision,
+    error: null,
+  };
+}
+
+export function sameResolvedGitRevisions(
+  left: GitRevision | null,
+  right: GitRevision | null,
+): boolean {
+  return left !== null
+    && right !== null
+    && left.resolved.algorithm === right.resolved.algorithm
+    && left.resolved.hex === right.resolved.hex;
+}
+
+export function gitRevisionFromRepositoryHead(
+  repository: GitRepositorySummary,
+  requestGeneration: number,
+): GitRevisionFieldState {
+  if (repository.head.kind === "unborn") {
+    return emptyGitRevisionField(requestGeneration);
+  }
+  const revision: GitRevision = {
+    rawLabel: "HEAD",
+    resolved: repository.head.objectId,
+    kind: "head",
+    displayName: "HEAD",
+  };
+  return {
+    input: "HEAD",
+    phase: "resolved",
+    revision,
+    error: null,
+    requestGeneration,
+  };
+}
 
 export type GitCompareViewState =
   | { kind: "compare"; session: GitFileCompareSession }

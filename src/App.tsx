@@ -9,6 +9,7 @@ import {
 import { StartPage } from "./components/StartPage";
 import {
   cancelFolderScan as cancelFolderScanJob,
+  cancelGitJob,
   chooseDirectory,
   chooseSavePath,
   chooseTextFile,
@@ -17,15 +18,29 @@ import {
   exitExternalGitTool,
   isTauriRuntime,
   listFileBackups,
+  listGitRefs,
   mergeTexts,
   readTextFile,
   revealPath,
   restoreTextFileBackup,
+  resolveGitRevision,
   scanDirectories,
   statTextFileVersion,
   startupArgs,
   writeTextFileAtomic,
 } from "./core/bridge";
+import {
+  applyGitRevisionValidationResult,
+  beginGitRevisionValidation,
+  emptyGitRevisionField,
+  gitRevisionFieldWithInput,
+  gitRevisionFromRepositoryHead,
+  sameResolvedGitRevisions,
+  type GitRefLoadState,
+  type GitRevisionFieldState,
+  type GitRevisionSide,
+} from "./core/gitSession";
+import type { GitRepositorySummary } from "./core/gitModels";
 import { buildDiffReport, compareReportDefaultPath } from "./core/diffReport";
 import type { CompareDropSide } from "./core/dropPaths";
 import {
@@ -177,6 +192,12 @@ export default function App() {
   const [mergeSession, setMergeSession] = useState<MergeSession | null>(null);
   const [gitRepositoryState, setGitRepositoryState] =
     useState<GitRepositoryScreenState | null>(null);
+  const [gitRevisionFields, setGitRevisionFields] =
+    useState<Record<GitRevisionSide, GitRevisionFieldState>>(() => ({
+      left: emptyGitRevisionField(),
+      right: emptyGitRevisionField(),
+    }));
+  const [gitRefState, setGitRefState] = useState<GitRefLoadState>({ kind: "idle" });
   const [savedMergeResult, setSavedMergeResult] = useState<string | null>(null);
   const [mergeOutputVersion, setMergeOutputVersion] = useState<WritePrecondition | null>(null);
   const [mergeRecoveryDraft, setMergeRecoveryDraft] = useState<MergeRecoveryDraft | null>(null);
@@ -212,6 +233,9 @@ export default function App() {
   const gitRepositoryPickerActive = useRef(false);
   const gitRepositoryProbeTail = useRef<Promise<void>>(Promise.resolve());
   const gitRepositoryStateRef = useRef<GitRepositoryScreenState | null>(null);
+  const activeGitRefRequestId = useRef(0);
+  const nextGitJobId = useRef(0);
+  const nextGitRevisionValidationId = useRef(0);
   const attemptedActiveSessionRestore = useRef(false);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [showUnresolvedSaveDialog, setShowUnresolvedSaveDialog] = useState(false);
@@ -767,6 +791,21 @@ export default function App() {
     saveMergeRecoveryDraft(mergeSession);
   }, [mergeRecoveryEnabled, mergeSession, mode, savedMergeResult]);
 
+  const resetGitRevisionReview = useCallback((
+    repository: GitRepositorySummary | null,
+  ) => {
+    activeGitRefRequestId.current += 1;
+    const requestGeneration = nextGitRevisionValidationId.current + 1;
+    nextGitRevisionValidationId.current = requestGeneration;
+    setGitRefState({ kind: "idle" });
+    setGitRevisionFields({
+      left: emptyGitRevisionField(requestGeneration),
+      right: repository
+        ? gitRevisionFromRepositoryHead(repository, requestGeneration)
+        : emptyGitRevisionField(requestGeneration),
+    });
+  }, []);
+
   useEffect(() => {
     if (mode === "git") return;
     const state = gitRepositoryStateRef.current;
@@ -782,8 +821,123 @@ export default function App() {
     } else if (exitPlan.closeSessionId != null) {
       void closeGitRepository(exitPlan.closeSessionId).catch(() => {});
     }
+    resetGitRevisionReview(null);
     setGitRepositoryState(null);
-  }, [endBusy, mode]);
+  }, [endBusy, mode, resetGitRevisionReview]);
+
+  useEffect(() => {
+    if (mode !== "git" || gitRepositoryState?.kind !== "ready") return;
+    const repository = gitRepositoryState.repository;
+    if (repository.head.kind === "unborn") {
+      setGitRefState({ kind: "ready", list: { refs: [], truncated: false } });
+      return;
+    }
+
+    const requestId = activeGitRefRequestId.current + 1;
+    activeGitRefRequestId.current = requestId;
+    const jobId = nextGitJobId.current + 1;
+    nextGitJobId.current = jobId;
+    setGitRefState({ kind: "loading" });
+
+    void listGitRefs(
+      repository.sessionId,
+      ["localBranch", "remoteTrackingBranch", "tag"],
+      10_000,
+      jobId,
+    ).then((list) => {
+      const currentRepository = gitRepositoryStateRef.current;
+      if (
+        activeGitRefRequestId.current === requestId
+        && currentRepository?.kind === "ready"
+        && currentRepository.repository.sessionId === repository.sessionId
+      ) {
+        setGitRefState({ kind: "ready", list });
+      }
+    }).catch((caught) => {
+      const currentRepository = gitRepositoryStateRef.current;
+      if (
+        activeGitRefRequestId.current === requestId
+        && currentRepository?.kind === "ready"
+        && currentRepository.repository.sessionId === repository.sessionId
+      ) {
+        setGitRefState({ kind: "error", message: errorMessage(caught, languageMode) });
+      }
+    });
+
+    return () => {
+      if (activeGitRefRequestId.current === requestId) {
+        activeGitRefRequestId.current += 1;
+      }
+      void cancelGitJob(repository.sessionId, jobId).catch(() => {});
+    };
+  }, [gitRepositoryState, languageMode, mode]);
+
+  const updateGitRevisionInput = useCallback((side: GitRevisionSide, input: string) => {
+    const requestGeneration = nextGitRevisionValidationId.current + 1;
+    nextGitRevisionValidationId.current = requestGeneration;
+    setGitRevisionFields((current) => ({
+      ...current,
+      [side]: gitRevisionFieldWithInput(current[side], input, requestGeneration),
+    }));
+  }, []);
+
+  const validateGitRevision = useCallback((side: GitRevisionSide, rawInput: string) => {
+    const currentRepository = gitRepositoryStateRef.current;
+    if (currentRepository?.kind !== "ready") return;
+    const repositorySessionId = currentRepository.repository.sessionId;
+    const requestGeneration = nextGitRevisionValidationId.current + 1;
+    nextGitRevisionValidationId.current = requestGeneration;
+    const emptyInput = rawInput.trim().length === 0;
+
+    setGitRevisionFields((current) => {
+      const validating = beginGitRevisionValidation(
+        current[side],
+        rawInput,
+        requestGeneration,
+      );
+      return {
+        ...current,
+        [side]: emptyInput
+          ? applyGitRevisionValidationResult(validating, {
+              kind: "error",
+              requestGeneration,
+              error: languageMode === "ko" ? "Revision을 입력하세요." : "Enter a revision.",
+            })
+          : validating,
+      };
+    });
+    if (emptyInput) return;
+
+    void resolveGitRevision(repositorySessionId, rawInput, requestGeneration).then((revision) => {
+      const repository = gitRepositoryStateRef.current;
+      if (
+        repository?.kind !== "ready"
+        || repository.repository.sessionId !== repositorySessionId
+      ) return;
+      setGitRevisionFields((current) => ({
+        ...current,
+        [side]: applyGitRevisionValidationResult(current[side], {
+          kind: "resolved",
+          requestGeneration,
+          revision,
+        }),
+      }));
+    }).catch((caught) => {
+      const repository = gitRepositoryStateRef.current;
+      if (
+        repository?.kind !== "ready"
+        || repository.repository.sessionId !== repositorySessionId
+      ) return;
+      setGitRevisionFields((current) => ({
+        ...current,
+        [side]: applyGitRevisionValidationResult(current[side], {
+          kind: "error",
+          requestGeneration,
+          error: errorMessage(caught, languageMode),
+        }),
+      }));
+    });
+  }, [languageMode]);
 
   const requestLeaveActiveSession = useCallback((leave: () => void) => {
     if (!activeUnsavedMessage) {
@@ -853,6 +1007,7 @@ export default function App() {
         setError(null);
         setMessage(null);
         setRecentSessionFailure(null);
+        resetGitRevisionReview(null);
         setGitRepositoryState({ kind: "loading", requestId });
         setMode("git");
 
@@ -877,6 +1032,7 @@ export default function App() {
             await closeGitRepository(repository.sessionId).catch(() => {});
             return;
           }
+          resetGitRevisionReview(repository);
           setGitRepositoryState({ kind: "ready", repository });
         } catch (caught) {
           if (!isCurrentGitRepositoryRequest(activeGitRepositoryRequestId.current, requestId)) {
@@ -899,6 +1055,7 @@ export default function App() {
     endBusy,
     languageMode,
     requestLeaveActiveSession,
+    resetGitRevisionReview,
   ]);
 
   const leaveGitRepository = useCallback(() => {
@@ -914,12 +1071,13 @@ export default function App() {
       } else if (exitPlan.closeSessionId != null) {
         void closeGitRepository(exitPlan.closeSessionId).catch(() => {});
       }
+      resetGitRevisionReview(null);
       setGitRepositoryState(null);
       setMode("home");
       setMessage(null);
       setError(null);
     });
-  }, [endBusy, requestLeaveActiveSession]);
+  }, [endBusy, requestLeaveActiveSession, resetGitRevisionReview]);
 
   const backHome = () => {
     requestLeaveActiveSession(() => {
@@ -1520,6 +1678,15 @@ export default function App() {
     return () => unlisten?.();
   }, []);
 
+  const gitRevisionPairError = sameResolvedGitRevisions(
+    gitRevisionFields.left.revision,
+    gitRevisionFields.right.revision,
+  )
+    ? languageMode === "ko"
+      ? "서로 다른 두 revision을 선택하세요."
+      : "Choose two different revisions."
+    : null;
+
   return (
     <div className="app-shell" data-theme={resolvedTheme} lang={languageMode}>
       {busy && (
@@ -1668,9 +1835,17 @@ export default function App() {
           <GitCompareView
             state={gitRepositoryState}
             languageMode={languageMode}
+            revisionReview={{
+              left: gitRevisionFields.left,
+              right: gitRevisionFields.right,
+              references: gitRefState,
+              pairError: gitRevisionPairError,
+            }}
             onBack={leaveGitRepository}
             onOpenRepository={openGitRepository}
             onCancelOpen={leaveGitRepository}
+            onRevisionInputChange={updateGitRevisionInput}
+            onValidateRevision={validateGitRevision}
           />
         )}
 

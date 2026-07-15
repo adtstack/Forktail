@@ -12,7 +12,10 @@ import type {
 import type { WritePrecondition } from "./mergeSave";
 import type {
   GitCompareSession,
+  GitRefKind,
+  GitRefList,
   GitRepositorySummary,
+  GitRevision,
   GitRevisionCompareRequest,
 } from "./gitModels";
 
@@ -94,6 +97,42 @@ export async function detectGitRepository(candidatePath: string): Promise<GitRep
 export async function closeGitRepository(repositorySessionId: string): Promise<void> {
   requireTauri();
   return invoke<void>("close_git_repository", { repositorySessionId });
+}
+
+export async function listGitRefs(
+  repositorySessionId: string,
+  kinds: GitRefKind[],
+  hardLimit: number,
+  jobId: number,
+): Promise<GitRefList> {
+  requireTauri();
+  return invoke<GitRefList>("list_git_refs", {
+    repositorySessionId,
+    kinds,
+    hardLimit,
+    jobId,
+  });
+}
+
+export async function resolveGitRevision(
+  repositorySessionId: string,
+  rawRevision: string,
+  requestGeneration: number,
+): Promise<GitRevision> {
+  requireTauri();
+  return invoke<GitRevision>("resolve_git_revision", {
+    repositorySessionId,
+    rawRevision,
+    requestGeneration,
+  });
+}
+
+export async function cancelGitJob(
+  repositorySessionId: string,
+  jobId: number,
+): Promise<void> {
+  requireTauri();
+  return invoke<void>("cancel_git_job", { repositorySessionId, jobId });
 }
 
 export async function statTextFileVersion(path: string): Promise<FileVersion> {

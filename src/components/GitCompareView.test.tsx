@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { GitRepositorySummary } from "../core/gitModels";
+import type { GitRevisionReviewState } from "./GitCompareView";
 import {
   GitCompareView,
   isCurrentGitRepositoryRequest,
@@ -27,14 +28,18 @@ const branchRepository: GitRepositorySummary = {
 function renderGitCompareView(
   state: GitRepositoryScreenState,
   languageMode: "en" | "ko" = "en",
+  revisionReview?: GitRevisionReviewState,
 ): string {
   return renderToStaticMarkup(
     <GitCompareView
       state={state}
       languageMode={languageMode}
+      revisionReview={revisionReview}
       onBack={() => {}}
       onOpenRepository={() => {}}
       onCancelOpen={() => {}}
+      onRevisionInputChange={() => {}}
+      onValidateRevision={() => {}}
     />,
   );
 }
@@ -129,11 +134,43 @@ describe("GitCompareView repository shell", () => {
     }
   });
 
+  it("renders both revision selectors and announces an identical-revision error", () => {
+    const resolvedHead = {
+      input: "HEAD",
+      phase: "resolved" as const,
+      revision: {
+        rawLabel: "HEAD",
+        resolved: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+        kind: "head" as const,
+        displayName: "HEAD",
+      },
+      error: null,
+      requestGeneration: 3,
+    };
+    const markup = renderGitCompareView(
+      { kind: "ready", repository: branchRepository },
+      "en",
+      {
+        left: resolvedHead,
+        right: resolvedHead,
+        references: { kind: "ready", list: { refs: [], truncated: false } },
+        pairError: "Choose two different revisions.",
+      },
+    );
+
+    expect(markup).toContain("aria-label=\"Left revision choices\"");
+    expect(markup).toContain("aria-label=\"Right revision choices\"");
+    expect(markup).toContain("role=\"alert\"");
+    expect(markup).toContain("Choose two different revisions.");
+  });
+
   it("uses wrapping and scroll containment needed at 200 percent zoom", () => {
     const styles = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
 
     expect(styles).toMatch(/\.git-repository-shell\s*\{[^}]*overflow:\s*auto/s);
     expect(styles).toMatch(/\.git-repository-root\s*\{[^}]*overflow-wrap:\s*anywhere/s);
     expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*\.git-repository-header/s);
+    expect(styles).toMatch(/\.git-revision-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2/s);
+    expect(styles).toMatch(/@media \(max-width: 900px\)[\s\S]*\.git-revision-grid/s);
   });
 });
