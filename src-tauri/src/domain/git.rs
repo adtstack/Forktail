@@ -105,6 +105,42 @@ pub struct GitRevision {
     pub display_name: String,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum GitObjectType {
+    Commit,
+    Tag,
+    Tree,
+    Blob,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Hash, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitRefKind {
+    LocalBranch,
+    RemoteTrackingBranch,
+    Tag,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRepositoryRef {
+    pub full_name: String,
+    pub display_name: String,
+    pub kind: GitRefKind,
+    pub object_id: GitObjectId,
+    pub object_type: GitObjectType,
+    pub peeled_object_id: Option<GitObjectId>,
+    pub peeled_object_type: Option<GitObjectType>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRefList {
+    pub refs: Vec<GitRepositoryRef>,
+    pub truncated: bool,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPathIdentity {
@@ -359,8 +395,9 @@ pub struct GitRepositoryIdentity {
 #[cfg(test)]
 mod tests {
     use super::{
-        GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitPathIdentity,
-        GitRepositorySummary, GitRevision, GitRevisionKind,
+        GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
+        GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
+        GitRevision, GitRevisionKind,
     };
     use serde_json::json;
 
@@ -453,6 +490,60 @@ mod tests {
                 },
                 "kind": "symbolic",
                 "displayName": "origin/main~1",
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_ref_list_with_local_remote_and_explicit_tag_peel_contract() {
+        let refs = GitRefList {
+            refs: vec![
+                GitRepositoryRef {
+                    full_name: "refs/remotes/origin/main".to_string(),
+                    display_name: "origin/main".to_string(),
+                    kind: GitRefKind::RemoteTrackingBranch,
+                    object_id: sha1('d'),
+                    object_type: GitObjectType::Commit,
+                    peeled_object_id: None,
+                    peeled_object_type: None,
+                },
+                GitRepositoryRef {
+                    full_name: "refs/tags/v2".to_string(),
+                    display_name: "v2".to_string(),
+                    kind: GitRefKind::Tag,
+                    object_id: sha1('e'),
+                    object_type: GitObjectType::Tag,
+                    peeled_object_id: Some(sha1('f')),
+                    peeled_object_type: Some(GitObjectType::Commit),
+                },
+            ],
+            truncated: false,
+        };
+
+        assert_eq!(
+            serde_json::to_value(refs).expect("serialize refs"),
+            json!({
+                "refs": [
+                    {
+                        "fullName": "refs/remotes/origin/main",
+                        "displayName": "origin/main",
+                        "kind": "remoteTrackingBranch",
+                        "objectId": { "algorithm": "sha1", "hex": "d".repeat(40) },
+                        "objectType": "commit",
+                        "peeledObjectId": null,
+                        "peeledObjectType": null,
+                    },
+                    {
+                        "fullName": "refs/tags/v2",
+                        "displayName": "v2",
+                        "kind": "tag",
+                        "objectId": { "algorithm": "sha1", "hex": "e".repeat(40) },
+                        "objectType": "tag",
+                        "peeledObjectId": { "algorithm": "sha1", "hex": "f".repeat(40) },
+                        "peeledObjectType": "commit",
+                    },
+                ],
+                "truncated": false,
             })
         );
     }

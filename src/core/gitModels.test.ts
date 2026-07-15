@@ -4,6 +4,7 @@ import type {
   GitHeadState,
   GitObjectId,
   GitPathIdentity,
+  GitRefList,
   GitRevision,
   GitRepositorySummary,
 } from "./gitModels";
@@ -77,6 +78,38 @@ describe("Git DTO contract", () => {
     });
   });
 
+  it("keeps remote-tracking refs local and annotated tag peel explicit", () => {
+    const refs: GitRefList = {
+      refs: [
+        {
+          fullName: "refs/remotes/origin/main",
+          displayName: "origin/main",
+          kind: "remoteTrackingBranch",
+          objectId: { algorithm: "sha1", hex: "d".repeat(40) },
+          objectType: "commit",
+          peeledObjectId: null,
+          peeledObjectType: null,
+        },
+        {
+          fullName: "refs/tags/v2",
+          displayName: "v2",
+          kind: "tag",
+          objectId: { algorithm: "sha1", hex: "e".repeat(40) },
+          objectType: "tag",
+          peeledObjectId: { algorithm: "sha1", hex: "f".repeat(40) },
+          peeledObjectType: "commit",
+        },
+      ],
+      truncated: false,
+    };
+
+    expect(refs.refs.map((entry) => entry.kind)).toEqual([
+      "remoteTrackingBranch",
+      "tag",
+    ]);
+    expect(refs.refs[1]?.peeledObjectType).toBe("commit");
+  });
+
   it("keeps every head-state variant explicit", () => {
     const states: GitHeadState[] = [
       { kind: "unborn" },
@@ -95,6 +128,8 @@ describe("Git DTO contract", () => {
     expect(rustDtoSource).toContain("pub struct GitObjectId");
     expect(rustDtoSource).toContain("pub struct GitPathIdentity");
     expect(rustDtoSource).toContain("pub struct GitRevision");
+    expect(rustDtoSource).toContain("pub struct GitRepositoryRef");
+    expect(rustDtoSource).toContain("pub struct GitRefList");
     expect(rustDtoSource).toContain("pub struct GitRepositorySummary");
   });
 });

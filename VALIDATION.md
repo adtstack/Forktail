@@ -408,6 +408,14 @@ cargo test
 - 테스트 선행 증거: 구현 전 `cargo test revision`은 `GitRevisionError`, `GitRevisionKind`, resolver와 `RevisionQuery`가 정의되지 않아 compile error로 실패했다. 구현 후 fake query의 structural ambiguity/output parser와 실제 temp repository의 detached HEAD, branch/tag, full/abbrev ID, `HEAD~1`, short-name collision, blob tag, invalid/unborn, repository fingerprint 불변 테스트가 통과했다.
 - 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/359 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 99 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux 실행은 사용자 확인 항목으로 남긴다.
 
+### GIT-102 bounded local ref selector — 2026-07-15
+
+- 변경 파일: `src-tauri/src/git/refs.rs`, `src-tauri/src/git/jobs.rs`, `src-tauri/src/git/runner.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/domain/git.rs`, `src-tauri/src/lib.rs`, `src/core/gitModels.ts`, `src/core/gitModels.test.ts`, `specs/001-git-snapshot-integration/tasks.md`, `VALIDATION.md`.
+- 수용 기준: local branch, 이미 로컬에 있는 remote-tracking ref, lightweight/annotated tag를 exact namespace의 `for-each-ref` 한 번으로 조회한다. full/display name, local ref kind, direct object ID/type, annotated tag peeled object ID/type을 분리하고 remote-tracking 항목을 live remote 상태로 표현하지 않는다. `--sort=refname`, exact 5-field NUL format, `--count=limit+1`, 10,000 hard max와 16 MiB stdout cap을 typed runner allowlist로 고정한다.
+- 실패/경계 조건: empty/duplicate kind, 0/10,000 초과 limit, missing record terminator, invalid field count, control/non-UTF-8 ref, duplicate/unknown namespace, zero/broken object ID, branch non-commit target, inconsistent tag peel, `limit+1` 초과 output을 typed error로 거절한다. `limit+1`은 첫 limit records와 `truncated=true`만 반환한다. stderr/refname/object detail은 command error에 노출하지 않는다.
+- 테스트 선행 증거: 구현 전 `cargo test refs`는 `GitRefError`, ref DTO, parser/list service가 정의되지 않아 compile error로 실패했다. 구현 후 pure record parser/cap/malformed tests, 실제 temp repository의 Unicode branch·remote-tracking ref·lightweight/annotated tag·fingerprint 불변·bounded result, pre-cancelled runner test 6건이 통과했다. session-scoped job ID duplicate/cancel/reuse/repository replacement·close tests 2건과 exact runner allowlist test도 통과했다.
+- 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/360 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 110 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux 실행은 사용자 확인 항목으로 남긴다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.

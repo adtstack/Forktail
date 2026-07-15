@@ -5,8 +5,9 @@ pub mod git;
 mod menu;
 
 pub use domain::git::{
-    GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitPathIdentity,
-    GitRepositoryIdentity, GitRepositorySummary, GitRevision, GitRevisionKind,
+    GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
+    GitPathIdentity, GitRefKind, GitRefList, GitRepositoryIdentity, GitRepositoryRef,
+    GitRepositorySummary, GitRevision, GitRevisionKind,
 };
 
 use commands::{files, folders, git as git_commands, merge, startup, system};
@@ -16,6 +17,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(git::repository::GitRepositorySessions::default())
+        .manage(git::jobs::GitJobs::default())
         .menu(menu::build_menu)
         .on_menu_event(menu::handle_menu_event)
         .invoke_handler(tauri::generate_handler![
@@ -29,6 +31,8 @@ pub fn run() {
             git_commands::check_git_availability,
             git_commands::detect_git_repository,
             git_commands::close_git_repository,
+            git_commands::list_git_refs,
+            git_commands::cancel_git_job,
             git_commands::resolve_git_revision,
             merge::merge_texts,
             startup::exit_external_git_tool,

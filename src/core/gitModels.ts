@@ -20,6 +20,24 @@ export interface GitRevision {
   displayName: string;
 }
 
+export type GitObjectType = "commit" | "tag" | "tree" | "blob";
+export type GitRefKind = "localBranch" | "remoteTrackingBranch" | "tag";
+
+export interface GitRepositoryRef {
+  fullName: string;
+  displayName: string;
+  kind: GitRefKind;
+  objectId: GitObjectId;
+  objectType: GitObjectType;
+  peeledObjectId: GitObjectId | null;
+  peeledObjectType: GitObjectType | null;
+}
+
+export interface GitRefList {
+  refs: GitRepositoryRef[];
+  truncated: boolean;
+}
+
 export interface GitPathIdentity {
   opaqueId: string;
   displayPath: string;

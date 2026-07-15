@@ -17,6 +17,10 @@ pub const SAFE_GLOBAL_ARGUMENTS: [&str; 5] = [
     "--literal-pathspecs",
 ];
 
+pub const REF_LIST_STDOUT_CAP: usize = 16 * 1024 * 1024;
+const REF_LIST_FORMAT: &str =
+    "%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00";
+
 const SAFE_INHERITED_ENVIRONMENT: &[&str] = &[
     "HOME",
     "USERPROFILE",
@@ -54,6 +58,11 @@ pub enum GitOperation {
         repository: PathBuf,
         query: RevisionQuery,
     },
+    References {
+        repository: PathBuf,
+        namespaces: Vec<RefNamespace>,
+        max_records: usize,
+    },
 }
 
 impl GitOperation {
@@ -75,8 +84,45 @@ impl GitOperation {
                 arguments.push(repository.as_os_str().to_owned());
                 arguments.extend(query.arguments());
             }
+            Self::References {
+                repository,
+                namespaces,
+                max_records,
+            } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend([
+                    OsString::from("for-each-ref"),
+                    OsString::from(format!("--format={REF_LIST_FORMAT}")),
+                    OsString::from("--sort=refname"),
+                    OsString::from(format!("--count={max_records}")),
+                    OsString::from("--"),
+                ]);
+                arguments.extend(
+                    namespaces
+                        .iter()
+                        .map(|namespace| OsString::from(namespace.pattern())),
+                );
+            }
         }
         arguments
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RefNamespace {
+    LocalBranches,
+    RemoteTrackingBranches,
+    Tags,
+}
+
+impl RefNamespace {
+    fn pattern(self) -> &'static str {
+        match self {
+            Self::LocalBranches => "refs/heads",
+            Self::RemoteTrackingBranches => "refs/remotes",
+            Self::Tags => "refs/tags",
+        }
     }
 }
 
@@ -174,6 +220,7 @@ impl RunnerLimits {
             timeout: Duration::from_secs(30),
             stdout_bytes: match operation {
                 GitOperation::Revision { .. } => 64 * 1024,
+                GitOperation::References { .. } => REF_LIST_STDOUT_CAP,
                 GitOperation::Version | GitOperation::Repository { .. } => 8 * 1024 * 1024,
             },
             stderr_bytes: 256 * 1024,
@@ -206,7 +253,7 @@ impl CancellationToken {
         self.cancelled.store(true, Ordering::Release);
     }
 
-    fn is_cancelled(&self) -> bool {
+    pub(crate) fn is_cancelled(&self) -> bool {
         self.cancelled.load(Ordering::Acquire)
     }
 }
@@ -297,10 +344,59 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
     ]
     .iter()
     .any(|query| os_arguments_equal(query_arguments, query.arguments()));
-    if fixed_repository_query || validate_revision_query_arguments(query_arguments) {
+    if fixed_repository_query
+        || validate_revision_query_arguments(query_arguments)
+        || validate_ref_query_arguments(query_arguments)
+    {
         Ok(())
     } else {
         Err(RunnerError::ForbiddenOperation)
+    }
+}
+
+fn validate_ref_query_arguments(arguments: &[OsString]) -> bool {
+    let Some(arguments) = arguments
+        .iter()
+        .map(|argument| argument.to_str())
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+    if arguments.len() < 6
+        || arguments[0] != "for-each-ref"
+        || arguments[1] != format!("--format={REF_LIST_FORMAT}")
+        || arguments[2] != "--sort=refname"
+        || arguments[4] != "--"
+    {
+        return false;
+    }
+    let Some(count) = arguments[3].strip_prefix("--count=") else {
+        return false;
+    };
+    if !count
+        .parse::<usize>()
+        .is_ok_and(|count| (1..=10_001).contains(&count))
+    {
+        return false;
+    }
+
+    let expected_order = ["refs/heads", "refs/remotes", "refs/tags"];
+    let patterns = &arguments[5..];
+    patterns.len() <= expected_order.len()
+        && patterns
+            .windows(2)
+            .all(|pair| expected_order_index(pair[0]) < expected_order_index(pair[1]))
+        && patterns
+            .iter()
+            .all(|pattern| expected_order.contains(pattern))
+}
+
+fn expected_order_index(pattern: &str) -> usize {
+    match pattern {
+        "refs/heads" => 0,
+        "refs/remotes" => 1,
+        "refs/tags" => 2,
+        _ => usize::MAX,
     }
 }
 
@@ -796,8 +892,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        CancellationToken, GitOperation, OutputStream, ProductionGitRunner, RepositoryQuery,
-        RevisionQuery, RunnerError, RunnerLimits, SAFE_GLOBAL_ARGUMENTS,
+        CancellationToken, GitOperation, OutputStream, ProductionGitRunner, REF_LIST_STDOUT_CAP,
+        RefNamespace, RepositoryQuery, RevisionQuery, RunnerError, RunnerLimits,
+        SAFE_GLOBAL_ARGUMENTS,
         fixture::{FixtureGitRunner, FixtureProcess},
         safe_environment_from, validate_approved_arguments,
     };
@@ -910,6 +1007,74 @@ mod tests {
                 "--format=%(objectname)",
                 "--",
                 "refs/heads/main",
+            ],
+        ] {
+            let arguments = SAFE_GLOBAL_ARGUMENTS
+                .iter()
+                .copied()
+                .chain(["-C", repository.to_str().expect("UTF-8 fixture path")])
+                .chain(malformed)
+                .map(OsString::from)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                validate_approved_arguments(&arguments),
+                Err(RunnerError::ForbiddenOperation)
+            );
+        }
+    }
+
+    #[test]
+    fn ref_list_operation_allows_only_exact_namespaces_format_and_count() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let repository = std::env::temp_dir().join("ref repository 한글");
+        let plan = runner
+            .plan(GitOperation::References {
+                repository: repository.clone(),
+                namespaces: vec![RefNamespace::LocalBranches, RefNamespace::Tags],
+                max_records: 501,
+            })
+            .expect("typed ref query should be approved");
+
+        assert!(validate_approved_arguments(&plan.arguments).is_ok());
+        assert_eq!(plan.limits.stdout_bytes, REF_LIST_STDOUT_CAP);
+        assert!(
+            plan.arguments
+                .iter()
+                .any(|argument| argument == "--count=501")
+        );
+        assert!(
+            !plan
+                .arguments
+                .iter()
+                .any(|argument| argument == "refs/remotes")
+        );
+
+        for malformed in [
+            vec![
+                "for-each-ref",
+                "--format=%(refname)",
+                "--sort=refname",
+                "--count=10",
+                "--",
+                "refs/heads",
+            ],
+            vec![
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00",
+                "--sort=refname",
+                "--count=0",
+                "--",
+                "refs/heads",
+            ],
+            vec![
+                "for-each-ref",
+                "--format=%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00",
+                "--sort=refname",
+                "--count=10",
+                "--",
+                "refs/tags",
+                "refs/heads",
             ],
         ] {
             let arguments = SAFE_GLOBAL_ARGUMENTS

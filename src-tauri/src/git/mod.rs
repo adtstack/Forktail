@@ -1,5 +1,7 @@
 pub mod executable;
+pub mod jobs;
 pub mod parsers;
+pub mod refs;
 pub mod repository;
 pub mod revision;
 pub mod runner;
