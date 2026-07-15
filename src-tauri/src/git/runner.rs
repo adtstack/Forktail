@@ -50,6 +50,10 @@ pub enum GitOperation {
         candidate: PathBuf,
         query: RepositoryQuery,
     },
+    Revision {
+        repository: PathBuf,
+        query: RevisionQuery,
+    },
 }
 
 impl GitOperation {
@@ -65,6 +69,11 @@ impl GitOperation {
                 arguments.push(OsString::from("-C"));
                 arguments.push(candidate.as_os_str().to_owned());
                 arguments.extend(query.arguments().iter().map(OsString::from));
+            }
+            Self::Revision { repository, query } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend(query.arguments());
             }
         }
         arguments
@@ -100,6 +109,38 @@ impl RepositoryQuery {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RevisionQuery {
+    ShortRefCandidates { short_name: String },
+    Disambiguate { prefix: String },
+    VerifyCommit { revision: String },
+}
+
+impl RevisionQuery {
+    fn arguments(&self) -> Vec<OsString> {
+        match self {
+            Self::ShortRefCandidates { short_name } => vec![
+                OsString::from("for-each-ref"),
+                OsString::from("--format=%(refname)"),
+                OsString::from("--"),
+                OsString::from(format!("refs/heads/{short_name}")),
+                OsString::from(format!("refs/tags/{short_name}")),
+                OsString::from(format!("refs/remotes/{short_name}")),
+            ],
+            Self::Disambiguate { prefix } => vec![
+                OsString::from("rev-parse"),
+                OsString::from(format!("--disambiguate={prefix}")),
+            ],
+            Self::VerifyCommit { revision } => vec![
+                OsString::from("rev-parse"),
+                OsString::from("--verify"),
+                OsString::from("--end-of-options"),
+                OsString::from(format!("{revision}^{{commit}}")),
+            ],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutputStream {
     Stdout,
@@ -128,10 +169,13 @@ pub struct RunnerLimits {
 }
 
 impl RunnerLimits {
-    fn production() -> Self {
+    fn production(operation: &GitOperation) -> Self {
         Self {
             timeout: Duration::from_secs(30),
-            stdout_bytes: 8 * 1024 * 1024,
+            stdout_bytes: match operation {
+                GitOperation::Revision { .. } => 64 * 1024,
+                GitOperation::Version | GitOperation::Repository { .. } => 8 * 1024 * 1024,
+            },
             stderr_bytes: 256 * 1024,
             poll_interval: Duration::from_millis(10),
         }
@@ -178,26 +222,23 @@ pub struct RunnerOutput {
 #[derive(Debug)]
 pub struct ProductionGitRunner {
     executable: PathBuf,
-    limits: RunnerLimits,
 }
 
 impl ProductionGitRunner {
     pub fn new(executable: PathBuf) -> Result<Self, RunnerError> {
         validate_executable(&executable)?;
-        Ok(Self {
-            executable,
-            limits: RunnerLimits::production(),
-        })
+        Ok(Self { executable })
     }
 
     fn plan(&self, operation: GitOperation) -> Result<ProcessPlan, RunnerError> {
+        let limits = RunnerLimits::production(&operation);
         let arguments = operation.arguments();
         validate_approved_arguments(&arguments)?;
         Ok(ProcessPlan {
             executable: self.executable.clone(),
             arguments,
             environment: safe_environment_from(std::env::vars_os()),
-            limits: self.limits,
+            limits,
         })
     }
 
@@ -245,7 +286,7 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
         return Err(RunnerError::ForbiddenOperation);
     }
     let query_arguments = &operation[2..];
-    let approved = [
+    let fixed_repository_query = [
         RepositoryQuery::Bare,
         RepositoryQuery::Root,
         RepositoryQuery::GitDir,
@@ -256,11 +297,61 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
     ]
     .iter()
     .any(|query| os_arguments_equal(query_arguments, query.arguments()));
-    if approved {
+    if fixed_repository_query || validate_revision_query_arguments(query_arguments) {
         Ok(())
     } else {
         Err(RunnerError::ForbiddenOperation)
     }
+}
+
+fn validate_revision_query_arguments(arguments: &[OsString]) -> bool {
+    let Some(arguments) = arguments
+        .iter()
+        .map(|argument| argument.to_str())
+        .collect::<Option<Vec<_>>>()
+    else {
+        return false;
+    };
+
+    match arguments.as_slice() {
+        ["rev-parse", "--verify", "--end-of-options", expression] => expression
+            .strip_suffix("^{commit}")
+            .is_some_and(is_bounded_revision_argument),
+        ["rev-parse", disambiguation] => disambiguation
+            .strip_prefix("--disambiguate=")
+            .is_some_and(|prefix| {
+                (4..=64).contains(&prefix.len())
+                    && prefix.bytes().all(|byte| byte.is_ascii_hexdigit())
+            }),
+        [
+            "for-each-ref",
+            "--format=%(refname)",
+            "--",
+            head,
+            tag,
+            remote,
+        ] => {
+            let head = head.strip_prefix("refs/heads/");
+            let tag = tag.strip_prefix("refs/tags/");
+            let remote = remote.strip_prefix("refs/remotes/");
+            matches!((head, tag, remote), (Some(head), Some(tag), Some(remote)) if head == tag
+                && tag == remote
+                && is_bounded_short_ref_argument(head))
+        }
+        _ => false,
+    }
+}
+
+fn is_bounded_revision_argument(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 1024
+        && !value.chars().any(|character| character.is_control())
+}
+
+fn is_bounded_short_ref_argument(value: &str) -> bool {
+    is_bounded_revision_argument(value)
+        && !value.starts_with('-')
+        && !value.contains(['~', '^', ':', '?', '*', '[', '\\'])
 }
 
 fn os_arguments_equal(actual: &[OsString], expected: &[&str]) -> bool {
@@ -706,7 +797,7 @@ mod tests {
 
     use super::{
         CancellationToken, GitOperation, OutputStream, ProductionGitRunner, RepositoryQuery,
-        RunnerError, RunnerLimits, SAFE_GLOBAL_ARGUMENTS,
+        RevisionQuery, RunnerError, RunnerLimits, SAFE_GLOBAL_ARGUMENTS,
         fixture::{FixtureGitRunner, FixtureProcess},
         safe_environment_from, validate_approved_arguments,
     };
@@ -781,6 +872,58 @@ mod tests {
             })
             .expect_err("relative repository context must fail closed");
         assert_eq!(error, RunnerError::ForbiddenOperation);
+    }
+
+    #[test]
+    fn revision_operations_allow_only_typed_bounded_read_queries() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let repository = std::env::temp_dir().join("revision repository 한글");
+        let queries = [
+            RevisionQuery::ShortRefCandidates {
+                short_name: "feature/review".to_string(),
+            },
+            RevisionQuery::Disambiguate {
+                prefix: "abcd1234".to_string(),
+            },
+            RevisionQuery::VerifyCommit {
+                revision: "HEAD~2".to_string(),
+            },
+        ];
+
+        for query in queries {
+            let plan = runner
+                .plan(GitOperation::Revision {
+                    repository: repository.clone(),
+                    query,
+                })
+                .expect("typed revision query should be approved");
+            assert!(validate_approved_arguments(&plan.arguments).is_ok());
+            assert_eq!(plan.limits.stdout_bytes, 64 * 1024);
+        }
+
+        for malformed in [
+            vec!["rev-parse", "--verify", "HEAD"],
+            vec!["rev-parse", "--disambiguate=abc"],
+            vec![
+                "for-each-ref",
+                "--format=%(objectname)",
+                "--",
+                "refs/heads/main",
+            ],
+        ] {
+            let arguments = SAFE_GLOBAL_ARGUMENTS
+                .iter()
+                .copied()
+                .chain(["-C", repository.to_str().expect("UTF-8 fixture path")])
+                .chain(malformed)
+                .map(OsString::from)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                validate_approved_arguments(&arguments),
+                Err(RunnerError::ForbiddenOperation)
+            );
+        }
     }
 
     #[test]

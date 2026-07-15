@@ -5,6 +5,21 @@ export interface GitObjectId {
   hex: string;
 }
 
+export type GitRevisionKind =
+  | "head"
+  | "branch"
+  | "remoteBranch"
+  | "tag"
+  | "commit"
+  | "symbolic";
+
+export interface GitRevision {
+  rawLabel: string;
+  resolved: GitObjectId;
+  kind: GitRevisionKind;
+  displayName: string;
+}
+
 export interface GitPathIdentity {
   opaqueId: string;
   displayPath: string;

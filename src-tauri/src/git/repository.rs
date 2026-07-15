@@ -405,14 +405,12 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Output, Stdio};
-    use std::sync::{Mutex, MutexGuard};
+    use std::sync::MutexGuard;
     use std::time::SystemTime;
     use tempfile::{TempDir, tempdir};
 
-    static REPOSITORY_FIXTURE_LOCK: Mutex<()> = Mutex::new(());
-
     fn repository_fixture_guard() -> MutexGuard<'static, ()> {
-        REPOSITORY_FIXTURE_LOCK
+        crate::git::GIT_FIXTURE_LOCK
             .lock()
             .expect("repository fixture lock")
     }

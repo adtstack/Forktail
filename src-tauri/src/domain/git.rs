@@ -85,6 +85,26 @@ impl GitObjectId {
     }
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitRevisionKind {
+    Head,
+    Branch,
+    RemoteBranch,
+    Tag,
+    Commit,
+    Symbolic,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRevision {
+    pub raw_label: String,
+    pub resolved: GitObjectId,
+    pub kind: GitRevisionKind,
+    pub display_name: String,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPathIdentity {
@@ -340,7 +360,7 @@ pub struct GitRepositoryIdentity {
 mod tests {
     use super::{
         GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitPathIdentity,
-        GitRepositorySummary,
+        GitRepositorySummary, GitRevision, GitRevisionKind,
     };
     use serde_json::json;
 
@@ -410,6 +430,29 @@ mod tests {
                         "hex": "b".repeat(40),
                     },
                 },
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_resolved_revision_with_full_object_identity() {
+        let revision = GitRevision {
+            raw_label: "origin/main~1".to_string(),
+            resolved: sha1('d'),
+            kind: GitRevisionKind::Symbolic,
+            display_name: "origin/main~1".to_string(),
+        };
+
+        assert_eq!(
+            serde_json::to_value(revision).expect("serialize revision"),
+            json!({
+                "rawLabel": "origin/main~1",
+                "resolved": {
+                    "algorithm": "sha1",
+                    "hex": "d".repeat(40),
+                },
+                "kind": "symbolic",
+                "displayName": "origin/main~1",
             })
         );
     }

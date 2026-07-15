@@ -400,6 +400,14 @@ cargo test
 - 테스트 선행 증거: 구현 전 `cargo test parsers`는 `GitParseError`, `NulParseLimits`, `parse_nul_records`, `GitPathRegistry` API가 정의되지 않아 compile error로 실패했다. 구현 후 공백/tab/newline/control/non-UTF-8 byte 보존, truncated/extra/huge record, duplicate ID, session scope, refresh invalidation, Unix/Windows 변환 정책 6 tests가 통과했다.
 - 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/358 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 90 tests 통과/0 ignored. Windows/Linux runtime path 변환 smoke는 사용자 확인 항목으로 남긴다.
 
+### GIT-101 immutable revision resolver — 2026-07-15
+
+- 변경 파일: `src-tauri/src/git/revision.rs`, `src-tauri/src/git/runner.rs`, `src-tauri/src/git/repository.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/domain/git.rs`, `src-tauri/src/lib.rs`, `src/core/gitModels.ts`, `src/core/gitModels.test.ts`, `specs/001-git-snapshot-integration/tasks.md`, `VALIDATION.md`.
+- 수용 기준: `HEAD`, branch, tag, full/unique abbreviated object ID와 revision expression을 `rev-parse --verify --end-of-options <revision>^{commit}`로 full commit ID에 고정한다. short ref는 heads/tags/remote-tracking의 exact full-name 후보를 먼저 비교하고 hexadecimal input은 `--disambiguate` 결과를 먼저 비교해 localized stderr 없이 ambiguity를 판정한다. production runner는 세 typed read query만 추가하고 revision stdout을 64 KiB로 제한한다.
+- 실패/경계 조건: empty/leading-dash/whitespace/control/1 KiB 초과 input, malformed/truncated output, tag-to-blob, unborn/invalid revision을 invalid로 거절한다. local object 후보가 없는 hex input은 자동 fetch 없이 `GIT_OBJECT_MISSING_LOCAL`, 여러 short ref/object 후보는 `GIT_AMBIGUOUS_REVISION`, parser/runner 실패는 raw stderr·argv·후보를 노출하지 않는 stable error로 변환한다.
+- 테스트 선행 증거: 구현 전 `cargo test revision`은 `GitRevisionError`, `GitRevisionKind`, resolver와 `RevisionQuery`가 정의되지 않아 compile error로 실패했다. 구현 후 fake query의 structural ambiguity/output parser와 실제 temp repository의 detached HEAD, branch/tag, full/abbrev ID, `HEAD~1`, short-name collision, blob tag, invalid/unborn, repository fingerprint 불변 테스트가 통과했다.
+- 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/359 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 99 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux 실행은 사용자 확인 항목으로 남긴다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.

@@ -3,6 +3,7 @@ use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
 use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
+use crate::git::revision::{GitRevisionError, resolve_revision};
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::State;
@@ -43,6 +44,21 @@ pub fn close_git_repository(
         .map_err(CommandError::from)
 }
 
+#[tauri::command]
+pub fn resolve_git_revision(
+    repository_session_id: String,
+    raw_revision: String,
+    request_generation: u64,
+    sessions: State<'_, GitRepositorySessions>,
+) -> CommandResult<crate::GitRevision> {
+    let _ = request_generation;
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    resolve_revision(&session, &raw_revision).map_err(CommandError::from)
+}
+
 impl From<GitExecutableError> for CommandError {
     fn from(error: GitExecutableError) -> Self {
         match error {
@@ -74,6 +90,18 @@ impl From<GitRepositoryError> for CommandError {
             | GitRepositoryError::SessionStateUnavailable => {
                 Self::git(AppErrorCode::GitCommandFailed)
             }
+        }
+    }
+}
+
+impl From<GitRevisionError> for CommandError {
+    fn from(error: GitRevisionError) -> Self {
+        match error {
+            GitRevisionError::Runner(error) => error.into(),
+            GitRevisionError::InvalidRevision => Self::git(AppErrorCode::GitInvalidRevision),
+            GitRevisionError::Ambiguous { .. } => Self::git(AppErrorCode::GitAmbiguousRevision),
+            GitRevisionError::ObjectMissingLocal => Self::git(AppErrorCode::GitObjectMissingLocal),
+            GitRevisionError::InvalidOutput => Self::git(AppErrorCode::GitCommandFailed),
         }
     }
 }
@@ -150,6 +178,40 @@ mod tests {
         for (source, expected) in cases {
             let error = CommandError::from(source);
             assert_eq!(error.code, expected);
+            assert!(!error.message.contains("stderr"));
+        }
+    }
+
+    #[test]
+    fn maps_revision_failures_without_localized_stderr_or_candidates() {
+        let cases = [
+            (
+                GitRevisionError::InvalidRevision,
+                AppErrorCode::GitInvalidRevision,
+            ),
+            (
+                GitRevisionError::Ambiguous {
+                    candidates: vec![
+                        "refs/heads/release".to_string(),
+                        "refs/tags/release".to_string(),
+                    ],
+                },
+                AppErrorCode::GitAmbiguousRevision,
+            ),
+            (
+                GitRevisionError::ObjectMissingLocal,
+                AppErrorCode::GitObjectMissingLocal,
+            ),
+            (
+                GitRevisionError::InvalidOutput,
+                AppErrorCode::GitCommandFailed,
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("refs/"));
             assert!(!error.message.contains("stderr"));
         }
     }

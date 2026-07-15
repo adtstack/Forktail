@@ -4,6 +4,7 @@ import type {
   GitHeadState,
   GitObjectId,
   GitPathIdentity,
+  GitRevision,
   GitRepositorySummary,
 } from "./gitModels";
 
@@ -60,6 +61,22 @@ describe("Git DTO contract", () => {
     });
   });
 
+  it("keeps resolved revisions pinned to a full immutable object ID", () => {
+    const revision: GitRevision = {
+      rawLabel: "main~1",
+      resolved: { algorithm: "sha1", hex: "c".repeat(40) },
+      kind: "symbolic",
+      displayName: "main~1",
+    };
+
+    expect(revision).toEqual({
+      rawLabel: "main~1",
+      resolved: { algorithm: "sha1", hex: "c".repeat(40) },
+      kind: "symbolic",
+      displayName: "main~1",
+    });
+  });
+
   it("keeps every head-state variant explicit", () => {
     const states: GitHeadState[] = [
       { kind: "unborn" },
@@ -77,6 +94,7 @@ describe("Git DTO contract", () => {
     expect(rustDtoSource).toContain('rename_all_fields = "camelCase"');
     expect(rustDtoSource).toContain("pub struct GitObjectId");
     expect(rustDtoSource).toContain("pub struct GitPathIdentity");
+    expect(rustDtoSource).toContain("pub struct GitRevision");
     expect(rustDtoSource).toContain("pub struct GitRepositorySummary");
   });
 });

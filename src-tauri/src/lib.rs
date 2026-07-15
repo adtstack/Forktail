@@ -6,7 +6,7 @@ mod menu;
 
 pub use domain::git::{
     GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitPathIdentity,
-    GitRepositoryIdentity, GitRepositorySummary,
+    GitRepositoryIdentity, GitRepositorySummary, GitRevision, GitRevisionKind,
 };
 
 use commands::{files, folders, git as git_commands, merge, startup, system};
@@ -29,6 +29,7 @@ pub fn run() {
             git_commands::check_git_availability,
             git_commands::detect_git_repository,
             git_commands::close_git_repository,
+            git_commands::resolve_git_revision,
             merge::merge_texts,
             startup::exit_external_git_tool,
             startup::startup_args,
