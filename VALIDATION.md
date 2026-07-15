@@ -295,7 +295,7 @@ cargo test
 
 실행 결과:
 
-- `npm run check`: typecheck 통과, Vitest 54 files/350 tests 통과, production build 통과
+- `npm run check`: typecheck 통과, frontend Vitest 54 files/350 tests와 T009 Git harness Vitest 1 file/15 tests 통과, production build 통과
 - `npm run tauri build`: release binary와 macOS `.app` bundle 생성 통과
 - `cd src-tauri && cargo fmt --all --check`: 통과
 - `cd src-tauri && cargo clippy --all-targets -- -D warnings`: 통과
@@ -319,20 +319,34 @@ cargo test
 
 ### T009 INT-002/MRG-014 Git external tool 검증
 
-아래 표의 `pending`은 미실행이며 통과를 뜻하지 않는다. 각 행은 release artifact와 격리된 repository-local Git config로 difftool wait/temp/added/deleted 및 mergetool missing-Base/save/no-save/unresolved/temp/wait를 모두 확인해야 `pass`로 바꾼다.
+아래 표의 `pending`은 미실행이며 통과를 뜻하지 않는다. 각 행은 release artifact와 격리된 repository-local Git config로 difftool wait/temp/added/deleted/read-only/launch-failure/crash, mergetool missing-Base/real-empty-Base/save/no-save/unresolved/external-change-race/temp/wait, 해당 OS 전용 path/lock/runtime gate를 모두 확인해야 `pass`로 바꾼다.
 
 | OS | Artifact | Git version | Difftool | Mergetool | Evidence |
 |---|---|---|---|---|---|
-| Windows | installed `.exe` | pending | pending | pending | 별도 Windows 환경 필요 |
-| macOS | release `.app` 0.2.2 arm64, executable SHA-256 `f4a4401081bb…` | 2.50.1 (Apple Git-155) | pending | pending | 2026-07-15 process-level 부분 실행; UI manual-not-run |
-| Linux | AppImage/지원 binary | pending | pending | pending | 별도 Linux 환경 필요 |
+| Windows | installed `.exe` | pending | pending | pending | 사용자 실행 예정 |
+| macOS | release `.app` 0.2.2 arm64, executable SHA-256 `f4a4401081bb…` | 2.50.1 (Apple Git-155) | pending | pending | 2026-07-15 harness/process-level 부분 실행; UI manual-not-run |
+| Linux | AppImage/지원 binary | pending | pending | pending | 사용자 실행 예정 |
+
+#### T009 격리 fixture/verifier 하네스 — 2026-07-15
+
+- `scripts/git-tool-smoke.mjs`는 fixture root를 만들기 전에 Git 2.45.0 이상을 확인하고 공백, apostrophe, Unicode가 포함된 임시 root에 파일명 자체도 세 문자를 포함하는 A/D/M difftool repository, modify/modify conflict, stage 1 없는 add/add, 실제 empty stage-1 blob conflict를 생성한다. HOME/XDG/global config는 비어 있는 임시 경로로 격리하고 system config, system attributes, optional lock refresh, credential prompt는 비활성화하며 실제 remote는 사용하지 않는다. inherited `GIT_*` 변수는 Windows 대소문자 차이까지 제거한다. setup 도중 실패하면 하네스가 새로 만든 root를 제거한다.
+- config install은 Git tool setup에서 복사한 정확한 `difftool.forktail.*`/`mergetool.forktail.*` 네 key만 허용한다. 네 repository의 금지 default, non-tool config, tool key cardinality를 모두 먼저 검사한 뒤 repo-local key를 설치하며, 설치된 exact value hash와 각 `.git/config` 전체 bytes hash를 root 안의 일회성 receipt에 고정한다.
+- manifest 전체 hash는 생성 직후 root 안의 provenance marker에 봉인된다. verifier는 이 sealed baseline을 기준으로 HEAD object와 symbolic/detached/merge operation state, refs, tracked file hash/size/mtime/permission, index bytes/mtime/stages/mode/object/flags와 `.lock`, exact tool config/receipt, Result fingerprint, 모든 regular non-symlink Forktail backup의 원본 일치, external-writer fingerprint receipt, unexpected sidecar와 mergetool repo-local temp residue를 checkpoint별로 검사한다. no-save/unresolved Result는 실제 Git wrapper가 바꿀 수 있는 mtime을 제외하고 hash/size/permission을 비교하며 external capture 이후에는 mtime까지 고정한다. `.orig`는 post-confirm에서만 허용하고 존재하면 원본 Result hash와 일치해야 한다.
+- install/run/capture/verify는 현재 Git version이 manifest에 기록된 지원 version과 같은지 다시 확인하고, run 직전 exact receipt와 네 tool config single-value/false 계약 및 금지 default를 검증한다. manifest는 정확한 네 repository key와 full object ID revision만 허용하고 filesystem identity를 사용해 NFC/NFD manifest alias를 받아들이되 fixture root 밖 HOME/XDG/config/receipt/repository, 중복 repository, remapped Result, revision option injection, symlink/non-empty global config를 거절한다. cleanup은 별도 sealed provenance/root 검증만 사용하므로 index 같은 mutable fixture state가 손상돼도 disposable root를 제거한다.
+- 외부 MERGED 변경과 Save race는 second writer 변경 직후 `smoke:git-tools:capture-external`로 Result hash/size/mtime/permission을 일회성 receipt에 기록한다. 그 뒤 verifier가 receipt와 다른 Result, backup/index/config/Git-state 변경을 거절한다.
+- `npm run test:git-tools`: Vitest 1 file/15 tests 통과. `npm run check`와 `.github/workflows/ci.yml`은 일반 frontend test와 process 경합하지 않도록 이 suite를 별도 직렬 gate로 실행하고, watch suite에서는 제외한다. CI source는 Ubuntu frontend job과 별도 Windows 2022 job에서 실행하며 macOS NFC/NFD 분기는 이 로컬 macOS 실행으로 확인했다. GitHub Actions hosted runner에서의 실제 workflow 실행은 아직 확인하지 않았다.
+- 이 하네스는 repository/process 불변식과 실행 순서용 checklist를 제공하지만 packaged UI를 실행하지 않는다. 자동 test의 save lifecycle은 Result/backup/index 전환을 모사해 verifier를 검증하는 것이며 실제 Forktail Save 증거가 아니다.
+- HOME/XDG 격리는 native platform known-folder API가 만드는 모든 app/WebView state를 fixture 안에 가둔다는 보장이 아니다. 실제 packaged UI evidence는 disposable OS account/VM/profile에서 다시 실행한다.
+- cleanup 전에 sanitized summary와 artifact identity를 이 문서에 전사한다. manifest/provenance 자체가 손상돼 CLI cleanup이 거절되면 준비 시 기록한 exact disposable root를 독립 확인해 수동 폐기하고 그 근거를 남긴다.
+- 현재 하네스 manifest schema는 2다. 아래 macOS process 관찰은 hardening 전 schema 1 fixture로 수집한 부분 증거이므로 해당 fixture를 현재 보존하고 있으며 schema 2 cleanup 명령의 대상이 아니다. evidence 정리 뒤 수동 폐기해야 한다. 어느 cell도 pass로 바꾸기 전에 schema 2가 생성한 최신 failure/race/OS/cleanup checklist 전체를 새 fixture에서 다시 실행해야 한다. Linux minimum glibc 결정은 `REL-004` 범위이며 T009는 실제 실행 환경만 기록한다.
 
 #### macOS process-level 부분 실행 — 2026-07-15
 
 - 환경: macOS 26.4.1 arm64, Git 2.50.1 (Apple Git-155), Forktail 0.2.2 release `.app`. 임시 HOME, global/system config 비활성화, repository-local tool config를 사용했다.
 - artifact/config quoting: executable을 공백, apostrophe, Unicode가 모두 포함된 격리 경로에 복사했다. generated command가 그 실제 executable을 실행했으며 `.gitconfig`나 default tool은 바꾸지 않았다.
-- Difftool process-level: 한 `git difftool` 호출이 added → deleted → modified를 순차 실행했다. added는 빈 LOCAL, deleted는 빈 REMOTE, modified는 두 temp path로 전달됐다. 각 창이 열린 동안 Git이 대기하고 해당 temp가 존재했으며, 일반 macOS app terminate 뒤 직전 temp가 정리되고 다음 path가 시작됐다. 마지막 종료 뒤 Git은 exit 0이었고 모든 관찰 temp가 정리됐다.
-- Mergetool process-level: 실제 add/add conflict에는 index stage 1이 없지만 Git이 0-byte BASE temp를 만들었다. `base_present=false` wrapper가 최종 packaged process에 빈 BASE slot과 LOCAL/REMOTE/MERGED 네 위치를 정확히 전달했다. 실행 중 MERGED hash와 index의 stage 2/3 두 entry는 유지됐다. 저장 없이 일반 종료하고 Git 질문에 `n`을 답한 뒤 예상대로 exit 1이었으며, MERGED hash와 unresolved index가 그대로이고 temp가 정리됐다.
+- Difftool process-level: 하네스의 한 `git difftool` 호출이 added → deleted → modified를 순차 실행했다. added는 빈 LOCAL, deleted는 빈 REMOTE, modified는 두 temp path로 전달됐다. 각 창이 열린 동안 Git이 대기하고 해당 temp가 존재했으며, 일반 macOS app terminate 뒤 직전 temp가 정리되고 다음 path가 시작됐다. 마지막 종료 뒤 Git은 exit 0이었고 모든 관찰 temp가 정리됐으며 `difftool-pristine` verifier가 통과했다.
+- Mergetool missing-Base process-level: 실제 add/add conflict에는 index stage 1이 없지만 Git이 0-byte BASE temp를 만들었다. `base_present=false` wrapper가 최종 packaged process에 빈 BASE slot과 LOCAL/REMOTE/MERGED 네 위치를 정확히 전달했다. 실행 중 MERGED hash와 index의 stage 2/3 두 entry는 유지됐다. 저장 없이 일반 종료하고 Git 질문에 `n`을 답한 뒤 예상대로 exit 1이었으며, MERGED hash와 unresolved index가 그대로이고 temp가 정리돼 `mergetool-missing-base-no-save` verifier가 통과했다.
+- Mergetool real-empty-Base process-level: 실제 empty stage-1 object가 있는 conflict에서는 Git의 0-byte BASE temp 경로가 빈 slot으로 축약되지 않고 packaged process에 전달됐다. 저장 없이 일반 종료하고 Git 질문에 `n`을 답한 뒤 예상대로 exit 1이었으며 `mergetool-empty-base-no-save` verifier가 통과했다. 이는 argv/path 보존 증거이며 UI에서 빈 Base pane을 직접 본 증거는 아니다.
 - Manual-not-run: 이 실행 환경의 macOS desktop이 `loginwindow`에 잠겨 있어 pane 매핑, missing badge, read-only controls, report export, 실제 Save, unresolved Save hard-block, dirty-close UI를 조작하지 못했다. process/argv/temp 관찰이나 component test로 이를 대체하지 않는다.
 - 판정: Difftool과 Mergetool은 모두 `pending`, T009는 미완료다. Windows/Linux 전체와 macOS UI 사례가 모두 실행되기 전 Phase 2 gate를 열지 않는다.
 

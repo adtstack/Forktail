@@ -636,7 +636,7 @@ external modification check
 - backup 실패 시 기존 target을 보존한다.
 - write/flush/fsync/replace fault마다 기존 target을 보존한다.
 - unresolved marker 저장 guard가 기존 MRG-007 정책과 일치한다.
-- 저장하지 않고 닫으면 MERGED fingerprint와 bytes가 그대로다.
+- 저장하지 않고 닫으면 MERGED bytes/size/permission이 그대로다. `trustExitCode=false`의 실제 `git mergetool`은 tool 호출 전후 MERGED/BACKUP을 이동·복원하며 앱이 쓰지 않아도 MERGED mtime을 바꿀 수 있으므로 no-save/unresolved 판정에는 mtime을 mutation 증거로 사용하지 않는다.
 - 외부 수정 뒤 저장은 명시적 사용자 선택 없이는 실패한다.
 - Windows file lock/read-only attribute, Unix permission, symlink swap을 포함한다.
 
@@ -692,9 +692,28 @@ repository-aware conflict 화면의 성공 메시지는 파일 저장만 완료�
 
 - 임시 repository와 격리된 HOME/XDG/config를 사용한다.
 - global `.gitconfig`를 수정하지 않는다.
-- test 종료 시 repo-local tool config를 제거한다.
+- test 종료 시 fixture root 전체를 제거해 repo-local tool config도 함께 폐기한다.
 - 실제 인터넷 remote와 credential helper를 사용하지 않는다.
 - 개발용 Vite URL이 아니라 packaged/release executable을 실행한다.
+- Git 2.45.0 이상을 사용하고 `git --version` 결과를 manifest와 evidence에 기록한다.
+- install/run/capture/verify마다 현재 Git version이 manifest의 기록과 같은지 확인하며 달라졌다면 새 fixture를 준비한다. cleanup은 sealed manifest/provenance와 root layout만 확인해 손상된 disposable repository도 제거할 수 있어야 한다.
+- `GIT_OPTIONAL_LOCKS=0`을 포함한 격리 환경으로 verifier의 read-only Git 조회가 index refresh를 만들지 않게 한다.
+- native known-folder API가 HOME/XDG를 무시할 수 있으므로 packaged UI evidence는 disposable OS account, VM 또는 동등한 clean profile에서 실행한다. fixture root가 모든 WebView/app state write를 포함한다고 주장하지 않는다.
+
+T009 공통 fixture와 verifier는 다음 명령으로 준비·검증한다.
+
+```bash
+npm run smoke:git-tools:prepare
+npm run smoke:git-tools:install -- "<manifest.json>" "<GIT_TOOL_CONFIG.gitconfig>"
+npm run smoke:git-tools:run -- "<manifest.json>" <difftool|mergetool-save|mergetool-missing-base|mergetool-empty-base>
+npm run smoke:git-tools:capture-external -- "<disposable-manifest.json>"
+npm run smoke:git-tools:verify -- "<manifest.json>" <checkpoint>
+npm run smoke:git-tools:cleanup -- "<manifest.json>"
+```
+
+`scripts/git-tool-smoke.mjs`는 공백·apostrophe·Unicode가 있는 root 아래 A/D/M repository, modify/modify conflict, stage 1 없는 add/add, 실제 empty stage-1 blob conflict를 만든다. HOME/XDG/global config와 system attributes를 격리하고 system config, optional lock refresh, credential prompt를 비활성화하며 remote를 만들지 않는다. 생성 직후 manifest 전체 hash를 별도 provenance marker에 봉인해 baseline/path/expected 배열 변조로 verifier를 약화할 수 없게 한다. Git tool setup에서 복사한 정확한 두 tool section만 모든 fixture에 설치하고 `diff.tool`/`merge.tool`은 전체 repository 사전 검사 후 건드리지 않는다. 설치 뒤 네 tool value hash와 각 `.git/config` 전체 bytes hash를 receipt에 고정한다. 외부 writer race는 Save 시도 전에 Result hash/size/mtime/permission을 별도 일회성 receipt로 고정한다. 생성된 `GIT_TOOL_SMOKE_CHECKLIST.md`가 UI 조작, disposable failure/race fixture, OS별 gate와 checkpoint 순서의 기준이다. setup 중 실패하면 새 root를 제거한다. cleanup은 sealed manifest/provenance와 root identity만 검증하므로 index 같은 mutable fixture state가 손상돼도 root를 제거한다. manifest/provenance 자체가 손상되면 준비 시 기록한 exact disposable root를 독립 확인한 뒤 수동 정리와 그 근거를 기록한다.
+
+자동 integration test는 fixture stage, config allowlist/raw bytes, revision argv injection, 저장 전후 Result/backup/index/refs/Git state/lock/temp 불변식을 검사한다. 일반 frontend suite와 process 경합하지 않도록 `npm run test:git-tools`에서 직렬 실행하며 `npm run check`와 CI가 이를 별도 gate로 호출한다. 이 test는 packaged app이나 UI를 실행하지 않는다.
 
 ### 12.2 Difftool
 
@@ -753,13 +772,15 @@ temp repo에 실제 conflict 생성
 |---|---|
 | Windows | 설치된 `.exe`, backslash/drive/UNC, file lock, quoting, process wait |
 | macOS | `.app` 내부 실제 executable 또는 검증된 `--wait` launcher, notarized/ad-hoc artifact, NFC/NFD path |
-| Linux | AppImage/지원 binary, executable bit, desktop 환경과 무관한 process wait, oldest supported glibc |
+| Linux | AppImage/지원 binary, executable bit, desktop 환경과 무관한 process wait; minimum glibc 결정은 `REL-004` release gate |
 
 macOS의 단순 `open App.app`처럼 즉시 반환하는 launcher는 Git tool 계약으로 인정하지 않는다. Git이 session window 종료까지 기다릴 수 있는 실행 경로를 검증해야 한다.
 
 ### 12.5 T009 evidence record
 
 실행 결과의 단일 기록 위치는 `VALIDATION.md`의 **INT-002/MRG-014 Git external tool 검증** 표다. `pending`을 `pass`로 바꾸려면 한 OS에서 다음 evidence를 모두 남긴다.
+
+fixture 준비 시 생성된 `GIT_TOOL_SMOKE_CHECKLIST.md`를 실행 기록으로 사용하고, 각 checkpoint에서 `smoke:git-tools:verify` 결과를 확인한다. verifier는 sealed manifest baseline을 기준으로 HEAD object와 symbolic/detached 및 merge pseudo-ref state, refs, index bytes/mtime/stages/flags와 `.lock`, Result와 다른 tracked file의 hash/size/mtime/permission, exact tool config와 `.git/config` bytes, stage-0 mode/object/flags, 모든 Forktail backup의 원본 일치, external-writer receipt, unexpected sidecar와 mergetool repository-local temp residue를 fail-closed로 검사한다. no-save/unresolved Result는 Git wrapper가 바꿀 수 있는 mtime을 제외하고 hash/size/permission을 비교하며, external-writer receipt 이후에는 mtime까지 고정한다. `.orig`는 post-confirm에서만 허용하고 존재하면 원본 Result hash와 일치해야 한다. difftool temp lifetime은 process 관찰로 별도 기록한다. 예상되는 Result/다른 파일 삭제처럼 검증 대상이 사라져도 raw stack 대신 구조화된 failure code로 실패해야 한다. fixture 삭제 전에 sanitized summary와 artifact identity를 `VALIDATION.md`에 전사한다.
 
 ```text
 Date / OS / architecture / Git version / forktail version
@@ -774,16 +795,22 @@ Difftool:
 
 Mergetool:
 - missing Base
+- 실제 empty Base가 missing이 아니라 present empty로 표시됨
 - save 뒤 MERGED-only 변경
 - no-save close 뒤 원본 유지
 - unresolved save hard block
+- 외부 MERGED 변경과 Save 경쟁에서 overwrite 차단
 - process 종료 전 index 불변
 - process 종료 뒤 Git 사용자 확인 흐름
+
+Failure/OS:
+- packaged app launch failure와 강제 종료 뒤 repository 불변
+- Windows UNC/deny-write file lock, macOS NFC/NFD와 artifact identity, Linux executable bit와 실행 환경 glibc 기록 (`REL-004`의 minimum baseline 결정과 분리)
 
 Notes: 파일 내용, 전체 home path, raw stderr는 기록하지 않음
 ```
 
-한 사례라도 미실행이면 해당 OS/tool cell은 `pending` 또는 `fail`로 유지한다. 다른 OS의 결과나 unit test로 대체하지 않는다.
+한 사례라도 미실행이면 해당 OS/tool cell은 `pending` 또는 `fail`로 유지한다. real-empty Base, failure/race, OS-specific gate도 생략하지 않으며 다른 OS의 결과나 unit test로 대체하지 않는다.
 
 process/argv/temp 관찰은 process-level evidence로만 기록한다. pane 표시, read-only, save/no-save, unresolved 동작을 실제 UI에서 조작하지 못한 경우 `manual-not-run`으로 분리하고 통과 근거로 대체하지 않는다.
 

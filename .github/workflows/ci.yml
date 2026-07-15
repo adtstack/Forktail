@@ -27,7 +27,21 @@ jobs:
       - run: npm audit --audit-level=high
       - run: npm run typecheck
       - run: npm test
+      - run: npm run test:git-tools
       - run: npm run build
+
+  git-tool-harness-windows:
+    name: Git tool harness (Windows)
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:git-tools
 
   rust:
     # SAV-007 requires the Windows atomic-replace path to be validated on

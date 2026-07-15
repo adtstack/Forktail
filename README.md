@@ -113,7 +113,18 @@ git difftool --tool=forktail --no-prompt
 git mergetool --tool=forktail
 ```
 
-difftool은 `$LOCAL`/`$REMOTE`를 read-only로 열며 added/deleted file의 `/dev/null` side를 missing으로 표시합니다. mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 받고 `$MERGED`만 저장합니다. Git이 stage 1 없는 add/add에 0-byte BASE temp를 만드는 경우도 missing으로 구분하고, 실제 empty Base는 유지합니다. 생성된 mergetool 설정은 `trustExitCode = false`, `hideResolved = false`를 유지합니다. 현재 GUI 종료 code는 저장 성공 여부를 신뢰성 있게 전달하지 않으므로 Git의 후속 확인 흐름을 사용해야 합니다. Git backup 설정에 따라 Git의 `.orig`와 Forktail safe-save의 `.bak.<timestamp>`가 함께 남을 수 있습니다. `%O/%A/%B/%P` custom merge driver 설정은 지원하지 않습니다.
+difftool은 `$LOCAL`/`$REMOTE`를 read-only로 열며 added/deleted file의 `/dev/null` side를 missing으로 표시합니다. mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 받고 `$MERGED`만 저장합니다. Git이 stage 1 없는 add/add에 0-byte BASE temp를 만드는 경우도 missing으로 구분하고, 실제 empty Base는 유지합니다. 생성된 mergetool 설정은 `trustExitCode = false`, `hideResolved = false`를 유지합니다. 현재 GUI 종료 code는 저장 성공 여부를 신뢰성 있게 전달하지 않으므로 Git의 후속 확인 흐름을 사용해야 합니다. 저장으로 `$MERGED` timestamp가 갱신되면 Git이 질문 없이 성공으로 처리할 수 있고, unchanged로 판단할 때만 성공 여부를 물을 수 있으므로 실제 관찰 경로를 기록합니다. Git backup 설정에 따라 Git의 `.orig`와 Forktail safe-save의 `.bak.<timestamp>`가 함께 남을 수 있습니다. `%O/%A/%B/%P` custom merge driver 설정은 지원하지 않습니다.
+
+T009 packaged lifecycle을 검증할 때는 Git 2.45.0 이상에서 격리 fixture와 체크리스트를 생성합니다. 출력된 config template에는 테스트할 packaged 앱의 **Git tool setup**에서 복사한 두 snippet만 붙여 넣습니다.
+
+```bash
+npm run smoke:git-tools:prepare
+npm run smoke:git-tools:install -- "<manifest.json>" "<GIT_TOOL_CONFIG.gitconfig>"
+npm run smoke:git-tools:run -- "<manifest.json>" difftool
+npm run smoke:git-tools:verify -- "<manifest.json>" difftool-pristine
+```
+
+같은 manifest로 `mergetool-save`, `mergetool-missing-base`, `mergetool-empty-base`를 실행합니다. 정확한 UI·저장·종료 순서, disposable crash/launch/race fixture, OS별 gate와 verifier checkpoint는 함께 생성되는 `GIT_TOOL_SMOKE_CHECKLIST.md`를 따릅니다. manifest baseline은 별도 provenance marker로 봉인됩니다. 외부 변경 race에서는 두 번째 process가 `$MERGED`를 바꾼 직후 `smoke:git-tools:capture-external`로 그 fingerprint를 일회성 receipt에 고정한 뒤 Save를 시도합니다. verifier는 repository file metadata, Git operation state, index, exact repo-local config bytes, backup/lock/temp를 검사합니다. 실제 `git mergetool`이 no-save에서도 `$MERGED` mtime을 바꿀 수 있어 no-save/unresolved는 hash/size/permission을 비교하고, external capture 이후에는 mtime까지 고정합니다. 이 검사는 실제 pane 표시, difftool temp lifetime, read-only control, Save, unresolved 차단을 대신하지 않습니다. native app/WebView state가 fixture 밖 OS known folder를 사용할 수 있으므로 packaged UI 증거는 disposable OS account/VM/profile에서 수집합니다. sanitized evidence를 `VALIDATION.md`에 옮긴 뒤 `npm run smoke:git-tools:cleanup -- "<manifest.json>"`으로 각 fixture를 정리합니다. cleanup은 sealed provenance/root만 사용하므로 index 같은 mutable fixture state가 손상돼도 동작합니다.
 
 macOS 앱 번들을 만들려면:
 
