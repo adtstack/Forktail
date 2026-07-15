@@ -20,8 +20,14 @@
 **Purpose**: repository-aware Git을 시작하기 전에 외부 tool lifecycle과 CLI-first 결정을 고정한다.
 
 - [X] T001 GIT-000 최소 Git version/capability, CLI-first, allowlist, no-network/no-mutation 결정을 `docs/10_ADR.md`, `docs/17_GIT_INTEGRATION.md`, `docs/21_GIT_REFERENCES.md`, `research.md`에 기록한다
-- [ ] T002 MRG-014 Windows/macOS/Linux packaged mergetool save/no-save/temp/wait 증거를 `VALIDATION.md`와 `docs/20_GIT_TEST_PLAN.md`에 기록한다
-- [ ] T003 INT-002 difftool/mergetool OS별 config 출력과 `trustExitCode=false` 안내를 `docs/14_PRODUCT_GAP_ROADMAP.md`, `README.md`, `VALIDATION.md`에 확정한다
+- [ ] T002 MRG-012 기본 Git label·diff3·base-less marker와 unresolved mergetool save 차단 테스트를 `src/core/conflicts.test.ts`, `src/core/mergeSave.test.ts`, `src/core/startupSession.test.ts`에 먼저 추가한다
+- [ ] T003 MRG-012 Git marker parser와 mergetool unresolved hard-block policy를 `src/core/conflicts.ts`, `src/core/mergeSave.ts`에 구현한다
+- [ ] T004 MRG-014 missing Base, 기존 `$MERGED` Result/fingerprint, mergetool origin, dirty close, Git temp path 비영속화 테스트를 `src/core/mergetoolSession.test.ts`, `src/core/startupSession.test.ts`, `src/core/settings.test.ts`, `src/components/MergeView.test.tsx`에 먼저 추가한다
+- [ ] T005 MRG-014 mergetool 전용 session adapter와 `$MERGED`-only save/close lifecycle을 `src/core/mergetoolSession.ts`, `src/core/startupSession.ts`, `src/core/settings.ts`, `src/App.tsx`, `src/components/MergeView.tsx`에 구현한다
+- [ ] T006 INT-002 `$LOCAL`/`$REMOTE` read-only difftool parser와 Windows/macOS/Linux config quote snapshot 테스트를 `src/core/startupSession.test.ts`, `src/core/gitToolConfig.test.ts`, `src/components/FileCompareView.test.tsx`에 먼저 추가한다
+- [ ] T007 INT-002 `--difftool` read-only session과 OS별 copy-only config generator를 `src/core/startupSession.ts`, `src/core/gitToolConfig.ts`, `src/core/models.ts`, `src/App.tsx`, `src/components/FileCompareView.tsx`에 구현한다
+- [ ] T008 INT-002 difftool/mergetool config 출력, `trustExitCode=false`, `hideResolved=false`, 자동 config 수정 금지 안내를 `docs/14_PRODUCT_GAP_ROADMAP.md`, `README.md`, `VALIDATION.md`에 확정한다
+- [ ] T009 MRG-014 Windows/macOS/Linux packaged mergetool save/no-save/unresolved/temp/wait 증거를 `VALIDATION.md`와 `docs/20_GIT_TEST_PLAN.md`에 기록한다
 
 **Checkpoint**: 시작 gate가 통과되지 않으면 Phase 2 이후 이슈를 승격하지 않는다.
 
@@ -33,16 +39,16 @@
 
 **⚠️ CRITICAL**: 이 phase가 완료되기 전에는 Git user story UI를 구현하지 않는다.
 
-- [ ] T004 GIT-001 fake runner의 argv/env/stdout-stderr drain/timeout/cancel/cap/forbidden-operation 실패 테스트를 `src-tauri/src/git/runner.rs`에 먼저 추가한다
-- [ ] T005 GIT-001 positive-allowlisted production runner와 fixture-only mutation helper 분리를 `src-tauri/src/git/runner.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/lib.rs`에 구현한다
-- [ ] T006 [P] GIT-002 Git error/DTO camelCase 직렬화와 friendly message 계약 테스트를 `src-tauri/src/error.rs`, `src-tauri/src/domain/git.rs`, `src/core/errors.test.ts`, `src/core/gitModels.test.ts`에 먼저 추가한다
-- [ ] T007 GIT-002 stable Git error와 object/path/repository DTO를 `src-tauri/src/error.rs`, `src-tauri/src/domain/git.rs`, `src/core/errors.ts`, `src/core/gitModels.ts`에 구현한다
-- [ ] T008 [P] GIT-003 Git discovery/version/capability와 공백·Unicode executable path 테스트를 `src-tauri/src/git/executable.rs`에 먼저 추가한다
-- [ ] T009 GIT-003 absolute Git executable discovery와 fail-closed capability gate를 `src-tauri/src/git/executable.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T010 GIT-004 root/nested/non-repo/bare/linked-worktree/detached/unsafe repository integration 테스트를 `src-tauri/src/git/repository.rs`에 먼저 추가한다
-- [ ] T011 GIT-004 repository identity와 session lifecycle을 `src-tauri/src/git/repository.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/domain/git.rs`에 구현한다
-- [ ] T012 [P] GIT-005 NUL/truncated/non-UTF-8/control-byte/duplicate opaque ID parser 테스트를 `src-tauri/src/git/parsers.rs`에 먼저 추가한다
-- [ ] T013 GIT-005 byte-preserving parser primitive와 session-scoped opaque path map을 `src-tauri/src/git/parsers.rs`, `src-tauri/src/domain/git.rs`에 구현한다
+- [ ] T010 GIT-001 fake runner의 argv/env/stdout-stderr drain/timeout/cancel/cap/forbidden-operation 실패 테스트를 `src-tauri/src/git/runner.rs`에 먼저 추가한다
+- [ ] T011 GIT-001 positive-allowlisted production runner와 fixture-only mutation helper 분리를 `src-tauri/src/git/runner.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/lib.rs`에 구현한다
+- [ ] T012 [P] GIT-002 Git error/DTO camelCase 직렬화와 friendly message 계약 테스트를 `src-tauri/src/error.rs`, `src-tauri/src/domain/git.rs`, `src/core/errors.test.ts`, `src/core/gitModels.test.ts`에 먼저 추가한다
+- [ ] T013 GIT-002 stable Git error와 object/path/repository DTO를 `src-tauri/src/error.rs`, `src-tauri/src/domain/git.rs`, `src/core/errors.ts`, `src/core/gitModels.ts`에 구현한다
+- [ ] T014 [P] GIT-003 Git discovery/version/capability와 공백·Unicode executable path 테스트를 `src-tauri/src/git/executable.rs`에 먼저 추가한다
+- [ ] T015 GIT-003 absolute Git executable discovery와 fail-closed capability gate를 `src-tauri/src/git/executable.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T016 GIT-004 root/nested/non-repo/bare/linked-worktree/detached/unsafe repository integration 테스트를 `src-tauri/src/git/repository.rs`에 먼저 추가한다
+- [ ] T017 GIT-004 repository identity와 session lifecycle을 `src-tauri/src/git/repository.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/domain/git.rs`에 구현한다
+- [ ] T018 [P] GIT-005 NUL/truncated/non-UTF-8/control-byte/duplicate opaque ID parser 테스트를 `src-tauri/src/git/parsers.rs`에 먼저 추가한다
+- [ ] T019 GIT-005 byte-preserving parser primitive와 session-scoped opaque path map을 `src-tauri/src/git/parsers.rs`, `src-tauri/src/domain/git.rs`에 구현한다
 
 **Checkpoint**: frontend가 arbitrary Git argv/path bytes를 전달할 수 없고 production runner가 mutation/network operation을 구성할 수 없다.
 
@@ -56,29 +62,29 @@
 
 ### Tests for User Story 1
 
-- [ ] T014 [US1] GIT-101 HEAD/branch/tag/full·abbrev ID/short-name collision/detached/invalid revision 테스트를 `src-tauri/src/git/revision.rs`에 먼저 추가한다
-- [ ] T015 [P] [US1] GIT-102 local/remote-tracking/tag ref framing, cap, control-character 테스트를 `src-tauri/src/git/refs.rs`에 먼저 추가한다
-- [ ] T016 [P] [US1] GIT-201 regular/executable/symlink/submodule/SHA-256/non-UTF-8 tree parser 테스트를 `src-tauri/src/git/tree.rs`에 먼저 추가한다
-- [ ] T017 [US1] GIT-202 UTF-8/UTF-16/binary/LFS/64 MiB boundary/type-size mismatch blob 테스트를 `src-tauri/src/git/blob.rs`와 `src-tauri/src/commands/files.rs`에 먼저 추가한다
-- [ ] T018 [P] [US1] GIT-203 lazy-fetch/filter/textconv/LFS helper가 0회인 fake/partial-clone 테스트를 `src-tauri/src/git/blob.rs`와 `src/core/networkPolicy.test.ts`에 먼저 추가한다
-- [ ] T019 [P] [US1] GIT-301 A/D/M/T/R/C/U/unknown/truncated byte record와 rename score 테스트를 `src-tauri/src/git/changed_files.rs`에 먼저 추가한다
-- [ ] T020 [US1] GIT-302 status-to-session, missing-vs-empty, origin/read-only capability 계약 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
-- [ ] T021 [P] [US1] GIT-601 repository open cancel/loading/error/keyboard/200% component 테스트를 `src/components/GitCompareView.test.tsx`와 `src/components/StartPage.test.tsx`에 먼저 추가한다
-- [ ] T022 [P] [US1] GIT-602 revision selector race/ambiguity/keyboard/combobox 테스트를 `src/components/GitRevisionSelector.test.tsx`에 먼저 추가한다
-- [ ] T023 [P] [US1] GIT-603 changed-file filter/count/rename/selection/10k virtualization/read-only 테스트를 `src/components/GitChangedFiles.test.tsx`와 `src/components/FileCompareView.test.tsx`에 먼저 추가한다
+- [ ] T020 [US1] GIT-101 HEAD/branch/tag/full·abbrev ID/short-name collision/detached/invalid revision 테스트를 `src-tauri/src/git/revision.rs`에 먼저 추가한다
+- [ ] T021 [P] [US1] GIT-102 local/remote-tracking/tag ref framing, cap, control-character 테스트를 `src-tauri/src/git/refs.rs`에 먼저 추가한다
+- [ ] T022 [P] [US1] GIT-201 regular/executable/symlink/submodule/SHA-256/non-UTF-8 tree parser 테스트를 `src-tauri/src/git/tree.rs`에 먼저 추가한다
+- [ ] T023 [US1] GIT-202 UTF-8/UTF-16/binary/LFS/64 MiB boundary/type-size mismatch blob 테스트를 `src-tauri/src/git/blob.rs`와 `src-tauri/src/commands/files.rs`에 먼저 추가한다
+- [ ] T024 [P] [US1] GIT-203 lazy-fetch/filter/textconv/LFS helper가 0회인 fake/partial-clone 테스트를 `src-tauri/src/git/blob.rs`와 `src/core/networkPolicy.test.ts`에 먼저 추가한다
+- [ ] T025 [P] [US1] GIT-301 A/D/M/T/R/C/U/unknown/truncated byte record와 rename score 테스트를 `src-tauri/src/git/changed_files.rs`에 먼저 추가한다
+- [ ] T026 [US1] GIT-302 status-to-session, missing-vs-empty, origin/read-only capability 계약 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
+- [ ] T027 [P] [US1] GIT-601 repository open cancel/loading/error/keyboard/200%와 repository→revision pair→changed file diff가 5회 이하 major interaction인 component 테스트를 `src/components/GitCompareView.test.tsx`와 `src/components/StartPage.test.tsx`에 먼저 추가한다
+- [ ] T028 [P] [US1] GIT-602 revision selector race/ambiguity/keyboard/combobox 테스트를 `src/components/GitRevisionSelector.test.tsx`에 먼저 추가한다
+- [ ] T029 [P] [US1] GIT-603 changed-file filter/count/rename/selection/10k virtualization/read-only와 bare/copy/cross-repository 후보 비노출 테스트를 `src/components/GitChangedFiles.test.tsx`와 `src/components/FileCompareView.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 1
 
-- [ ] T024 [US1] GIT-101 raw revision 검증·ambiguity 판정·immutable object ID 고정을 `src-tauri/src/git/revision.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T025 [US1] GIT-102 bounded local ref selector service를 `src-tauri/src/git/refs.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T026 [US1] GIT-201 revision tree/path lookup과 mode/type 분류를 `src-tauri/src/git/tree.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T027 [US1] GIT-202 blob type/size/read와 공유 text decode pipeline을 `src-tauri/src/git/blob.rs`, `src-tauri/src/commands/files.rs`, `src-tauri/src/domain/git.rs`에 구현한다
-- [ ] T028 [US1] GIT-203 raw blob/LFS/no-lazy-fetch 상태와 bounded memory cache를 `src-tauri/src/git/blob.rs`, `src-tauri/src/git/runner.rs`에 구현한다
-- [ ] T029 [US1] GIT-301 name-status changed-file service와 lossless old/new path mapping을 `src-tauri/src/git/changed_files.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T030 [US1] GIT-302 read-only compare session builder와 TypeScript adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`, `src/core/bridge.ts`에 구현한다
-- [ ] T031 [US1] GIT-601 `Open Git Repository` shell과 repository header를 `src/components/StartPage.tsx`, `src/components/GitCompareView.tsx`, `src/App.tsx`에 구현한다
-- [ ] T032 [US1] GIT-602 left/right revision selector와 stale validation handling을 `src/components/GitRevisionSelector.tsx`, `src/components/GitCompareView.tsx`, `src/core/gitSession.ts`에 구현한다
-- [ ] T033 [US1] GIT-603 changed-file sidebar와 기존 read-only diff viewer 연결을 `src/components/GitChangedFiles.tsx`, `src/components/GitCompareView.tsx`, `src/components/FileCompareView.tsx`에 구현한다
+- [ ] T030 [US1] GIT-101 raw revision 검증·ambiguity 판정·immutable object ID 고정을 `src-tauri/src/git/revision.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T031 [US1] GIT-102 bounded local ref selector service를 `src-tauri/src/git/refs.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T032 [US1] GIT-201 revision tree/path lookup과 mode/type 분류를 `src-tauri/src/git/tree.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T033 [US1] GIT-202 blob type/size/read와 공유 text decode pipeline을 `src-tauri/src/git/blob.rs`, `src-tauri/src/commands/files.rs`, `src-tauri/src/domain/git.rs`에 구현한다
+- [ ] T034 [US1] GIT-203 raw blob/LFS/no-lazy-fetch 상태와 bounded memory cache를 `src-tauri/src/git/blob.rs`, `src-tauri/src/git/runner.rs`에 구현한다
+- [ ] T035 [US1] GIT-301 name-status changed-file service와 lossless old/new path mapping을 `src-tauri/src/git/changed_files.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T036 [US1] GIT-302 read-only compare session builder와 TypeScript adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`, `src/core/bridge.ts`에 구현한다
+- [ ] T037 [US1] GIT-601 `Open Git Repository` shell과 repository header를 `src/components/StartPage.tsx`, `src/components/GitCompareView.tsx`, `src/App.tsx`에 구현한다
+- [ ] T038 [US1] GIT-602 left/right revision selector와 stale validation handling을 `src/components/GitRevisionSelector.tsx`, `src/components/GitCompareView.tsx`, `src/core/gitSession.ts`에 구현한다
+- [ ] T039 [US1] GIT-603 changed-file sidebar와 기존 read-only diff viewer 연결을 `src/components/GitChangedFiles.tsx`, `src/components/GitCompareView.tsx`, `src/components/FileCompareView.tsx`에 구현한다
 
 **Checkpoint**: User Story 1만으로 local branch/commit review MVP를 독립 배포·검증할 수 있다.
 
@@ -92,17 +98,17 @@
 
 ### Tests for User Story 2
 
-- [ ] T034 [US2] GIT-401 porcelain v2 clean/dirty/rename/untracked/unmerged/unborn/detached byte parser와 index-mutation guard 테스트를 `src-tauri/src/git/status.rs`에 먼저 추가한다
-- [ ] T035 [US2] GIT-402 revision↔working-tree root escape/symlink/TOCTOU/missing/binary/external-change 테스트를 `src-tauri/src/git/session.rs`에 먼저 추가한다
-- [ ] T036 [US2] GIT-403 stage-0/staged+unstaged/intent-to-add/sparse/index-race three-state 테스트를 `src-tauri/src/git/index.rs`에 먼저 추가한다
-- [ ] T037 [P] [US2] GIT-605 staged/unstaged/untracked/unmerged filter/refresh/keyboard UI 테스트를 `src/components/GitWorkingTreeFiles.test.tsx`에 먼저 추가한다
+- [ ] T040 [US2] GIT-401 porcelain v2 clean/dirty/rename/untracked/unmerged/unborn/detached byte parser와 index-mutation guard 테스트를 `src-tauri/src/git/status.rs`에 먼저 추가한다
+- [ ] T041 [US2] GIT-402 revision↔working-tree root escape/symlink/TOCTOU/missing/binary/external-change 테스트를 `src-tauri/src/git/session.rs`에 먼저 추가한다
+- [ ] T042 [US2] GIT-403 stage-0/staged+unstaged/intent-to-add/sparse/index-race three-state 테스트를 `src-tauri/src/git/index.rs`에 먼저 추가한다
+- [ ] T043 [P] [US2] GIT-605 staged/unstaged/untracked/unmerged filter/refresh/keyboard UI 테스트를 `src/components/GitWorkingTreeFiles.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 2
 
-- [ ] T038 [US2] GIT-401 bounded porcelain-v2 status service와 branch state를 `src-tauri/src/git/status.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T039 [US2] GIT-402 revision↔working-tree session과 containment/fingerprint guard를 `src-tauri/src/git/session.rs`, `src-tauri/src/commands/git.rs`, `src/core/gitSession.ts`에 구현한다
-- [ ] T040 [US2] GIT-403 stage-0 index reader와 HEAD/index/working-tree pair session을 `src-tauri/src/git/index.rs`, `src-tauri/src/git/session.rs`, `src-tauri/src/commands/git.rs`, `src/core/gitSession.ts`에 구현한다
-- [ ] T041 [US2] GIT-605 working-tree changed-file UI와 three-state selector를 `src/components/GitWorkingTreeFiles.tsx`, `src/components/GitCompareView.tsx`에 구현한다
+- [ ] T044 [US2] GIT-401 bounded porcelain-v2 status service와 branch state를 `src-tauri/src/git/status.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T045 [US2] GIT-402 revision↔working-tree session과 containment/fingerprint guard를 `src-tauri/src/git/session.rs`, `src-tauri/src/commands/git.rs`, `src/core/gitSession.ts`에 구현한다
+- [ ] T046 [US2] GIT-403 stage-0 index reader와 HEAD/index/working-tree pair session을 `src-tauri/src/git/index.rs`, `src-tauri/src/git/session.rs`, `src-tauri/src/commands/git.rs`, `src/core/gitSession.ts`에 구현한다
+- [ ] T047 [US2] GIT-605 working-tree changed-file UI와 three-state selector를 `src/components/GitWorkingTreeFiles.tsx`, `src/components/GitCompareView.tsx`에 구현한다
 
 **Checkpoint**: stage/unstage button 없이 commit 전 staged/unstaged review가 완결된다.
 
@@ -116,17 +122,17 @@
 
 ### Tests for User Story 3
 
-- [ ] T042 [US3] GIT-501 stage 1/2/3 grouping, missing/duplicate stage, add-add/delete-modify/rename/type conflict 테스트를 `src-tauri/src/git/conflicts.rs`에 먼저 추가한다
-- [ ] T043 [US3] GIT-502 conflict operation label, missing Result, marker/binary/symlink/submodule session 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
-- [ ] T044 [US3] GIT-503 stage/result fingerprint race, containment/symlink, unresolved marker, write fault, index mutation guard 테스트를 `src-tauri/src/git/conflicts.rs`와 `src-tauri/src/commands/files.rs`에 먼저 추가한다
-- [ ] T045 [P] [US3] GIT-604 conflict selection/save-refresh/dirty-switch/keyboard UI 테스트를 `src/components/GitConflictView.test.tsx`와 `src/components/MergeView.test.tsx`에 먼저 추가한다
+- [ ] T048 [US3] GIT-501 stage 1/2/3 grouping, missing/duplicate stage, add-add/delete-modify/rename/type conflict 테스트를 `src-tauri/src/git/conflicts.rs`에 먼저 추가한다
+- [ ] T049 [US3] GIT-502 conflict operation label, missing Result, marker/binary/symlink/submodule session 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
+- [ ] T050 [US3] GIT-503 stage/result fingerprint race, containment/symlink, unresolved marker, write fault, index mutation guard 테스트를 `src-tauri/src/git/conflicts.rs`와 `src-tauri/src/commands/files.rs`에 먼저 추가한다
+- [ ] T051 [P] [US3] GIT-604 conflict selection/save-refresh/dirty-switch/keyboard UI 테스트를 `src/components/GitConflictView.test.tsx`와 `src/components/MergeView.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 3
 
-- [ ] T046 [US3] GIT-501 unmerged path/stage discovery와 operation context를 `src-tauri/src/git/conflicts.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T047 [US3] GIT-502 stage snapshot + working Result merge session adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`에 구현한다
-- [ ] T048 [US3] GIT-503 Result-only safe-save와 `CONFLICT_SAVED` next-step contract를 `src-tauri/src/git/conflicts.rs`, `src-tauri/src/commands/git.rs`, `src/core/mergeSave.ts`에 구현한다
-- [ ] T049 [US3] GIT-604 conflict list와 기존 MergeView 연결을 `src/components/GitConflictView.tsx`, `src/components/MergeView.tsx`, `src/App.tsx`에 구현한다
+- [ ] T052 [US3] GIT-501 unmerged path/stage discovery와 operation context를 `src-tauri/src/git/conflicts.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T053 [US3] GIT-502 stage snapshot + working Result merge session adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`에 구현한다
+- [ ] T054 [US3] GIT-503 Result-only safe-save와 `CONFLICT_SAVED` next-step contract를 `src-tauri/src/git/conflicts.rs`, `src-tauri/src/commands/git.rs`, `src/core/mergeSave.ts`에 구현한다
+- [ ] T055 [US3] GIT-604 conflict list와 기존 MergeView 연결을 `src/components/GitConflictView.tsx`, `src/components/MergeView.tsx`, `src/App.tsx`에 구현한다
 
 **Checkpoint**: Forktail은 Result를 저장하지만 index를 unresolved 상태로 두고 terminal 후속 작업을 안내한다.
 
@@ -140,13 +146,13 @@
 
 ### Tests for User Story 4
 
-- [ ] T050 [US4] GIT-701 single/none/multiple merge-base, missing object, timeout/cancel 테스트를 `src-tauri/src/git/merge_base.rs`에 먼저 추가한다
-- [ ] T051 [US4] GIT-702 clean/conflict/missing/binary/type-change/read-only capability 테스트를 `src-tauri/src/git/session.rs`, `src/core/gitSession.test.ts`, `src/components/MergeView.test.tsx`에 먼저 추가한다
+- [ ] T056 [US4] GIT-701 single/none/multiple merge-base, missing object, timeout/cancel 테스트를 `src-tauri/src/git/merge_base.rs`에 먼저 추가한다
+- [ ] T057 [US4] GIT-702 clean/conflict/missing/binary/type-change/read-only capability 테스트를 `src-tauri/src/git/session.rs`, `src/core/gitSession.test.ts`, `src/components/MergeView.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 4
 
-- [ ] T052 [US4] GIT-701 merge-base typed service를 `src-tauri/src/git/merge_base.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T053 [US4] GIT-702 immutable Base/Left/Right preview adapter와 disclaimer UI를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/components/MergeView.tsx`에 구현한다
+- [ ] T058 [US4] GIT-701 merge-base typed service를 `src-tauri/src/git/merge_base.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T059 [US4] GIT-702 immutable Base/Left/Right preview adapter와 disclaimer UI를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/components/MergeView.tsx`에 구현한다
 
 **Checkpoint**: preview가 실제 Git merge로 오인되지 않고 항상 read-only다.
 
@@ -160,15 +166,15 @@
 
 ### Tests for User Story 5
 
-- [ ] T054 [US5] GIT-606 10k/100k tree virtualization, fuzzy search, different-path, opaque identity, cancel/stale 테스트를 `src/components/GitTreePicker.test.tsx`와 `src-tauri/src/git/tree.rs`에 먼저 추가한다
-- [ ] T055 [P] [US5] GIT-607 viewed reducer/filter-count/revision-reset/next-unviewed/privacy retention 테스트를 `src/core/gitReview.test.ts`와 `src/core/settings.test.ts`에 먼저 추가한다
-- [ ] T056 [US5] GIT-608 modified/added/deleted/rename/no-final-newline exact patch와 Save As fault/cancel/mutation 테스트를 `src/core/diffReport.test.ts`, `src/core/gitSession.test.ts`, `src-tauri/src/commands/files.rs`에 먼저 추가한다
+- [ ] T060 [US5] GIT-606 10k/100k tree virtualization, fuzzy search, different-path, opaque identity, cancel/stale와 10k 입력의 100ms UI stall budget benchmark를 `src/components/GitTreePicker.test.tsx`와 `src-tauri/src/git/tree.rs`에 먼저 추가한다
+- [ ] T061 [P] [US5] GIT-607 viewed reducer/filter-count/revision-reset/next-unviewed/privacy retention 테스트를 `src/core/gitReview.test.ts`와 `src/core/settings.test.ts`에 먼저 추가한다
+- [ ] T062 [US5] GIT-608 modified/added/deleted/rename/no-final-newline exact patch와 Save As fault/cancel/mutation 테스트를 `src/core/diffReport.test.ts`, `src/core/gitSession.test.ts`, `src-tauri/src/commands/files.rs`에 먼저 추가한다
 
 ### Implementation for User Story 5
 
-- [ ] T057 [US5] GIT-606 lazy/batched tracked-tree picker와 different-path session mapping을 `src/components/GitTreePicker.tsx`, `src/components/GitCompareView.tsx`, `src-tauri/src/git/tree.rs`에 구현한다
-- [ ] T058 [US5] GIT-607 session-local viewed queue와 keyboard next-unviewed를 `src/core/gitReview.ts`, `src/components/GitChangedFiles.tsx`, `src/components/GitCompareView.tsx`에 구현한다
-- [ ] T059 [US5] GIT-608 immutable snapshot unified patch Save As를 `src/core/diffReport.ts`, `src/core/gitSession.ts`, `src/components/GitCompareView.tsx`, `src/core/bridge.ts`에 구현한다
+- [ ] T063 [US5] GIT-606 lazy/batched tracked-tree picker와 different-path session mapping을 `src/components/GitTreePicker.tsx`, `src/components/GitCompareView.tsx`, `src-tauri/src/git/tree.rs`에 구현한다
+- [ ] T064 [US5] GIT-607 session-local viewed queue와 keyboard next-unviewed를 `src/core/gitReview.ts`, `src/components/GitChangedFiles.tsx`, `src/components/GitCompareView.tsx`에 구현한다
+- [ ] T065 [US5] GIT-608 immutable snapshot unified patch Save As를 `src/core/diffReport.ts`, `src/core/gitSession.ts`, `src/components/GitCompareView.tsx`, `src/core/bridge.ts`에 구현한다
 
 **Checkpoint**: review state는 metadata-only이며 patch output 외 source state는 바뀌지 않는다.
 
@@ -182,13 +188,13 @@
 
 ### Tests for User Story 6
 
-- [ ] T060 [US6] GIT-103 bounded recent commit framing/order/limit/control-character/shallow 테스트를 `src-tauri/src/git/history.rs`에 먼저 추가한다
-- [ ] T061 [US6] GIT-609 rename boundary/deleted path/non-UTF-8/shallow/limit/cancel/no-network file-history 테스트를 `src-tauri/src/git/history.rs`와 `src/components/GitFileHistory.test.tsx`에 먼저 추가한다
+- [ ] T066 [US6] GIT-103 bounded recent commit framing/order/limit/control-character/shallow 테스트를 `src-tauri/src/git/history.rs`에 먼저 추가한다
+- [ ] T067 [US6] GIT-609 rename boundary/deleted path/non-UTF-8/shallow/limit/cancel/no-network file-history 테스트를 `src-tauri/src/git/history.rs`와 `src/components/GitFileHistory.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 6
 
-- [ ] T062 [US6] GIT-103 selector용 recent commit metadata service를 `src-tauri/src/git/history.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T063 [US6] GIT-609 bounded file-history service와 snapshot compare handoff UI를 `src-tauri/src/git/history.rs`, `src-tauri/src/commands/git.rs`, `src/components/GitFileHistory.tsx`, `src/core/gitSession.ts`에 구현한다
+- [ ] T068 [US6] GIT-103 selector용 recent commit metadata service를 `src-tauri/src/git/history.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [ ] T069 [US6] GIT-609 bounded file-history service와 snapshot compare handoff UI를 `src-tauri/src/git/history.rs`, `src-tauri/src/commands/git.rs`, `src/components/GitFileHistory.tsx`, `src/core/gitSession.ts`에 구현한다
 
 **Checkpoint**: full history graph 없이 선택 path의 local context만 제공한다.
 
@@ -198,10 +204,10 @@
 
 **Purpose**: cross-cutting privacy, packaged lifecycle, documentation, final gates
 
-- [ ] T064 [P] GIT-801 user-facing Git scope/no-network/no-mutation/LFS/submodule/conflict-next-step 문서를 `README.md`, `docs/17_GIT_INTEGRATION.md`, `docs/20_GIT_TEST_PLAN.md`에 동기화한다
-- [ ] T065 GIT-801 Windows/macOS/Linux packaged revision compare/difftool/mergetool/conflict-save smoke 결과를 `VALIDATION.md`에 기록한다
-- [ ] T066 [P] GIT-801 forbidden command/environment/content persistence 회귀 gate를 `src/core/networkPolicy.test.ts`, `src/core/privacyLoggingPolicy.test.ts`, `src/core/securityConfig.test.ts`에 추가한다
-- [ ] T067 GIT-801 전체 frontend/Rust 검증과 미실행 OS 항목을 `VALIDATION.md`에 실제 결과로 기록한다
+- [ ] T070 [P] GIT-801 user-facing Git scope/no-network/no-mutation/LFS/submodule/conflict-next-step 문서를 `README.md`, `docs/17_GIT_INTEGRATION.md`, `docs/20_GIT_TEST_PLAN.md`에 동기화한다
+- [ ] T071 GIT-801 Windows/macOS/Linux packaged repository-aware revision compare/conflict-save smoke와 T009 external-tool evidence 참조를 `VALIDATION.md`에 기록한다
+- [ ] T072 [P] GIT-801 forbidden command/environment/content persistence 회귀 gate를 `src/core/networkPolicy.test.ts`, `src/core/privacyLoggingPolicy.test.ts`, `src/core/securityConfig.test.ts`에 추가한다
+- [ ] T073 GIT-801 전체 frontend/Rust 검증과 미실행 OS 항목을 `VALIDATION.md`에 실제 결과로 기록한다
 
 ---
 
@@ -209,7 +215,7 @@
 
 ### Phase Dependencies
 
-- **Phase 1 Gate**: 시작점. `T001`~`T003`이 승인/검증되기 전 candidate implementation을 승격하지 않는다.
+- **Phase 1 Gate**: 시작점. `T001`~`T009`가 승인/검증되기 전 candidate implementation을 승격하지 않는다. T002→T003, T004→T005, T006→T007→T008 순서를 지키고 T009는 T005와 T008 뒤에 실행한다.
 - **Phase 2 Foundation**: Phase 1에 의존하며 모든 user story를 block한다.
 - **US1 / Phase 3**: Foundation 뒤 시작하며 제품 MVP다.
 - **US2 / Phase 4**: US1 snapshot/session primitives에 의존한다.
@@ -239,12 +245,12 @@ Gate → Foundation → US1 (MVP)
 ## Parallel Example: User Story 1
 
 ```text
-T016 GIT-102 ref parser tests
-T018 GIT-201 tree parser tests
-T024 GIT-301 changed-file parser tests
-T028 GIT-601 repository shell component tests
-T030 GIT-602 revision selector tests
-T032 GIT-603 changed-files UI tests
+T021 GIT-102 ref parser tests
+T022 GIT-201 tree parser tests
+T025 GIT-301 changed-file parser tests
+T027 GIT-601 repository shell component tests
+T028 GIT-602 revision selector tests
+T029 GIT-603 changed-files UI tests
 ```
 
 위 test task들은 Phase 2 contract 완료 뒤 병렬 준비할 수 있다. 각 이슈의 implementation task는 해당
