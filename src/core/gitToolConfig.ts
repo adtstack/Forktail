@@ -26,7 +26,7 @@ export function generateGitToolConfig(
 
   const mergetoolCommand = [
     'forktail_base="$BASE"',
-    'if test "$forktail_base" = /dev/null; then forktail_base=; fi',
+    'if test "$base_present" = false || test "$forktail_base" = /dev/null; then forktail_base=; fi',
     `exec ${shellExecutable} --mergetool "$forktail_base" "$LOCAL" "$REMOTE" "$MERGED"`,
   ].join("; ");
 

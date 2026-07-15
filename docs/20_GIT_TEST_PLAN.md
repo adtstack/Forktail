@@ -726,7 +726,7 @@ temp repo에 두 commit 생성
 temp repo에 실제 conflict 생성
 → repo-local mergetool config (`trustExitCode=false`, `hideResolved=false`)
 → git mergetool --tool=forktail 실행
-→ BASE/LOCAL/REMOTE/MERGED 전달; 빈 BASE 인자도 보존
+→ BASE/LOCAL/REMOTE/MERGED 전달; stage 1 부재는 빈 BASE slot으로 보존
 → MERGED fingerprint 저장
 → 사용자 resolve/save
 → packaged process 종료
@@ -741,7 +741,8 @@ temp repo에 실제 conflict 생성
 - no-save close 후 원본 유지
 - unresolved save 취소
 - 외부 MERGED 변경과 저장 경쟁
-- BASE가 없는 add/add conflict에서 empty argument가 parser에서 사라지지 않고 missing Base가 됨
+- BASE stage가 없는 add/add conflict에서 Git의 0-byte temp가 `base_present=false`로 구분되고, empty argument가 parser에서 사라지지 않아 missing Base가 됨
+- 실제 empty blob인 BASE stage는 같은 0-byte temp여도 `base_present=true`이므로 non-missing 빈 Base로 열림
 - Forktail 저장 직후·프로세스 종료 전에는 index가 그대로임
 - process 종료 뒤 사용자가 성공을 확인하면 Git wrapper가 stage할 수 있으며 그 후속 상태가 문서와 일치함
 - 앱은 자동 `git add`나 continue를 하지 않음
@@ -783,6 +784,8 @@ Notes: 파일 내용, 전체 home path, raw stderr는 기록하지 않음
 ```
 
 한 사례라도 미실행이면 해당 OS/tool cell은 `pending` 또는 `fail`로 유지한다. 다른 OS의 결과나 unit test로 대체하지 않는다.
+
+process/argv/temp 관찰은 process-level evidence로만 기록한다. pane 표시, read-only, save/no-save, unresolved 동작을 실제 UI에서 조작하지 못한 경우 `manual-not-run`으로 분리하고 통과 근거로 대체하지 않는다.
 
 ## 13. 성능과 대규모 repository
 

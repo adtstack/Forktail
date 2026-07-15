@@ -649,7 +649,7 @@ mergetool.forktail.hideResolved = false
 mergetool session은 다음을 지킨다.
 
 - source는 `$BASE`/`$LOCAL`/`$REMOTE`, 초기 Result는 Git이 이미 만든 `$MERGED`다.
-- `$BASE` empty argument를 startup parser가 제거하지 않고 missing source로 매핑한다.
+- stage 1이 없는 add/add에서 Git이 만든 0-byte BASE temp는 wrapper가 `base_present=false`일 때 empty argument로 바꾸고, startup parser가 그 slot을 제거하지 않고 missing source로 매핑한다. 실제 empty stage 1은 non-missing Base path로 유지하며, 신호가 없으면 path를 보존한다.
 - `$MERGED`를 무시하고 세 source를 새로 자동 병합하지 않는다.
 - 기본 `<<<<<<< HEAD` label과 base 없는 marker를 포함해 unresolved marker가 남은 상태의 강제 저장을 허용하지 않는다.
 - Git 임시 source path를 recent/recovery에 남기지 않는다.

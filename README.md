@@ -113,7 +113,7 @@ git difftool --tool=forktail --no-prompt
 git mergetool --tool=forktail
 ```
 
-difftool은 `$LOCAL`/`$REMOTE`를 read-only로 열며 added/deleted file의 `/dev/null` side를 missing으로 표시합니다. mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 받고 `$MERGED`만 저장합니다. 생성된 mergetool 설정은 `trustExitCode = false`, `hideResolved = false`를 유지합니다. 현재 GUI 종료 code는 저장 성공 여부를 신뢰성 있게 전달하지 않으므로 Git의 후속 확인 흐름을 사용해야 합니다. Git backup 설정에 따라 Git의 `.orig`와 Forktail safe-save의 `.bak.<timestamp>`가 함께 남을 수 있습니다. `%O/%A/%B/%P` custom merge driver 설정은 지원하지 않습니다.
+difftool은 `$LOCAL`/`$REMOTE`를 read-only로 열며 added/deleted file의 `/dev/null` side를 missing으로 표시합니다. mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 받고 `$MERGED`만 저장합니다. Git이 stage 1 없는 add/add에 0-byte BASE temp를 만드는 경우도 missing으로 구분하고, 실제 empty Base는 유지합니다. 생성된 mergetool 설정은 `trustExitCode = false`, `hideResolved = false`를 유지합니다. 현재 GUI 종료 code는 저장 성공 여부를 신뢰성 있게 전달하지 않으므로 Git의 후속 확인 흐름을 사용해야 합니다. Git backup 설정에 따라 Git의 `.orig`와 Forktail safe-save의 `.bak.<timestamp>`가 함께 남을 수 있습니다. `%O/%A/%B/%P` custom merge driver 설정은 지원하지 않습니다.
 
 macOS 앱 번들을 만들려면:
 

@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { generateGitToolConfig, type GitToolPlatform } from "./gitToolConfig";
 
 describe("generateGitToolConfig", () => {
+  it("preserves Git's missing-base signal as an empty mergetool argument", () => {
+    const { mergetool } = generateGitToolConfig(
+      "macos",
+      "/Applications/forktail.app/Contents/MacOS/forktail",
+    );
+
+    expect(mergetool).toContain(
+      'if test \\"$base_present\\" = false || test \\"$forktail_base\\" = /dev/null; then forktail_base=; fi',
+    );
+    expect(mergetool).not.toContain('test ! -s \\"$forktail_base\\"');
+  });
+
   it("snapshots macOS shell and git-config quoting for spaces, Unicode, and apostrophes", () => {
     const config = generateGitToolConfig(
       "macos",
@@ -13,7 +25,7 @@ describe("generateGitToolConfig", () => {
         "difftool": "[difftool "forktail"]
       \tcmd = "forktail_local=\\"$LOCAL\\"; if test \\"$forktail_local\\" = /dev/null; then forktail_local=; fi; forktail_remote=\\"$REMOTE\\"; if test \\"$forktail_remote\\" = /dev/null; then forktail_remote=; fi; exec '/Applications/Forktail O'\\\\''Brien 한글.app/Contents/MacOS/forktail' --difftool \\"$forktail_local\\" \\"$forktail_remote\\""",
         "mergetool": "[mergetool "forktail"]
-      \tcmd = "forktail_base=\\"$BASE\\"; if test \\"$forktail_base\\" = /dev/null; then forktail_base=; fi; exec '/Applications/Forktail O'\\\\''Brien 한글.app/Contents/MacOS/forktail' --mergetool \\"$forktail_base\\" \\"$LOCAL\\" \\"$REMOTE\\" \\"$MERGED\\""
+      \tcmd = "forktail_base=\\"$BASE\\"; if test \\"$base_present\\" = false || test \\"$forktail_base\\" = /dev/null; then forktail_base=; fi; exec '/Applications/Forktail O'\\\\''Brien 한글.app/Contents/MacOS/forktail' --mergetool \\"$forktail_base\\" \\"$LOCAL\\" \\"$REMOTE\\" \\"$MERGED\\""
       \ttrustExitCode = false
       \thideResolved = false",
         "usage": "Copy either tool-specific snippet into Git config manually.
@@ -39,7 +51,7 @@ describe("generateGitToolConfig", () => {
         "difftool": "[difftool "forktail"]
       \tcmd = "forktail_local=\\"$LOCAL\\"; if test \\"$forktail_local\\" = /dev/null; then forktail_local=; fi; forktail_remote=\\"$REMOTE\\"; if test \\"$forktail_remote\\" = /dev/null; then forktail_remote=; fi; exec 'C:/Program Files/Forktail O'\\\\''Brien 한글/forktail.exe' --difftool \\"$forktail_local\\" \\"$forktail_remote\\""",
         "mergetool": "[mergetool "forktail"]
-      \tcmd = "forktail_base=\\"$BASE\\"; if test \\"$forktail_base\\" = /dev/null; then forktail_base=; fi; exec 'C:/Program Files/Forktail O'\\\\''Brien 한글/forktail.exe' --mergetool \\"$forktail_base\\" \\"$LOCAL\\" \\"$REMOTE\\" \\"$MERGED\\""
+      \tcmd = "forktail_base=\\"$BASE\\"; if test \\"$base_present\\" = false || test \\"$forktail_base\\" = /dev/null; then forktail_base=; fi; exec 'C:/Program Files/Forktail O'\\\\''Brien 한글/forktail.exe' --mergetool \\"$forktail_base\\" \\"$LOCAL\\" \\"$REMOTE\\" \\"$MERGED\\""
       \ttrustExitCode = false
       \thideResolved = false",
         "usage": "Copy either tool-specific snippet into Git config manually.
@@ -64,7 +76,7 @@ describe("generateGitToolConfig", () => {
         "difftool": "[difftool "forktail"]
       \tcmd = "forktail_local=\\"$LOCAL\\"; if test \\"$forktail_local\\" = /dev/null; then forktail_local=; fi; forktail_remote=\\"$REMOTE\\"; if test \\"$forktail_remote\\" = /dev/null; then forktail_remote=; fi; exec '/opt/Forktail 한글/forktail' --difftool \\"$forktail_local\\" \\"$forktail_remote\\""",
         "mergetool": "[mergetool "forktail"]
-      \tcmd = "forktail_base=\\"$BASE\\"; if test \\"$forktail_base\\" = /dev/null; then forktail_base=; fi; exec '/opt/Forktail 한글/forktail' --mergetool \\"$forktail_base\\" \\"$LOCAL\\" \\"$REMOTE\\" \\"$MERGED\\""
+      \tcmd = "forktail_base=\\"$BASE\\"; if test \\"$base_present\\" = false || test \\"$forktail_base\\" = /dev/null; then forktail_base=; fi; exec '/opt/Forktail 한글/forktail' --mergetool \\"$forktail_base\\" \\"$LOCAL\\" \\"$REMOTE\\" \\"$MERGED\\""
       \ttrustExitCode = false
       \thideResolved = false",
         "usage": "Copy either tool-specific snippet into Git config manually.

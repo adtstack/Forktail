@@ -224,7 +224,7 @@ custom `git mergetool`은 `$BASE`, `$LOCAL`, `$REMOTE`, `$MERGED` 환경 변수�
 forktail --mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"
 ```
 
-- `$BASE` → Base source. 공통 조상이 없으면 빈 인자이거나 사용할 수 없는 path일 수 있으므로 CLI parser가 이를 버리지 않고 missing Base로 보존한다.
+- `$BASE` → Base source. Git은 공통 조상 stage가 없는 add/add에서도 0-byte 임시 path를 만들 수 있다. generated wrapper는 Git mergetool shell의 `base_present=false`를 빈 positional argument로 바꾸고 `/dev/null`도 정규화하며, CLI parser는 그 빈 slot을 missing Base로 보존한다. 실제 empty base도 0 bytes일 수 있으므로 파일 크기로 missing을 추정하지 않는다. `base_present`가 없으면 path를 그대로 보존하는 fail-safe이며 최소 Git/세 OS 호환성은 T009에서 검증한다.
 - `$LOCAL` → Ours/current source
 - `$REMOTE` → Theirs/other source
 - `$MERGED` → Git이 이미 만든 working tree result이자 유일한 저장 대상

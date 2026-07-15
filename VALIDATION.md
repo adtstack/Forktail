@@ -295,7 +295,8 @@ cargo test
 
 실행 결과:
 
-- `npm run check`: typecheck 통과, Vitest 54 files/349 tests 통과, production build 통과
+- `npm run check`: typecheck 통과, Vitest 54 files/350 tests 통과, production build 통과
+- `npm run tauri build`: release binary와 macOS `.app` bundle 생성 통과
 - `cd src-tauri && cargo fmt --all --check`: 통과
 - `cd src-tauri && cargo clippy --all-targets -- -D warnings`: 통과
 - `cd src-tauri && cargo test`: 44 tests 통과
@@ -303,7 +304,7 @@ cargo test
 
 - `--difftool "$LOCAL" "$REMOTE"`은 두 positional slot을 보존하고, 빈 인자와 정확한 `/dev/null`을 missing side로 분류하며 두 쪽이 모두 missing이면 거절한다.
 - difftool session은 편집, Save/Save As, backup restore, hunk 적용/undo, 좌우 교환, pane drop, recent/active-session 저장을 차단한다. 별도 경로를 고르는 plain text report export와 diff 탐색은 허용한다.
-- `--mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"`은 missing Base를 허용하고 기존 `$MERGED`를 초기 Result이자 유일한 저장 대상으로 사용한다. unresolved Result의 저장은 hard block한다.
+- `--mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"`은 missing Base를 허용하고 기존 `$MERGED`를 초기 Result이자 유일한 저장 대상으로 사용한다. generated wrapper는 stage 1 없는 add/add의 0-byte Git temp를 `base_present=false`로 구분해 빈 Base slot으로 바꾸며, 실제 empty stage 1과 signal 부재 시에는 path를 보존한다. unresolved Result의 저장은 hard block한다.
 - config generator는 다음 absolute executable path 형태를 입력으로 받으며 path의 공백, Unicode, apostrophe와 Git config/shell의 이중 quoting을 Windows/macOS/Linux snapshot으로 검증한다.
 
 | OS | 대표 packaged executable path |
@@ -316,15 +317,24 @@ cargo test
 - mergetool snippet은 `trustExitCode = false`, `hideResolved = false`를 고정한다. GUI 종료 code가 저장 성공을 신뢰성 있게 전달하지 않으므로 사용자는 `git mergetool --tool=forktail`의 후속 확인 흐름을 사용한다.
 - `%O/%A/%B/%P` custom merge driver와 자동 `git add`/continue는 생성하거나 실행하지 않는다.
 
-### T009 packaged lifecycle 결과
+### T009 INT-002/MRG-014 Git external tool 검증
 
 아래 표의 `pending`은 미실행이며 통과를 뜻하지 않는다. 각 행은 release artifact와 격리된 repository-local Git config로 difftool wait/temp/added/deleted 및 mergetool missing-Base/save/no-save/unresolved/temp/wait를 모두 확인해야 `pass`로 바꾼다.
 
 | OS | Artifact | Git version | Difftool | Mergetool | Evidence |
 |---|---|---|---|---|---|
 | Windows | installed `.exe` | pending | pending | pending | 별도 Windows 환경 필요 |
-| macOS | `.app` 내부 executable | pending | pending | pending | packaged smoke 미실행 |
+| macOS | release `.app` 0.2.2 arm64, executable SHA-256 `f4a4401081bb…` | 2.50.1 (Apple Git-155) | pending | pending | 2026-07-15 process-level 부분 실행; UI manual-not-run |
 | Linux | AppImage/지원 binary | pending | pending | pending | 별도 Linux 환경 필요 |
+
+#### macOS process-level 부분 실행 — 2026-07-15
+
+- 환경: macOS 26.4.1 arm64, Git 2.50.1 (Apple Git-155), Forktail 0.2.2 release `.app`. 임시 HOME, global/system config 비활성화, repository-local tool config를 사용했다.
+- artifact/config quoting: executable을 공백, apostrophe, Unicode가 모두 포함된 격리 경로에 복사했다. generated command가 그 실제 executable을 실행했으며 `.gitconfig`나 default tool은 바꾸지 않았다.
+- Difftool process-level: 한 `git difftool` 호출이 added → deleted → modified를 순차 실행했다. added는 빈 LOCAL, deleted는 빈 REMOTE, modified는 두 temp path로 전달됐다. 각 창이 열린 동안 Git이 대기하고 해당 temp가 존재했으며, 일반 macOS app terminate 뒤 직전 temp가 정리되고 다음 path가 시작됐다. 마지막 종료 뒤 Git은 exit 0이었고 모든 관찰 temp가 정리됐다.
+- Mergetool process-level: 실제 add/add conflict에는 index stage 1이 없지만 Git이 0-byte BASE temp를 만들었다. `base_present=false` wrapper가 최종 packaged process에 빈 BASE slot과 LOCAL/REMOTE/MERGED 네 위치를 정확히 전달했다. 실행 중 MERGED hash와 index의 stage 2/3 두 entry는 유지됐다. 저장 없이 일반 종료하고 Git 질문에 `n`을 답한 뒤 예상대로 exit 1이었으며, MERGED hash와 unresolved index가 그대로이고 temp가 정리됐다.
+- Manual-not-run: 이 실행 환경의 macOS desktop이 `loginwindow`에 잠겨 있어 pane 매핑, missing badge, read-only controls, report export, 실제 Save, unresolved Save hard-block, dirty-close UI를 조작하지 못했다. process/argv/temp 관찰이나 component test로 이를 대체하지 않는다.
+- 판정: Difftool과 Mergetool은 모두 `pending`, T009는 미완료다. Windows/Linux 전체와 macOS UI 사례가 모두 실행되기 전 Phase 2 gate를 열지 않는다.
 
 ## 관찰된 경고
 
@@ -350,13 +360,13 @@ cargo test
 - `TXT-010` diff report 실제 파일 저장은 Tauri file dialog와 `write_text_file_atomic` runtime이 필요해 브라우저에서 버튼/오류 경로와 순수 report 생성까지만 확인했다.
 - `TXT-007` 양방향 hunk copy는 브라우저에서 좌/우 편집 대상 전환, `왼쪽→오른쪽`/`오른쪽→왼쪽` 적용, 마지막 적용 undo, dirty/save 상태까지 확인했다. 실제 Tauri file dialog를 통한 좌/우 Save/Save As 파일 쓰기는 Rust/Tauri runtime에서 추가 smoke가 필요하다.
 - `TXT-008` Drag & Drop은 브라우저 자동화가 OS 파일 경로를 담은 실제 file-drop 이벤트를 만들 수 없어 순수 경로 추출/개수 검증과 화면 회귀까지만 확인했다. 실제 Tauri WebView에서 파일 2개 drop 및 한쪽 pane 1파일 drop으로 `read_text_file` command가 호출되는지는 `npm run tauri dev`에서 수동/자동 smoke가 필요하다.
-- `TXT-009`/`MRG-009`/`MRG-014`/`INT-002` CLI open은 parser, session capability, Tauri command wiring, config quote snapshot까지만 확인했다. 실제 `forktail left right`, `forktail --merge ...`, custom Git difftool의 `$LOCAL $REMOTE`, custom Git mergetool의 `$BASE $LOCAL $REMOTE $MERGED` 인자 전달, read-only/missing side, 기존 `$MERGED` result/fingerprint, save/no-save/unresolved, 임시 파일과 process wait lifecycle은 packaged binary와 세 OS Tauri runtime에서 smoke가 필요하다. `%O/%A/%B/%P` custom merge driver는 현재 범위가 아니다.
+- `TXT-009`/`MRG-009`/`MRG-014`/`INT-002` CLI open은 parser, session capability, Tauri command wiring, config quote snapshot을 확인했다. macOS packaged Git tool은 위 T009 절의 process/argv/temp/no-save 범위만 부분 확인했다. 실제 pane의 read-only/missing 표시, report export, mergetool Save/unresolved/dirty-close UI와 Windows/Linux 전체 lifecycle, 일반 `forktail left right`/`forktail --merge ...`는 여전히 실제 OS smoke가 필요하다. `%O/%A/%B/%P` custom merge driver는 현재 범위가 아니다.
 - `UX-006` native reveal은 source/contract test로만 확인했다. 실제 Finder/Explorer/file manager가 선택 항목 또는 폴더를 여는지는 `npm run tauri dev` 가능한 OS별 환경에서 smoke가 필요하다.
 - `MRG-010` opt-in draft recovery는 브라우저 localStorage와 새 탭 재진입으로 확인했다. 실제 데스크톱 앱 crash 후 WebView storage 유지, 큰 draft 한도 안내, OS별 storage persistence는 `npm run tauri dev` 환경에서 추가 smoke가 필요하다.
 - 마지막 화면 자동 복원은 브라우저 데모 세션 reload와 active session 저장소 단위 테스트로 확인했다. 실제 사용자 파일 경로의 자동 재열기와 폴더 rescan은 Tauri runtime에서 `read_text_file`/`scan_directories`를 통한 추가 smoke가 필요하다.
 - Linux Tauri용 WebKitGTK 4.1 개발 패키지는 macOS 로컬 실행에서는 해당 없음. Linux CI/스모크에서 별도 확인한다.
 
-따라서 현재 macOS 개발 환경에서는 frontend/Rust 검증과 Tauri `.app` bundle build까지 확인됐다. 남은 항목은 세 OS 패키징, 실제 파일 dialog/native menu/reveal/CLI/저장 smoke, packaged WebView runtime smoke다.
+따라서 현재 macOS 개발 환경에서는 frontend/Rust 검증, Tauri `.app` bundle build, Git external-tool process lifecycle 일부까지 확인됐다. 남은 항목은 T009의 macOS UI 및 Windows/Linux 전체 사례, 세 OS 패키징, 실제 file dialog/native menu/reveal/일반 CLI/저장 smoke, packaged WebView runtime smoke다.
 
 ## 첫 로컬 검증 순서
 

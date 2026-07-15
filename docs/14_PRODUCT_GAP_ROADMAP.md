@@ -803,7 +803,7 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 - packaged runtime은 실제 current executable을 제안한다. Linux AppImage는 임시 mount 내부 binary가 아니라 `APPIMAGE`의 stable artifact path를 사용하며, 감지 실패 시 빈 입력과 OS별 형태 예시만 보여준다.
 - 실제 `.gitconfig` 자동 수정은 첫 버전에서 제외한다.
 - difftool은 `$LOCAL`/`$REMOTE`, mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 사용한다.
-- added/deleted difftool side와 missing merge Base의 `/dev/null`은 빈 positional argument로 정규화한다.
+- added/deleted difftool side의 `/dev/null`은 빈 positional argument로 정규화한다. mergetool은 stage 1이 없어도 Git이 0-byte BASE 임시파일을 만들 수 있으므로 `base_present=false`일 때만 빈 Base slot으로 바꾸고, 실제 empty stage 1은 path를 보존한다.
 - generated mergetool config에는 tool-specific `mergetool.forktail.hideResolved=false`를 포함한다.
 - `%O/%A/%B/%P` custom merge driver 설정은 생성하지 않는다.
 
@@ -813,6 +813,7 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 - difftool과 mergetool 설정을 구분한다.
 - 현재 GUI lifecycle에서는 `trustExitCode = false`가 필요한 이유를 짧게 설명한다.
 - generated config text가 shell로 평가된다는 점을 반영해 OS별 path 공백/quote snapshot을 검증한다.
+- add/add의 missing stage 1과 실제 empty stage 1을 파일 크기가 아니라 Git의 stage-presence 신호로 구분하고, 신호가 없으면 path를 보존한다.
 - `diff.tool`, `merge.tool` 같은 default 변경은 생성하지 않고 사용자가 `--tool=forktail`을 명시한다.
 
 필요 테스트:
