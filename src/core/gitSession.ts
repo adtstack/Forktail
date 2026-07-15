@@ -4,6 +4,7 @@ import type {
   FileDocument,
   GitConflictMergeSession,
   GitFileCompareSession,
+  GitPreviewMergeSession,
   MergeSession,
 } from "./models";
 import type { WritePrecondition } from "./mergeSave";
@@ -12,6 +13,7 @@ import type {
   GitConflictEntry,
   GitConflictList,
   GitConflictSession,
+  GitMergePreview,
   GitChangedFile,
   GitChangedFileList,
   GitChangedFileStatus,
@@ -37,7 +39,7 @@ export function keepsGitRepositorySession(
 ): boolean {
   return mode === "git"
     || (mode === "compare" && compareOrigin === "git")
-    || (mode === "merge" && mergeOrigin === "gitConflict");
+    || (mode === "merge" && (mergeOrigin === "gitConflict" || mergeOrigin === "gitPreview"));
 }
 
 export interface GitRevisionFieldState {
@@ -73,6 +75,8 @@ export type GitChangedFileStatusFilter =
   | "modified"
   | "typeChanged"
   | "renamed";
+
+export type GitChangedFileOpenMode = "compare" | "mergePreview";
 
 export interface GitChangedFileFilter {
   query: string;
@@ -110,6 +114,13 @@ export type GitSnapshotSelectionState =
       fileKey: string;
       requestGeneration: number;
       message: string;
+    }
+  | {
+      kind: "mergeBaseNotice";
+      fileKey: string;
+      requestGeneration: number;
+      cardinality: "none" | "multiple";
+      candidateCount: number;
     };
 
 export type GitWorkingTreeSection = "all" | "staged" | "unstaged" | "untracked" | "unmerged";
@@ -521,6 +532,56 @@ export function adaptGitConflictSession(session: GitConflictSession): GitConflic
           expectedSize: session.result.workingTreeVersion.size,
           expectedModifiedMs: session.result.workingTreeVersion.modifiedMs,
         },
+  };
+}
+
+export type GitMergePreviewViewState =
+  | { kind: "merge"; session: GitPreviewMergeSession }
+  | {
+      kind: "notice";
+      session: GitMergePreview;
+      contentStates: GitSnapshotContentState["kind"][];
+      unavailableReasons: GitSnapshotUnavailableReason[];
+      resultState: GitMergePreview["result"]["kind"];
+    };
+
+export function adaptGitMergePreview(session: GitMergePreview): GitMergePreviewViewState {
+  const snapshots = [session.base, session.left, session.right];
+  const [base, ours, theirs] = snapshots.map(gitSnapshotFileDocument);
+  const validReadOnlyContract = session.mergeBase.kind === "single"
+    && session.disclaimer === "notExecutedMerge"
+    && session.readOnly
+    && snapshots.every((snapshot) => snapshot.readOnly)
+    && !session.capabilities.edit
+    && !session.capabilities.save
+    && !session.capabilities.hunkCopy;
+
+  if (!base || !ours || !theirs || session.result.kind !== "ready" || !validReadOnlyContract) {
+    return {
+      kind: "notice",
+      session,
+      contentStates: snapshots.map((snapshot) => snapshot.contentState.kind),
+      unavailableReasons: snapshots
+        .map((snapshot) => snapshot.contentState)
+        .filter((state): state is Extract<GitSnapshotContentState, { kind: "unavailable" }> =>
+          state.kind === "unavailable")
+        .map((state) => state.reason),
+      resultState: session.result.kind,
+    };
+  }
+
+  return {
+    kind: "merge",
+    session: {
+      origin: "gitPreview",
+      base,
+      ours,
+      theirs,
+      result: session.result.text,
+      output: null,
+      outputPath: null,
+      preview: session,
+    },
   };
 }
 

@@ -813,6 +813,11 @@ export const MERGE_VIEW_TEXT = {
       `${operation} · ${path}. Save writes only the Result file. Forktail does not run git add or continue.`,
     gitConflictNextStep: (operation: string) =>
       `Run git add and continue the ${operation} outside Forktail.`,
+    gitPreviewMode: "Read-only merge preview",
+    gitPreviewDisclaimer:
+      "This preview does not execute Git merge or change the repository. Result exists only in memory.",
+    inMemoryResult: "In-memory Result",
+    readOnly: "read-only",
     missingSource: (label: string) => `${label} (missing)`,
     draftWarning: "An unsaved merge draft is available. Original file contents were not cached.",
     restoreDraft: "Restore draft",
@@ -873,6 +878,11 @@ export const MERGE_VIEW_TEXT = {
       `${operation} · ${path}. 저장은 Result 파일에만 기록합니다. Forktail은 git add나 continue를 실행하지 않습니다.`,
     gitConflictNextStep: (operation: string) =>
       `Forktail 밖에서 git add를 실행하고 ${operation} 작업을 계속하세요.`,
+    gitPreviewMode: "읽기 전용 병합 미리보기",
+    gitPreviewDisclaimer:
+      "이 미리보기는 Git merge를 실행하거나 저장소를 변경하지 않습니다. Result는 메모리에만 존재합니다.",
+    inMemoryResult: "메모리 내 Result",
+    readOnly: "읽기 전용",
     missingSource: (label: string) => `${label} (없음)`,
     draftWarning: "이전에 저장하지 못한 병합 결과 draft가 있습니다. 원본 파일 내용은 별도 캐시하지 않았습니다.",
     restoreDraft: "draft 복구",

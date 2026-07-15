@@ -17,6 +17,16 @@ export interface GitMergeBaseRequest {
   rightCommit: GitObjectId;
 }
 
+export type GitMergePreviewResult =
+  | { kind: "ready"; text: string; clean: boolean; conflictCount: number }
+  | { kind: "unavailable" };
+
+export interface GitMergePreviewCapabilities {
+  edit: boolean;
+  save: boolean;
+  hunkCopy: boolean;
+}
+
 export type GitRevisionKind =
   | "head"
   | "branch"
@@ -374,6 +384,27 @@ export interface GitRevisionCompareRequest {
   leftRevision: GitRevision;
   rightRevision: GitRevision;
   changedFile: GitChangedFile;
+  generation: number;
+}
+
+export interface GitMergePreviewRequest {
+  mergeBase: GitObjectId;
+  leftRevision: GitRevision;
+  rightRevision: GitRevision;
+  changedFile: GitChangedFile;
+  generation: number;
+}
+
+export interface GitMergePreview {
+  repositoryId: string;
+  mergeBase: GitMergeBase;
+  base: GitSnapshotDocument;
+  left: GitSnapshotDocument;
+  right: GitSnapshotDocument;
+  result: GitMergePreviewResult;
+  disclaimer: "notExecutedMerge";
+  readOnly: boolean;
+  capabilities: GitMergePreviewCapabilities;
   generation: number;
 }
 

@@ -16,6 +16,7 @@ import {
   closeGitRepository,
   detectGitRepository,
   exitExternalGitTool,
+  getGitMergeBase,
   isTauriRuntime,
   listFileBackups,
   listGitChangedFiles,
@@ -25,6 +26,7 @@ import {
   openGitConflict,
   openGitRevisionCompare,
   openGitIndexCompare,
+  openGitMergePreview,
   readTextFile,
   readGitStatus,
   revealPath,
@@ -39,6 +41,7 @@ import {
 import {
   adaptGitCompareSession,
   adaptGitConflictSession,
+  adaptGitMergePreview,
   applyGitRevisionValidationResult,
   beginGitRevisionValidation,
   emptyGitRevisionField,
@@ -56,6 +59,7 @@ import {
   selectedGitWorkingTreeRowKeyAfterRefresh,
   type GitChangedFileFilter,
   type GitChangedFileLoadState,
+  type GitChangedFileOpenMode,
   type GitChangedFileStatusFilter,
   type GitConflictLoadState,
   type GitConflictOpenState,
@@ -238,6 +242,8 @@ export default function App() {
     query: "",
     status: "all",
   });
+  const [gitChangedFileOpenMode, setGitChangedFileOpenMode] =
+    useState<GitChangedFileOpenMode>("compare");
   const [selectedGitChangedFileKey, setSelectedGitChangedFileKey] = useState<string | null>(null);
   const [viewedGitChangedFileKeys, setViewedGitChangedFileKeys] =
     useState<Set<string>>(() => new Set());
@@ -393,7 +399,10 @@ export default function App() {
   }, []);
 
   const updateMergeResult = useCallback((result: string) => {
-    setMergeSession((current) => current ? { ...current, result } : current);
+    setMergeSession((current) =>
+      current && mergetoolSessionCapabilities(current).editable
+        ? { ...current, result }
+        : current);
     setMergeRecoveryDraft(null);
   }, []);
 
@@ -927,6 +936,7 @@ export default function App() {
     setGitRefState({ kind: "idle" });
     setGitChangedFileState({ kind: "idle" });
     setGitChangedFileFilter({ query: "", status: "all" });
+    setGitChangedFileOpenMode("compare");
     setSelectedGitChangedFileKey(null);
     setViewedGitChangedFileKeys(new Set());
     setGitSnapshotSelectionState({ kind: "idle" });
@@ -1323,6 +1333,97 @@ export default function App() {
       || sameResolvedGitRevisions(leftRevision, rightRevision)
     ) return;
 
+    if (gitChangedFileOpenMode === "mergePreview") {
+      cancelActiveGitSnapshot();
+      const requestGeneration = activeGitSnapshotRequestId.current + 1;
+      activeGitSnapshotRequestId.current = requestGeneration;
+      const repositorySessionId = repository.repository.sessionId;
+      const fileKey = gitChangedFileKey(changedFile);
+      const generation = gitChangedFileState.list.generation;
+      let currentJobId = nextGitJobId.current + 1;
+      nextGitJobId.current = currentJobId;
+      activeGitSnapshotJob.current = { repositorySessionId, jobId: currentJobId };
+      setSelectedGitChangedFileKey(fileKey);
+      setGitWorkingTreeSnapshotState({ kind: "idle" });
+      setGitSnapshotSelectionState({ kind: "loading", fileKey, requestGeneration });
+
+      const isCurrent = () => {
+        const currentRepository = gitRepositoryStateRef.current;
+        return isCurrentGitRequest(activeGitSnapshotRequestId.current, requestGeneration)
+          && currentRepository?.kind === "ready"
+          && currentRepository.repository.sessionId === repositorySessionId;
+      };
+
+      void (async () => {
+        try {
+          const mergeBase = await getGitMergeBase(repositorySessionId, {
+            leftCommit: leftRevision.resolved,
+            rightCommit: rightRevision.resolved,
+          }, currentJobId);
+          if (!isCurrent()) return;
+          if (mergeBase.kind !== "single") {
+            setGitSnapshotSelectionState({
+              kind: "mergeBaseNotice",
+              fileKey,
+              requestGeneration,
+              cardinality: mergeBase.kind,
+              candidateCount: mergeBase.kind === "multiple" ? mergeBase.objectIds.length : 0,
+            });
+            return;
+          }
+
+          currentJobId = nextGitJobId.current + 1;
+          nextGitJobId.current = currentJobId;
+          activeGitSnapshotJob.current = { repositorySessionId, jobId: currentJobId };
+          const preview = await openGitMergePreview(repositorySessionId, {
+            mergeBase: mergeBase.objectId,
+            leftRevision,
+            rightRevision,
+            changedFile,
+            generation,
+          }, currentJobId);
+          if (!isCurrent()) return;
+
+          setViewedGitChangedFileKeys((current) => {
+            const next = new Set(current);
+            next.add(fileKey);
+            return next;
+          });
+          const view = adaptGitMergePreview(preview);
+          if (view.kind === "notice") {
+            setGitSnapshotSelectionState({
+              kind: "notice",
+              fileKey,
+              requestGeneration,
+              contentStates: view.contentStates,
+              unavailableReasons: view.unavailableReasons,
+            });
+            return;
+          }
+
+          setGitSnapshotSelectionState({ kind: "idle" });
+          setCleanMergeSession(view.session);
+          setMode("merge");
+        } catch (caught) {
+          if (!isCurrent()) return;
+          setGitSnapshotSelectionState({
+            kind: "error",
+            fileKey,
+            requestGeneration,
+            message: errorMessage(caught, languageMode),
+          });
+        } finally {
+          if (
+            activeGitSnapshotJob.current?.repositorySessionId === repositorySessionId
+            && activeGitSnapshotJob.current.jobId === currentJobId
+          ) {
+            activeGitSnapshotJob.current = null;
+          }
+        }
+      })();
+      return;
+    }
+
     cancelActiveGitSnapshot();
     const requestGeneration = activeGitSnapshotRequestId.current + 1;
     activeGitSnapshotRequestId.current = requestGeneration;
@@ -1393,10 +1494,12 @@ export default function App() {
   }, [
     cancelActiveGitSnapshot,
     gitChangedFileState,
+    gitChangedFileOpenMode,
     gitRevisionFields.left.revision,
     gitRevisionFields.right.revision,
     languageMode,
     setCleanCompareSession,
+    setCleanMergeSession,
   ]);
 
   const selectGitWorkingTreeFile = useCallback((row: GitWorkingTreeRow) => {
@@ -2052,6 +2155,7 @@ export default function App() {
     lineEndingMode: SaveLineEndingMode = "original",
   ) => run(async () => {
     if (!mergeSession) return;
+    if (mergeSession.origin === "gitPreview") return;
     if (mergeSession.origin === "gitConflict") {
       const repositorySessionId = mergeSession.conflict.repositoryId;
       const repository = gitRepositoryStateRef.current;
@@ -2183,7 +2287,7 @@ export default function App() {
               result: saved.savedSnapshot,
               outputPath: saved.outputPath,
             }
-        : current
+        : current?.origin === "files"
           ? {
               ...current,
               output: current.output
@@ -2222,7 +2326,10 @@ export default function App() {
   ]);
 
   const showMergeBackups = useCallback(() => run(async () => {
-    if (!mergeSession?.outputPath || mergeSession.origin === "gitConflict") return;
+    if (
+      !mergeSession?.outputPath
+      || mergeSession.origin === "gitConflict"
+    ) return;
     const backups = await listFileBackups(mergeSession.outputPath);
     setBackupDialog({
       kind: "merge",
@@ -2268,12 +2375,15 @@ export default function App() {
       }));
       setCompareModelRevision((current) => current + 1);
     } else {
-      setMergeSession((current) => current ? {
-        ...current,
-        output: restored,
-        result: restored.text,
-        outputPath: restored.path,
-      } : current);
+      setMergeSession((current) => {
+        if (!current || current.origin === "gitPreview") return current;
+        return {
+          ...current,
+          output: restored,
+          result: restored.text,
+          outputPath: restored.path,
+        };
+      });
       setSavedMergeResult(restored.text);
       setMergeOutputVersion(writePreconditionFromDocument(restored));
       if (mergeSession) clearMergeRecoveryDraft(mergeSession);
@@ -2298,6 +2408,7 @@ export default function App() {
   ) => {
     if (!mergeSession) return;
     const capabilities = mergetoolSessionCapabilities(mergeSession);
+    if (!capabilities.save) return;
     if (forceSaveAs && !capabilities.saveAs) return;
     if (!hasUnresolvedConflicts(mergeSession.result)) {
       saveMergeNow(forceSaveAs, lineEndingMode);
@@ -2563,6 +2674,7 @@ export default function App() {
               selectedKey: selectedGitChangedFileKey,
               viewedKeys: viewedGitChangedFileKeys,
               snapshotState: gitSnapshotSelectionState,
+              openMode: gitChangedFileOpenMode,
             }}
             workingTreeReview={{
               state: gitWorkingTreeState,
@@ -2587,6 +2699,11 @@ export default function App() {
             onChangedFileStatusFilterChange={(status: GitChangedFileStatusFilter) =>
               setGitChangedFileFilter((current) => ({ ...current, status }))
             }
+            onChangedFileOpenModeChange={(openMode) => {
+              cancelActiveGitSnapshot();
+              setGitChangedFileOpenMode(openMode);
+              setGitSnapshotSelectionState({ kind: "idle" });
+            }}
             onSelectChangedFile={selectGitChangedFile}
             onRefreshWorkingTree={refreshGitRepositoryStatus}
             onWorkingTreeFilterChange={(query) =>
@@ -2682,7 +2799,7 @@ export default function App() {
             onBack={
               mergeSession.origin === "mergetool"
                 ? closeExternalGitToolWindow
-                : mergeSession.origin === "gitConflict"
+                : mergeSession.origin === "gitConflict" || mergeSession.origin === "gitPreview"
                   ? backFromGitConflict
                   : backHome
             }

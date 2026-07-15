@@ -5,6 +5,7 @@ import {
   isReviewableGitChangedFile,
   type GitChangedFileFilter,
   type GitChangedFileLoadState,
+  type GitChangedFileOpenMode,
   type GitChangedFileStatusFilter,
   type GitSnapshotSelectionState,
 } from "../core/gitSession";
@@ -65,9 +66,11 @@ interface GitChangedFilesProps {
   selectedKey: string | null;
   viewedKeys: ReadonlySet<string>;
   snapshotState: GitSnapshotSelectionState;
+  openMode?: GitChangedFileOpenMode;
   languageMode?: AppLanguage;
   onFilterChange: (query: string) => void;
   onStatusFilterChange: (status: GitChangedFileStatusFilter) => void;
+  onOpenModeChange?: (mode: GitChangedFileOpenMode) => void;
   onSelect: (entry: GitChangedFile) => void;
 }
 
@@ -88,6 +91,12 @@ const TEXT = {
     loadingSnapshot: "Opening the selected read-only snapshots…",
     notice: "This selection cannot be opened as text. Snapshot metadata remains read-only.",
     readOnly: "read-only",
+    openMode: "Open selected file as",
+    compareMode: "2-way diff",
+    previewMode: "3-way preview",
+    noMergeBase: "These revisions have no merge base, so a 3-way preview cannot be created.",
+    multipleMergeBases: (count: number) =>
+      `${count} merge-base candidates were found. Forktail will not choose one automatically.`,
     states: {
       text: "Text",
       missing: "Missing",
@@ -115,6 +124,12 @@ const TEXT = {
     loadingSnapshot: "선택한 읽기 전용 snapshot을 여는 중…",
     notice: "이 항목은 텍스트로 열 수 없습니다. Snapshot metadata만 읽기 전용으로 표시합니다.",
     readOnly: "읽기 전용",
+    openMode: "선택 파일 열기 방식",
+    compareMode: "2-way diff",
+    previewMode: "3-way 미리보기",
+    noMergeBase: "두 revision에 merge base가 없어 3-way 미리보기를 만들 수 없습니다.",
+    multipleMergeBases: (count: number) =>
+      `merge-base 후보가 ${count}개입니다. Forktail은 후보를 자동 선택하지 않습니다.`,
     states: {
       text: "텍스트",
       missing: "없음",
@@ -159,9 +174,11 @@ export function GitChangedFiles({
   selectedKey,
   viewedKeys,
   snapshotState,
+  openMode = "compare",
   languageMode = "en",
   onFilterChange,
   onStatusFilterChange,
+  onOpenModeChange,
   onSelect,
 }: GitChangedFilesProps) {
   const text = TEXT[languageMode];
@@ -218,6 +235,29 @@ export function GitChangedFiles({
       {state.kind === "ready" && (
         <>
           <div className="git-changed-file-filters">
+            <fieldset className="git-changed-file-open-mode">
+              <legend>{text.openMode}</legend>
+              <label>
+                <input
+                  type="radio"
+                  name="git-changed-file-open-mode"
+                  value="compare"
+                  checked={openMode === "compare"}
+                  onChange={() => onOpenModeChange?.("compare")}
+                />
+                {text.compareMode}
+              </label>
+              <label>
+                <input
+                  type="radio"
+                  name="git-changed-file-open-mode"
+                  value="mergePreview"
+                  checked={openMode === "mergePreview"}
+                  onChange={() => onOpenModeChange?.("mergePreview")}
+                />
+                {text.previewMode}
+              </label>
+            </fieldset>
             <label>
               <span>{text.query}</span>
               <input
@@ -306,6 +346,16 @@ export function GitChangedFiles({
         <div className="git-snapshot-notice" role="status">
           <strong>{text.notice}</strong>
           <span>{snapshotState.contentStates.map((state) => text.states[state]).join(" · ")}</span>
+          <span>{text.readOnly}</span>
+        </div>
+      )}
+      {snapshotState.kind === "mergeBaseNotice" && (
+        <div className="git-snapshot-notice" role="status">
+          <strong>
+            {snapshotState.cardinality === "none"
+              ? text.noMergeBase
+              : text.multipleMergeBases(snapshotState.candidateCount)}
+          </strong>
           <span>{text.readOnly}</span>
         </div>
       )}

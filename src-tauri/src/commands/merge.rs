@@ -3,17 +3,21 @@ use crate::error::CommandResult;
 
 #[tauri::command]
 pub fn merge_texts(base: String, ours: String, theirs: String) -> CommandResult<MergeResult> {
-    let (output, clean) = match diffy::merge(&base, &ours, &theirs) {
+    Ok(merge_text_values(&base, &ours, &theirs))
+}
+
+pub(crate) fn merge_text_values(base: &str, ours: &str, theirs: &str) -> MergeResult {
+    let (output, clean) = match diffy::merge(base, ours, theirs) {
         Ok(output) => (output, true),
         Err(output_with_conflicts) => (output_with_conflicts, false),
     };
     let conflict_count = count_conflicts(&output);
 
-    Ok(MergeResult {
+    MergeResult {
         output,
         clean,
         conflict_count,
-    })
+    }
 }
 
 fn count_conflicts(text: &str) -> usize {

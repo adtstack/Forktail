@@ -8,6 +8,7 @@ import {
   selectedGitChangedFileKeyAfterRefresh,
   type GitChangedFileFilter,
   type GitChangedFileLoadState,
+  type GitChangedFileOpenMode,
   type GitSnapshotSelectionState,
 } from "../core/gitSession";
 import type {
@@ -74,6 +75,7 @@ function renderChangedFiles(
   selectedKey: string | null = null,
   viewedKeys: ReadonlySet<string> = new Set(),
   snapshotState: GitSnapshotSelectionState = { kind: "idle" },
+  openMode: GitChangedFileOpenMode = "compare",
 ): string {
   return renderToStaticMarkup(
     <GitChangedFiles
@@ -82,9 +84,11 @@ function renderChangedFiles(
       selectedKey={selectedKey}
       viewedKeys={viewedKeys}
       snapshotState={snapshotState}
+      openMode={openMode}
       languageMode="en"
       onFilterChange={() => {}}
       onStatusFilterChange={() => {}}
+      onOpenModeChange={() => {}}
       onSelect={() => {}}
     />,
   );
@@ -201,5 +205,40 @@ describe("GitChangedFiles", () => {
     expect(notice).toContain("Symlink");
     expect(notice).toContain("read-only");
     expect(notice).not.toContain("Fetch");
+  });
+
+  it("offers an explicit 2-way or 3-way path and never auto-selects an ambiguous base", () => {
+    const key = gitChangedFileKey(entries[1]);
+    const previewMode = renderChangedFiles(
+      undefined,
+      undefined,
+      key,
+      new Set(),
+      { kind: "idle" },
+      "mergePreview",
+    );
+    expect(previewMode).toContain("Open selected file as");
+    expect(previewMode).toContain("2-way diff");
+    expect(previewMode).toContain("3-way preview");
+    expect(previewMode).toMatch(/checked="" value="mergePreview"/);
+
+    const noBase = renderChangedFiles(undefined, undefined, key, new Set(), {
+      kind: "mergeBaseNotice",
+      fileKey: key,
+      requestGeneration: 13,
+      cardinality: "none",
+      candidateCount: 0,
+    });
+    expect(noBase).toContain("no merge base");
+
+    const multiple = renderChangedFiles(undefined, undefined, key, new Set(), {
+      kind: "mergeBaseNotice",
+      fileKey: key,
+      requestGeneration: 14,
+      cardinality: "multiple",
+      candidateCount: 2,
+    });
+    expect(multiple).toContain("2 merge-base candidates");
+    expect(multiple).toContain("will not choose one automatically");
   });
 });

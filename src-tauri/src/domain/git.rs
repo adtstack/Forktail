@@ -100,6 +100,27 @@ pub enum GitMergeBase {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum GitMergePreviewDisclaimer {
+    NotExecutedMerge,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GitMergePreviewResult {
+    Ready {
+        text: String,
+        clean: bool,
+        conflict_count: usize,
+    },
+    Unavailable,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum GitRevisionKind {
     Head,
     Branch,
@@ -594,6 +615,29 @@ pub struct GitCompareSession {
     pub generation: u64,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitMergePreviewCapabilities {
+    pub edit: bool,
+    pub save: bool,
+    pub hunk_copy: bool,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitMergePreview {
+    pub repository_id: String,
+    pub merge_base: GitMergeBase,
+    pub base: GitSnapshotDocument,
+    pub left: GitSnapshotDocument,
+    pub right: GitSnapshotDocument,
+    pub result: GitMergePreviewResult,
+    pub disclaimer: GitMergePreviewDisclaimer,
+    pub read_only: bool,
+    pub capabilities: GitMergePreviewCapabilities,
+    pub generation: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPathIdentity {
@@ -862,12 +906,14 @@ mod tests {
         GitChangedFileStatus, GitCompareCapabilities, GitCompareSession, GitCompareSourceKind,
         GitConflictEntry, GitConflictList, GitConflictOperation, GitConflictSaveAction,
         GitConflictSaveResult, GitConflictStage, GitHeadState, GitIndexComparison, GitMergeBase,
-        GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType, GitPathIdentity,
-        GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary, GitRevision,
-        GitRevisionKind, GitRevisionPair, GitSnapshotContentState, GitSnapshotDocument,
-        GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState, GitStatusChangeKind,
-        GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus, GitTextMetadata, GitTreeEntry,
-        GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry, GitWorkingTreeVersion,
+        GitMergePreview, GitMergePreviewCapabilities, GitMergePreviewDisclaimer,
+        GitMergePreviewResult, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
+        GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
+        GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
+        GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState,
+        GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus,
+        GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry,
+        GitWorkingTreeVersion,
     };
     use crate::domain::models::WriteResult;
     use serde_json::json;
@@ -940,6 +986,68 @@ mod tests {
                 expected,
             );
         }
+    }
+
+    #[test]
+    fn serializes_merge_preview_as_read_only_and_not_executed() {
+        let object_id = sha1('a');
+        let path = GitPathIdentity::new("repository:path:1", "file.txt", Some("file.txt"));
+        let snapshot = |label: &str| GitSnapshotDocument {
+            origin: GitSnapshotOrigin::CommittedBlob,
+            label: label.to_string(),
+            read_only: true,
+            object_id: Some(object_id.clone()),
+            path: Some(path.clone()),
+            mode: Some("100644".to_string()),
+            text_metadata: Some(GitTextMetadata {
+                encoding: "UTF-8".to_string(),
+                line_ending: crate::LineEnding::Lf,
+                had_final_newline: true,
+                decode_had_errors: false,
+                size: 5,
+            }),
+            working_tree_version: None,
+            content_state: GitSnapshotContentState::Text {
+                text: "text\n".to_string(),
+            },
+        };
+        let value = serde_json::to_value(GitMergePreview {
+            repository_id: "repository-session-1".to_string(),
+            merge_base: GitMergeBase::Single {
+                object_id: object_id.clone(),
+            },
+            base: snapshot("Merge base"),
+            left: snapshot("Left"),
+            right: snapshot("Right"),
+            result: GitMergePreviewResult::Ready {
+                text: "text\n".to_string(),
+                clean: true,
+                conflict_count: 0,
+            },
+            disclaimer: GitMergePreviewDisclaimer::NotExecutedMerge,
+            read_only: true,
+            capabilities: GitMergePreviewCapabilities {
+                edit: false,
+                save: false,
+                hunk_copy: false,
+            },
+            generation: 7,
+        })
+        .expect("serialize merge preview");
+
+        assert_eq!(value["mergeBase"]["kind"], "single");
+        assert_eq!(value["result"]["kind"], "ready");
+        assert_eq!(value["result"]["conflictCount"], 0);
+        assert_eq!(value["disclaimer"], "notExecutedMerge");
+        assert_eq!(value["readOnly"], true);
+        assert_eq!(
+            value["capabilities"],
+            json!({
+                "edit": false,
+                "save": false,
+                "hunkCopy": false,
+            })
+        );
     }
 
     #[test]

@@ -24,7 +24,7 @@ export const APP_COMMAND_EVENT = "forktail-command";
 export interface ShellOpenCommandContext {
   mode: "home" | "compare" | "folders" | "merge" | "git";
   compareOrigin: "files" | "difftool" | "git" | null;
-  mergeOrigin: "files" | "mergetool" | "gitConflict" | null;
+  mergeOrigin: "files" | "mergetool" | "gitConflict" | "gitPreview" | null;
 }
 
 export interface KeyboardShortcutLike {

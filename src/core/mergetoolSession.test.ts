@@ -80,6 +80,8 @@ describe("buildMergetoolSession", () => {
 describe("mergetoolSessionCapabilities", () => {
   it("hardens mergetool save and persistence capabilities", () => {
     expect(mergetoolSessionCapabilities({ origin: "mergetool" })).toEqual({
+      editable: true,
+      save: true,
       saveTarget: "output-only",
       saveAs: false,
       backupRestore: false,
@@ -91,7 +93,22 @@ describe("mergetoolSessionCapabilities", () => {
 
   it("gives repository conflicts the same fixed-output and no-persistence boundary", () => {
     expect(mergetoolSessionCapabilities({ origin: "gitConflict" })).toEqual({
+      editable: true,
+      save: true,
       saveTarget: "output-only",
+      saveAs: false,
+      backupRestore: false,
+      persistPaths: false,
+      recoveryDrafts: false,
+      unresolvedPolicy: "block-unresolved",
+    });
+  });
+
+  it("makes repository merge previews fully read-only and non-persistent", () => {
+    expect(mergetoolSessionCapabilities({ origin: "gitPreview" })).toEqual({
+      editable: false,
+      save: false,
+      saveTarget: "none",
       saveAs: false,
       backupRestore: false,
       persistPaths: false,
@@ -102,6 +119,8 @@ describe("mergetoolSessionCapabilities", () => {
 
   it("keeps ordinary file merge capabilities", () => {
     expect(mergetoolSessionCapabilities({ origin: "files" })).toEqual({
+      editable: true,
+      save: true,
       saveTarget: "selectable",
       saveAs: true,
       backupRestore: true,

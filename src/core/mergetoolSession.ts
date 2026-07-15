@@ -19,7 +19,9 @@ export interface BuiltMergetoolSession {
 }
 
 export interface MergeSessionCapabilities {
-  saveTarget: "selectable" | "output-only";
+  editable: boolean;
+  save: boolean;
+  saveTarget: "selectable" | "output-only" | "none";
   saveAs: boolean;
   backupRestore: boolean;
   persistPaths: boolean;
@@ -62,8 +64,22 @@ export function buildMergetoolSession(
 export function mergetoolSessionCapabilities(
   session: Pick<MergeSession, "origin">,
 ): MergeSessionCapabilities {
+  if (session.origin === "gitPreview") {
+    return {
+      editable: false,
+      save: false,
+      saveTarget: "none",
+      saveAs: false,
+      backupRestore: false,
+      persistPaths: false,
+      recoveryDrafts: false,
+      unresolvedPolicy: "block-unresolved",
+    };
+  }
   if (session.origin === "mergetool" || session.origin === "gitConflict") {
     return {
+      editable: true,
+      save: true,
       saveTarget: "output-only",
       saveAs: false,
       backupRestore: false,
@@ -74,6 +90,8 @@ export function mergetoolSessionCapabilities(
   }
 
   return {
+    editable: true,
+    save: true,
     saveTarget: "selectable",
     saveAs: true,
     backupRestore: true,

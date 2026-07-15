@@ -19,6 +19,7 @@ import {
   listGitRefs,
   openGitConflict,
   openGitIndexCompare,
+  openGitMergePreview,
   openGitRevisionCompare,
   openGitWorkingTreeCompare,
   readGitStatus,
@@ -329,6 +330,38 @@ describe("Git merge-base bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 98,
+    });
+  });
+});
+
+describe("Git merge-preview bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("passes the selected base and immutable revision/file identities to one cancellable job", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+    const objectId = { algorithm: "sha1" as const, hex: "a".repeat(40) };
+    const path = { opaqueId: "repository-session-1:path:9:1", displayPath: "file.txt", utf8Path: "file.txt" };
+    const request = {
+      mergeBase: objectId,
+      leftRevision: { rawLabel: "main", resolved: objectId, kind: "branch" as const, displayName: "main" },
+      rightRevision: { rawLabel: "feature", resolved: { ...objectId, hex: "b".repeat(40) }, kind: "branch" as const, displayName: "feature" },
+      changedFile: { status: "modified" as const, oldPath: path, newPath: path, similarityScore: null },
+      generation: 9,
+    };
+
+    await openGitMergePreview("repository-session-1", request, 99);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("open_git_merge_preview", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 99,
     });
   });
 });

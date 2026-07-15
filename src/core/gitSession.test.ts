@@ -7,11 +7,13 @@ import type {
   GitCompareSession,
   GitConflictOperation,
   GitConflictSession,
+  GitMergePreview,
   GitSnapshotDocument,
 } from "./gitModels";
 import {
   adaptGitCompareSession,
   adaptGitConflictSession,
+  adaptGitMergePreview,
   keepsGitRepositorySession,
 } from "./gitSession";
 import { persistentCompareSessionInput } from "./settings";
@@ -22,6 +24,7 @@ describe("Git repository session lifecycle", () => {
     expect(keepsGitRepositorySession("git", null, null)).toBe(true);
     expect(keepsGitRepositorySession("compare", "git", null)).toBe(true);
     expect(keepsGitRepositorySession("merge", null, "gitConflict")).toBe(true);
+    expect(keepsGitRepositorySession("merge", null, "gitPreview")).toBe(true);
     expect(keepsGitRepositorySession("merge", null, "files")).toBe(false);
     expect(keepsGitRepositorySession("home", null, null)).toBe(false);
   });
@@ -55,6 +58,29 @@ function snapshot(
       : null,
     workingTreeVersion: null,
     contentState,
+  };
+}
+
+function mergePreview(result: GitMergePreview["result"] = {
+  kind: "ready",
+  text: "merged\n",
+  clean: true,
+  conflictCount: 0,
+}): GitMergePreview {
+  return {
+    repositoryId: "repository-session-1",
+    mergeBase: {
+      kind: "single",
+      objectId: { algorithm: "sha1", hex: "a".repeat(40) },
+    },
+    base: snapshot({ kind: "text", text: "base\n" }, "Merge base · src/file.txt"),
+    left: snapshot({ kind: "text", text: "left\n" }, "main · src/file.txt"),
+    right: snapshot({ kind: "text", text: "right\n" }, "feature · src/file.txt"),
+    result,
+    disclaimer: "notExecutedMerge",
+    readOnly: true,
+    capabilities: { edit: false, save: false, hunkCopy: false },
+    generation: 9,
   };
 }
 
@@ -339,5 +365,39 @@ describe("Git conflict merge session adapter", () => {
         contentStates: ["text", "text", "text", contentState.kind],
       });
     }
+  });
+});
+
+describe("Git merge preview adapter", () => {
+  it("adapts one immutable in-memory result without creating a save target", () => {
+    const source = mergePreview();
+    const adapted = adaptGitMergePreview(source);
+
+    expect(adapted.kind).toBe("merge");
+    if (adapted.kind !== "merge") throw new Error("expected merge state");
+    expect(adapted.session).toMatchObject({
+      origin: "gitPreview",
+      result: "merged\n",
+      output: null,
+      outputPath: null,
+      preview: source,
+    });
+    expect(adapted.session.base.text).toBe("base\n");
+    expect(adapted.session.ours.text).toBe("left\n");
+    expect(adapted.session.theirs.text).toBe("right\n");
+  });
+
+  it("fails closed for an unavailable result or a mutable backend contract", () => {
+    expect(adaptGitMergePreview(mergePreview({ kind: "unavailable" }))).toMatchObject({
+      kind: "notice",
+      resultState: "unavailable",
+    });
+    expect(adaptGitMergePreview({ ...mergePreview(), readOnly: false })).toMatchObject({
+      kind: "notice",
+    });
+    expect(adaptGitMergePreview({
+      ...mergePreview(),
+      capabilities: { edit: true, save: false, hunkCopy: false },
+    })).toMatchObject({ kind: "notice" });
   });
 });

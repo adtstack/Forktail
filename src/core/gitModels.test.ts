@@ -5,6 +5,7 @@ import type {
   GitBlobDocument,
   GitChangedFileList,
   GitMergeBase,
+  GitMergePreview,
   GitObjectId,
   GitPathIdentity,
   GitRefList,
@@ -57,6 +58,45 @@ describe("Git DTO contract", () => {
     expect(multiple.kind).toBe("multiple");
     expect(rustDtoSource).toContain("pub enum GitMergeBase");
     expect(rustDtoSource).toContain("Multiple { object_ids: Vec<GitObjectId> }");
+  });
+
+  it("keeps merge preview read-only, in-memory, and explicitly not executed", () => {
+    const objectId = { algorithm: "sha1" as const, hex: "a".repeat(40) };
+    const path = { opaqueId: "repository:path:1", displayPath: "file.txt", utf8Path: "file.txt" };
+    const snapshot = {
+      origin: "committedBlob" as const,
+      label: "snapshot",
+      readOnly: true,
+      objectId,
+      path,
+      mode: "100644",
+      textMetadata: {
+        encoding: "UTF-8",
+        lineEnding: "lf" as const,
+        hadFinalNewline: true,
+        decodeHadErrors: false,
+        size: 5,
+      },
+      workingTreeVersion: null,
+      contentState: { kind: "text" as const, text: "text\n" },
+    };
+    const preview: GitMergePreview = {
+      repositoryId: "repository-session-1",
+      mergeBase: { kind: "single", objectId },
+      base: snapshot,
+      left: snapshot,
+      right: snapshot,
+      result: { kind: "ready", text: "text\n", clean: true, conflictCount: 0 },
+      disclaimer: "notExecutedMerge",
+      readOnly: true,
+      capabilities: { edit: false, save: false, hunkCopy: false },
+      generation: 7,
+    };
+
+    expect(preview.disclaimer).toBe("notExecutedMerge");
+    expect(preview.capabilities).toEqual({ edit: false, save: false, hunkCopy: false });
+    expect(rustDtoSource).toContain("pub struct GitMergePreview");
+    expect(rustDtoSource).toContain("NotExecutedMerge");
   });
 
   it("keeps repository and head state as a discriminated DTO", () => {

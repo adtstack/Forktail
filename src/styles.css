@@ -721,7 +721,7 @@ input, select {
 .git-changed-file-shown { color: var(--muted-text); font-size: 12px; }
 .git-changed-file-filters {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(170px, 0.35fr);
+  grid-template-columns: minmax(220px, 0.55fr) minmax(0, 1fr) minmax(170px, 0.35fr);
   gap: 10px;
   margin-top: 14px;
 }
@@ -729,6 +729,29 @@ input, select {
 .git-changed-file-filters label > span { color: var(--muted-text); font-size: 12px; }
 .git-changed-file-filters input,
 .git-changed-file-filters select { width: 100%; min-width: 0; }
+.git-changed-file-open-mode {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.git-changed-file-open-mode legend {
+  padding: 0 4px;
+  color: var(--muted-text);
+  font-size: 12px;
+}
+.git-changed-file-open-mode label {
+  display: flex;
+  grid-template-columns: none;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+.git-changed-file-open-mode input { width: auto; }
 .git-changed-file-counts {
   display: flex;
   flex-wrap: wrap;

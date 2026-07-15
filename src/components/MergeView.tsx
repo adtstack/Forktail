@@ -63,7 +63,11 @@ export function canRunMergeViewCommand(
   conflictCount: number,
 ): boolean {
   const capabilities = mergetoolSessionCapabilities(session);
+  if (["undo", "redo", "acceptOurs", "acceptBase", "acceptTheirs", "acceptBoth"].includes(commandId)) {
+    return capabilities.editable;
+  }
   if (commandId === "saveAs") return capabilities.saveAs;
+  if (commandId === "save" && !capabilities.save) return false;
   if (commandId === "save" && capabilities.unresolvedPolicy === "block-unresolved") {
     return conflictCount === 0;
   }
@@ -96,6 +100,9 @@ export function MergeView({
   const capabilities = useMemo(() => mergetoolSessionCapabilities(session), [session.origin]);
   const isMergetool = session.origin === "mergetool";
   const isGitConflict = session.origin === "gitConflict";
+  const isGitPreview = session.origin === "gitPreview";
+  const oursLabel = isGitPreview ? "LEFT" : "OURS";
+  const theirsLabel = isGitPreview ? "RIGHT" : "THEIRS";
   const baseMissing = isMissingFileDocument(session.base);
   const resultEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
   const activeDecorationIds = useRef<string[]>([]);
@@ -182,12 +189,13 @@ export function MergeView({
   };
 
   const commitResult = useCallback((next: string) => {
+    if (!capabilities.editable) return;
     const nextHistory = pushTextHistory(resultHistory, next);
     if (nextHistory === resultHistory) return;
     setResultHistory(nextHistory);
     lastSyncedResult.current = next;
     onResultChange(next);
-  }, [onResultChange, resultHistory]);
+  }, [capabilities.editable, onResultChange, resultHistory]);
 
   const replaceResultFromHistory = useCallback((nextHistory: TextHistory) => {
     if (nextHistory === resultHistory) return;
@@ -393,6 +401,8 @@ export function MergeView({
               ? text.closeMergetool
               : isGitConflict
                 ? text.repositoryReview
+                : isGitPreview
+                  ? text.repositoryReview
                 : text.home}
           </button>
         </div>
@@ -426,7 +436,7 @@ export function MergeView({
             {text.nextConflict}
           </button>
         </div>
-        <div className="command-group" aria-label={text.resultEditingAria}>
+        {capabilities.editable && <div className="command-group" aria-label={text.resultEditingAria}>
           <span
             className={dirty ? "dirty-count" : "clean-count"}
             role="status"
@@ -451,8 +461,8 @@ export function MergeView({
           >
             {text.redo}
           </button>
-        </div>
-        <div className="command-group" aria-label={text.mergeOptionsAria}>
+        </div>}
+        {capabilities.editable && <div className="command-group" aria-label={text.mergeOptionsAria}>
           <label className="toolbar-check">
             <input
               type="checkbox"
@@ -499,9 +509,9 @@ export function MergeView({
               <option value="crlf">CRLF</option>
             </select>
           </label>
-        </div>
+        </div>}
         <div className="toolbar-spacer" />
-        <div className="command-group" aria-label={text.saveAria}>
+        {capabilities.save && <div className="command-group" aria-label={text.saveAria}>
           <button
             className="command-button primary-button"
             onClick={saveResult}
@@ -529,7 +539,7 @@ export function MergeView({
               {text.backups}
             </button>
           )}
-        </div>
+        </div>}
       </header>
 
       {isMergetool && (
@@ -547,6 +557,13 @@ export function MergeView({
             session.conflict.path.displayPath,
           )}</span>
           <span>{text.gitConflictNextStep(session.conflict.operation)}</span>
+        </div>
+      )}
+
+      {isGitPreview && (
+        <div className="metadata-warning git-merge-preview-notice" role="status">
+          <strong>{text.gitPreviewMode}</strong>
+          <span>{text.gitPreviewDisclaimer}</span>
         </div>
       )}
 
@@ -570,19 +587,19 @@ export function MergeView({
           }}
         />
         <PaneHeading
-          label="OURS"
+          label={oursLabel}
           path={session.ours.path}
           text={text}
           onCopyPath={() => {
-            void copyPath("OURS", session.ours.path);
+            void copyPath(oursLabel, session.ours.path);
           }}
         />
         <PaneHeading
-          label="THEIRS"
+          label={theirsLabel}
           path={session.theirs.path}
           text={text}
           onCopyPath={() => {
-            void copyPath("THEIRS", session.theirs.path);
+            void copyPath(theirsLabel, session.theirs.path);
           }}
         />
       </section>
@@ -625,14 +642,14 @@ export function MergeView({
           editorTheme={editorTheme}
         />
         <SourceEditor
-          label={text.sourceLabel("OURS")}
+          label={text.sourceLabel(oursLabel)}
           path={session.ours.path}
           value={session.ours.text}
           language={editorLanguage}
           editorTheme={editorTheme}
         />
         <SourceEditor
-          label={text.sourceLabel("THEIRS")}
+          label={text.sourceLabel(theirsLabel)}
           path={session.theirs.path}
           value={session.theirs.text}
           language={editorLanguage}
@@ -643,7 +660,7 @@ export function MergeView({
           role="region"
           aria-label={text.resultEditorAria(session.outputPath)}
         >
-          {activeConflict && (
+          {activeConflict && capabilities.editable && (
             <div className="resolution-rail" aria-label={text.resolveActiveConflictAria}>
               <div>
                 <span className="side-label">{text.activeConflict}</span>
@@ -679,8 +696,8 @@ export function MergeView({
           )}
           <div className="result-heading">
             <div>
-              <span className="side-label">{text.result}</span>
-              <strong>{session.outputPath ?? text.noOutputPath}</strong>
+              <span className="side-label">{isGitPreview ? text.inMemoryResult : text.result}</span>
+              <strong>{isGitPreview ? text.gitPreviewMode : session.outputPath ?? text.noOutputPath}</strong>
             </div>
           </div>
           <Editor
@@ -691,6 +708,7 @@ export function MergeView({
             onMount={mountResult}
             onChange={(value) => commitResult(value ?? "")}
             options={{
+              readOnly: !capabilities.editable,
               automaticLayout: true,
               minimap: { enabled: false },
               fontSize: 13,
@@ -705,9 +723,11 @@ export function MergeView({
       </section>
 
       <footer className="status-bar">
-        <span>{language} · {text.editable}</span>
+        <span>{language} · {capabilities.editable ? text.editable : text.readOnly}</span>
         <span>
-          {dirty
+          {isGitPreview
+            ? text.gitPreviewDisclaimer
+            : dirty
             ? text.unsavedResultChanges
             : conflicts.length
               ? text.resolveBeforeSaving

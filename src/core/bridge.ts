@@ -21,6 +21,8 @@ import type {
   GitIndexCompareRequest,
   GitMergeBase,
   GitMergeBaseRequest,
+  GitMergePreview,
+  GitMergePreviewRequest,
   GitChangedFileList,
   GitChangedFilesRequest,
   GitRefKind,
@@ -221,6 +223,19 @@ export async function getGitMergeBase(
 ): Promise<GitMergeBase> {
   requireTauri();
   return invoke<GitMergeBase>("get_git_merge_base", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
+}
+
+export async function openGitMergePreview(
+  repositorySessionId: string,
+  request: GitMergePreviewRequest,
+  jobId: number,
+): Promise<GitMergePreview> {
+  requireTauri();
+  return invoke<GitMergePreview>("open_git_merge_preview", {
     repositorySessionId,
     request,
     jobId,

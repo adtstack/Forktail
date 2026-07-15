@@ -7,6 +7,7 @@ import type { GitChangedFile } from "../core/gitModels";
 import type {
   GitChangedFileFilter,
   GitChangedFileLoadState,
+  GitChangedFileOpenMode,
   GitChangedFileStatusFilter,
   GitConflictLoadState,
   GitConflictOpenState,
@@ -70,6 +71,7 @@ interface GitCompareViewProps {
   onValidateRevision?: (side: "left" | "right", input: string) => void;
   onChangedFileFilterChange?: (query: string) => void;
   onChangedFileStatusFilterChange?: (status: GitChangedFileStatusFilter) => void;
+  onChangedFileOpenModeChange?: (mode: GitChangedFileOpenMode) => void;
   onSelectChangedFile?: (entry: GitChangedFile) => void;
   onRefreshWorkingTree?: () => void;
   onWorkingTreeFilterChange?: (query: string) => void;
@@ -93,6 +95,7 @@ export interface GitChangedFilesReviewState {
   selectedKey: string | null;
   viewedKeys: ReadonlySet<string>;
   snapshotState: GitSnapshotSelectionState;
+  openMode?: GitChangedFileOpenMode;
 }
 
 export interface GitWorkingTreeReviewState {
@@ -172,6 +175,7 @@ export function GitCompareView({
   onValidateRevision,
   onChangedFileFilterChange,
   onChangedFileStatusFilterChange,
+  onChangedFileOpenModeChange,
   onSelectChangedFile,
   onRefreshWorkingTree,
   onWorkingTreeFilterChange,
@@ -340,9 +344,11 @@ export function GitCompareView({
           selectedKey={changedFilesReview.selectedKey}
           viewedKeys={changedFilesReview.viewedKeys}
           snapshotState={changedFilesReview.snapshotState}
+          openMode={changedFilesReview.openMode}
           languageMode={languageMode}
           onFilterChange={onChangedFileFilterChange}
           onStatusFilterChange={onChangedFileStatusFilterChange}
+          onOpenModeChange={onChangedFileOpenModeChange}
           onSelect={onSelectChangedFile}
         />
       )}

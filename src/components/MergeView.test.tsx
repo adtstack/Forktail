@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { AppCommandId } from "../core/commands";
 import type { MergeRecoveryDraft } from "../core/mergeRecovery";
-import type { GitConflictMergeSession, MergeSession } from "../core/models";
+import type { GitConflictMergeSession, GitPreviewMergeSession, MergeSession } from "../core/models";
 import { demoMergeSession } from "../core/samples";
 import { virtualMissingFileDocument } from "../core/virtualDocument";
 import { canRunMergeViewCommand, MergeView } from "./MergeView";
@@ -11,7 +11,9 @@ vi.mock("../monaco", () => ({
   loadMonacoLanguage: () => Promise.resolve(),
 }));
 vi.mock("@monaco-editor/react", () => ({
-  default: ({ value }: { value?: string }) => <div role="textbox">{value}</div>,
+  default: ({ value, options }: { value?: string; options?: { readOnly?: boolean } }) => (
+    <div role="textbox" data-readonly={options?.readOnly === true}>{value}</div>
+  ),
 }));
 
 function renderMergeView(
@@ -193,6 +195,34 @@ describe("MergeView repository conflict mode", () => {
   });
 });
 
+describe("MergeView repository merge preview mode", () => {
+  it("shows a read-only in-memory disclaimer and removes every mutation path", () => {
+    const session = gitPreviewSession();
+    const markup = renderMergeView(false, session);
+
+    expect(markup).toContain("Read-only merge preview");
+    expect(markup).toContain("This preview does not execute Git merge or change the repository");
+    expect(markup).toContain("In-memory Result");
+    expect(markup).toContain("LEFT source");
+    expect(markup).toContain("RIGHT source");
+    expect(markup).toContain("data-readonly=\"true\"");
+    expect(markup).toContain(">Repository review</button>");
+    for (const label of ["Save", "Save As", "Undo", "Redo", "Accept OURS", "Accept THEIRS", "Drafts", "Backups"]) {
+      expect(markup).not.toContain(`>${label}<`);
+    }
+  });
+
+  it("allows conflict navigation but rejects edit, resolution, and save commands", () => {
+    const session = gitPreviewSession();
+
+    expect(commandAvailable("previousConflict", session, 1)).toBe(true);
+    expect(commandAvailable("nextConflict", session, 1)).toBe(true);
+    for (const command of ["undo", "redo", "acceptOurs", "acceptTheirs", "acceptBase", "acceptBoth", "save", "saveAs"] as AppCommandId[]) {
+      expect(commandAvailable(command, session, 0)).toBe(false);
+    }
+  });
+});
+
 function mergetoolSession(result = demoMergeSession().result): MergeSession {
   const demo = demoMergeSession();
   return {
@@ -283,6 +313,54 @@ function gitConflictSession(): GitConflictMergeSession {
       operation: "rebase",
       saveState: "clean",
       generation: 9,
+    },
+  };
+}
+
+function gitPreviewSession(): GitPreviewMergeSession {
+  const demo = demoMergeSession();
+  const objectId = { algorithm: "sha1" as const, hex: "a".repeat(40) };
+  const path = {
+    opaqueId: "repository-session-1:path:10:1",
+    displayPath: "src/preview.ts",
+    utf8Path: "src/preview.ts",
+  };
+  const snapshot = (label: string, text: string) => ({
+    origin: "committedBlob" as const,
+    label,
+    readOnly: true,
+    objectId,
+    path,
+    mode: "100644",
+    textMetadata: {
+      encoding: "UTF-8",
+      lineEnding: "lf" as const,
+      hadFinalNewline: true,
+      decodeHadErrors: false,
+      size: text.length,
+    },
+    workingTreeVersion: null,
+    contentState: { kind: "text" as const, text },
+  });
+  return {
+    origin: "gitPreview",
+    base: { ...demo.base, path: "Merge base · src/preview.ts" },
+    ours: { ...demo.ours, path: "main · src/preview.ts" },
+    theirs: { ...demo.theirs, path: "feature · src/preview.ts" },
+    result: demo.result,
+    output: null,
+    outputPath: null,
+    preview: {
+      repositoryId: "repository-session-1",
+      mergeBase: { kind: "single", objectId },
+      base: snapshot("Merge base · src/preview.ts", demo.base.text),
+      left: snapshot("main · src/preview.ts", demo.ours.text),
+      right: snapshot("feature · src/preview.ts", demo.theirs.text),
+      result: { kind: "ready", text: demo.result, clean: false, conflictCount: 2 },
+      disclaimer: "notExecutedMerge",
+      readOnly: true,
+      capabilities: { edit: false, save: false, hunkCopy: false },
+      generation: 10,
     },
   };
 }

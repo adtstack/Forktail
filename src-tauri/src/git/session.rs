@@ -1,11 +1,14 @@
+use crate::commands::merge::merge_text_values;
 use crate::domain::git::{
     GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileStatus, GitCompareCapabilities,
     GitCompareSession, GitCompareSourceKind, GitConflictOperation, GitConflictResultFingerprint,
     GitConflictResultKind, GitConflictSaveState, GitConflictSession, GitConflictStage,
-    GitConflictStageFingerprint, GitHeadState, GitIndexComparison, GitIndexEntry, GitPathIdentity,
-    GitPathPlatform, GitPathRegistryError, GitRevision, GitRevisionKind, GitRevisionPair,
-    GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason,
-    GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitWorkingTreeVersion,
+    GitConflictStageFingerprint, GitHeadState, GitIndexComparison, GitIndexEntry, GitMergeBase,
+    GitMergePreview, GitMergePreviewCapabilities, GitMergePreviewDisclaimer, GitMergePreviewResult,
+    GitPathIdentity, GitPathPlatform, GitPathRegistryError, GitRevision, GitRevisionKind,
+    GitRevisionPair, GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin,
+    GitSnapshotUnavailableReason, GitTextMetadata, GitTreeEntry, GitTreeEntryKind,
+    GitWorkingTreeVersion,
 };
 use crate::git::blob::{GitBlobError, read_blob};
 use crate::git::conflicts::{GitConflictError, MAX_CONFLICT_ENTRIES, list_conflicts};
@@ -13,6 +16,7 @@ use crate::git::index::{
     GitIndexError, index_entry_visible_against_head, index_fingerprint_matches,
     read_stage_zero_index_entry,
 };
+use crate::git::merge_base::{GitMergeBaseError, get_merge_base};
 use crate::git::repository::GitRepositorySession;
 use crate::git::runner::CancellationToken;
 use crate::git::tree::{GitTreeError, list_tree};
@@ -47,11 +51,14 @@ pub enum GitSessionError {
     IndexChanged,
     ConflictNotFound,
     ConflictStateChanged,
+    MergeBaseUnavailable,
+    MergeBaseChanged,
     StateUnavailable,
     Cancelled,
     Tree(GitTreeError),
     Blob(GitBlobError),
     Index(GitIndexError),
+    MergeBase(GitMergeBaseError),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -120,6 +127,111 @@ pub fn open_revision_compare(
         },
         generation,
     })
+}
+
+pub fn open_merge_preview(
+    session: &GitRepositorySession,
+    expected_merge_base: &crate::GitObjectId,
+    left_revision: &GitRevision,
+    right_revision: &GitRevision,
+    changed_file: &GitChangedFile,
+    generation: u64,
+    cancellation: &CancellationToken,
+) -> Result<GitMergePreview, GitSessionError> {
+    if cancellation.is_cancelled() {
+        return Err(GitSessionError::Cancelled);
+    }
+    validate_revision(session, left_revision)?;
+    validate_revision(session, right_revision)?;
+    validate_generation(session, generation)?;
+
+    let merge_base = get_merge_base(
+        session,
+        &left_revision.resolved,
+        &right_revision.resolved,
+        cancellation,
+    )
+    .map_err(map_merge_base_error)?;
+    let actual_merge_base = match &merge_base {
+        GitMergeBase::Single { object_id } if object_id == expected_merge_base => object_id.clone(),
+        GitMergeBase::Single { .. } => return Err(GitSessionError::MergeBaseChanged),
+        GitMergeBase::None | GitMergeBase::Multiple { .. } => {
+            return Err(GitSessionError::MergeBaseUnavailable);
+        }
+    };
+
+    let (left_plan, right_plan) = plan_changed_file(changed_file)?;
+    let left_plan = canonicalize_plan(session, left_plan, generation)?;
+    let right_plan = canonicalize_plan(session, right_plan, generation)?;
+    let left = materialize_side(session, left_revision, left_plan, generation, cancellation)?;
+    let right = materialize_side(
+        session,
+        right_revision,
+        right_plan,
+        generation,
+        cancellation,
+    )?;
+    let base_path = left.path.clone().ok_or(GitSessionError::StateUnavailable)?;
+    let base_revision = GitRevision {
+        raw_label: actual_merge_base.hex.clone(),
+        resolved: actual_merge_base,
+        kind: GitRevisionKind::Commit,
+        display_name: "Merge base".to_string(),
+    };
+    let base = read_optional_committed_snapshot(
+        session,
+        &base_revision,
+        base_path,
+        generation,
+        cancellation,
+    )?;
+    validate_generation(session, generation)?;
+
+    let result = build_merge_preview_result(&base, &left, &right);
+    Ok(GitMergePreview {
+        repository_id: session.summary().session_id.clone(),
+        merge_base,
+        base,
+        left,
+        right,
+        result,
+        disclaimer: GitMergePreviewDisclaimer::NotExecutedMerge,
+        read_only: true,
+        capabilities: GitMergePreviewCapabilities {
+            edit: false,
+            save: false,
+            hunk_copy: false,
+        },
+        generation,
+    })
+}
+
+fn build_merge_preview_result(
+    base: &GitSnapshotDocument,
+    left: &GitSnapshotDocument,
+    right: &GitSnapshotDocument,
+) -> GitMergePreviewResult {
+    fn text_or_missing(document: &GitSnapshotDocument) -> Option<&str> {
+        match &document.content_state {
+            GitSnapshotContentState::Text { text } => Some(text),
+            GitSnapshotContentState::Missing => Some(""),
+            _ => None,
+        }
+    }
+
+    let (Some(base), Some(left), Some(right)) = (
+        text_or_missing(base),
+        text_or_missing(left),
+        text_or_missing(right),
+    ) else {
+        return GitMergePreviewResult::Unavailable;
+    };
+    let merged = merge_text_values(base, left, right);
+    GitMergePreviewResult::Ready {
+        text: merged.output,
+        clean: merged.clean,
+        conflict_count: merged.conflict_count,
+    }
 }
 
 pub fn open_working_tree_compare(
@@ -1421,6 +1533,15 @@ fn map_conflict_error(error: GitConflictError) -> GitSessionError {
     }
 }
 
+fn map_merge_base_error(error: GitMergeBaseError) -> GitSessionError {
+    match error {
+        GitMergeBaseError::Runner(crate::git::runner::RunnerError::Cancelled) => {
+            GitSessionError::Cancelled
+        }
+        other => GitSessionError::MergeBase(other),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1429,8 +1550,9 @@ mod tests {
     };
     use crate::domain::git::{
         GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileStatus,
-        GitCompareSourceKind, GitConflictOperation, GitObjectAlgorithm, GitObjectId,
-        GitPathIdentity, GitRevision, GitRevisionKind, GitSnapshotContentState, GitSnapshotOrigin,
+        GitCompareSourceKind, GitConflictOperation, GitMergePreviewDisclaimer,
+        GitMergePreviewResult, GitObjectAlgorithm, GitObjectId, GitPathIdentity, GitRevision,
+        GitRevisionKind, GitSnapshotContentState, GitSnapshotOrigin,
     };
     use crate::git::GIT_FIXTURE_LOCK;
     use crate::git::changed_files::list_changed_files;
@@ -1628,6 +1750,211 @@ mod tests {
             super::conflict_stage_label(3, GitConflictOperation::CherryPick, &path),
             "Cherry-picked commit (Git theirs, index stage 3) · src/conflict.txt",
         );
+    }
+
+    #[test]
+    fn builds_clean_conflict_and_missing_preview_results_but_rejects_non_text_states() {
+        let preview_path = path("preview", "src/preview.txt");
+        let revision = revision();
+        let text = |value: &str, digit: char| {
+            snapshot_document_from_blob(
+                &revision,
+                preview_path.clone(),
+                "100644".to_string(),
+                GitBlobDocument {
+                    object_id: sha1(digit),
+                    size: value.len() as u64,
+                    content: GitBlobContent::Text {
+                        text: value.to_string(),
+                        encoding: "UTF-8".to_string(),
+                        line_ending: crate::LineEnding::Lf,
+                        had_final_newline: value.ends_with('\n'),
+                        decode_had_errors: false,
+                    },
+                },
+            )
+        };
+
+        assert_eq!(
+            super::build_merge_preview_result(
+                &text("a\nb\nc\n", '1'),
+                &text("A\nb\nc\n", '2'),
+                &text("a\nb\nC\n", '3'),
+            ),
+            GitMergePreviewResult::Ready {
+                text: "A\nb\nC\n".to_string(),
+                clean: true,
+                conflict_count: 0,
+            },
+        );
+        let conflict = super::build_merge_preview_result(
+            &text("base\n", '4'),
+            &text("ours\n", '5'),
+            &text("theirs\n", '6'),
+        );
+        assert!(matches!(
+            conflict,
+            GitMergePreviewResult::Ready {
+                clean: false,
+                conflict_count: 1,
+                ref text,
+            } if text.contains("<<<<<<< ours") && text.contains(">>>>>>> theirs")
+        ));
+        assert!(matches!(
+            super::build_merge_preview_result(
+                &missing_snapshot_document(&revision, preview_path.clone()),
+                &missing_snapshot_document(&revision, preview_path.clone()),
+                &text("added\n", '7'),
+            ),
+            GitMergePreviewResult::Ready { .. }
+        ));
+
+        let mut binary = text("ignored\n", '8');
+        binary.content_state = GitSnapshotContentState::Binary;
+        let mut type_change = text("ignored\n", '9');
+        type_change.content_state = GitSnapshotContentState::Symlink;
+        for unavailable in [binary, type_change] {
+            assert_eq!(
+                super::build_merge_preview_result(
+                    &text("base\n", 'a'),
+                    &text("left\n", 'b'),
+                    &unavailable,
+                ),
+                GitMergePreviewResult::Unavailable,
+            );
+        }
+    }
+
+    #[test]
+    fn opens_only_the_actual_single_base_as_an_immutable_preview_without_mutation() {
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = revision_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-702".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let cancellation = CancellationToken::new();
+        let changes = list_changed_files(
+            &session,
+            &fixture.left.resolved,
+            &fixture.right.resolved,
+            100,
+            &cancellation,
+        )
+        .expect("list changed files");
+        let modified = find_change(
+            &changes.entries,
+            GitChangedFileStatus::Modified,
+            "modified.txt",
+        );
+        let before = repository_fingerprint(&fixture.root);
+
+        let preview = super::open_merge_preview(
+            &session,
+            &fixture.left.resolved,
+            &fixture.left,
+            &fixture.right,
+            modified,
+            changes.generation,
+            &cancellation,
+        )
+        .expect("open single-base preview");
+
+        assert!(preview.read_only);
+        assert!(!preview.capabilities.edit);
+        assert!(!preview.capabilities.save);
+        assert!(!preview.capabilities.hunk_copy);
+        assert_eq!(
+            preview.disclaimer,
+            GitMergePreviewDisclaimer::NotExecutedMerge,
+        );
+        assert!(matches!(
+            preview.base.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "before\n"
+        ));
+        assert!(matches!(
+            preview.left.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "before\n"
+        ));
+        assert!(matches!(
+            preview.right.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "after\n"
+        ));
+        assert_eq!(
+            preview.result,
+            GitMergePreviewResult::Ready {
+                text: "after\n".to_string(),
+                clean: true,
+                conflict_count: 0,
+            },
+        );
+        assert_eq!(repository_fingerprint(&fixture.root), before);
+
+        assert_eq!(
+            super::open_merge_preview(
+                &session,
+                &fixture.right.resolved,
+                &fixture.left,
+                &fixture.right,
+                modified,
+                changes.generation,
+                &cancellation,
+            ),
+            Err(GitSessionError::MergeBaseChanged),
+        );
+    }
+
+    #[test]
+    fn keeps_binary_and_type_change_snapshots_read_only_without_a_text_result() {
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = revision_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-702-non-text".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let cancellation = CancellationToken::new();
+        let changes = list_changed_files(
+            &session,
+            &fixture.left.resolved,
+            &fixture.right.resolved,
+            100,
+            &cancellation,
+        )
+        .expect("list changed files");
+
+        for (status, display_path, expected_state) in [
+            (
+                GitChangedFileStatus::Added,
+                "binary.bin",
+                GitSnapshotContentState::Binary,
+            ),
+            (
+                GitChangedFileStatus::TypeChanged,
+                "type.txt",
+                GitSnapshotContentState::Symlink,
+            ),
+        ] {
+            let changed_file = find_change(&changes.entries, status, display_path);
+            let preview = super::open_merge_preview(
+                &session,
+                &fixture.left.resolved,
+                &fixture.left,
+                &fixture.right,
+                changed_file,
+                changes.generation,
+                &cancellation,
+            )
+            .expect("open non-text preview metadata");
+            assert_eq!(preview.result, GitMergePreviewResult::Unavailable);
+            assert_eq!(preview.right.content_state, expected_state);
+            assert!(preview.read_only && preview.right.read_only);
+        }
     }
 
     #[test]
