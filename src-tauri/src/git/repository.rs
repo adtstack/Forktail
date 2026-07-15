@@ -1,5 +1,6 @@
 use crate::domain::git::{
-    GitHeadState, GitObjectAlgorithm, GitObjectId, GitRepositoryIdentity, GitRepositorySummary,
+    GitHeadState, GitObjectAlgorithm, GitObjectId, GitPathRegistry, GitRepositoryIdentity,
+    GitRepositorySummary,
 };
 use crate::git::executable::{GitExecutableError, ValidatedGitExecutable};
 use crate::git::runner::{
@@ -28,6 +29,7 @@ pub struct GitRepositorySession {
     summary: GitRepositorySummary,
     identity: GitRepositoryIdentity,
     executable: ValidatedGitExecutable,
+    paths: Mutex<GitPathRegistry>,
 }
 
 impl GitRepositorySession {
@@ -49,6 +51,7 @@ impl GitRepositorySession {
         let (is_shallow, object_format) = parse_repository_metadata(&metadata.stdout)?;
         let head = read_head(&executable, &root, object_format)?;
         let is_linked_worktree = git_dir != common_dir;
+        let paths = GitPathRegistry::new(session_id.clone());
         let summary = GitRepositorySummary {
             session_id,
             display_root: safe_display_path(&root),
@@ -69,6 +72,7 @@ impl GitRepositorySession {
             summary,
             identity,
             executable,
+            paths: Mutex::new(paths),
         })
     }
 
@@ -82,6 +86,10 @@ impl GitRepositorySession {
 
     pub fn executable(&self) -> &ValidatedGitExecutable {
         &self.executable
+    }
+
+    pub fn paths(&self) -> &Mutex<GitPathRegistry> {
+        &self.paths
     }
 }
 

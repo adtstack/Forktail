@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
@@ -109,6 +110,192 @@ impl GitPathIdentity {
             utf8_path: utf8_path.map(Into::into),
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GitPathPlatform {
+    Unix,
+    Windows,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GitPathRegistryError {
+    EmptyPath,
+    PathContainsNul,
+    DuplicateOpaqueId,
+    UnknownOpaqueId,
+    StaleGeneration,
+    PlatformConversionUnsupported,
+    GenerationExhausted,
+    OpaqueIdExhausted,
+}
+
+#[derive(Debug)]
+pub struct GitPathRegistry {
+    session_scope: String,
+    generation: u64,
+    next_id: u64,
+    paths_by_id: HashMap<String, Vec<u8>>,
+    ids_by_path: HashMap<Vec<u8>, String>,
+}
+
+impl GitPathRegistry {
+    pub fn new(session_scope: impl Into<String>) -> Self {
+        Self {
+            session_scope: session_scope.into(),
+            generation: 0,
+            next_id: 0,
+            paths_by_id: HashMap::new(),
+            ids_by_path: HashMap::new(),
+        }
+    }
+
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+
+    pub fn register(&mut self, path: Vec<u8>) -> Result<GitPathIdentity, GitPathRegistryError> {
+        validate_path_bytes(&path)?;
+        if let Some(opaque_id) = self.ids_by_path.get(&path) {
+            return Ok(path_identity(opaque_id.clone(), &path));
+        }
+
+        let next_id = self
+            .next_id
+            .checked_add(1)
+            .ok_or(GitPathRegistryError::OpaqueIdExhausted)?;
+        let opaque_id = format!(
+            "{}:path:{}:{}",
+            self.session_scope, self.generation, next_id
+        );
+        if self.paths_by_id.contains_key(&opaque_id) {
+            return Err(GitPathRegistryError::DuplicateOpaqueId);
+        }
+
+        self.next_id = next_id;
+        let identity = path_identity(opaque_id.clone(), &path);
+        self.ids_by_path.insert(path.clone(), opaque_id.clone());
+        self.paths_by_id.insert(opaque_id, path);
+        Ok(identity)
+    }
+
+    pub fn resolve(
+        &self,
+        opaque_id: &str,
+        generation: u64,
+        platform: GitPathPlatform,
+    ) -> Result<&[u8], GitPathRegistryError> {
+        if generation != self.generation {
+            return Err(GitPathRegistryError::StaleGeneration);
+        }
+        let path = self
+            .paths_by_id
+            .get(opaque_id)
+            .ok_or(GitPathRegistryError::UnknownOpaqueId)?;
+        if platform == GitPathPlatform::Windows && std::str::from_utf8(path).is_err() {
+            return Err(GitPathRegistryError::PlatformConversionUnsupported);
+        }
+        Ok(path)
+    }
+
+    pub fn refresh(&mut self) -> Result<(), GitPathRegistryError> {
+        self.generation = self
+            .generation
+            .checked_add(1)
+            .ok_or(GitPathRegistryError::GenerationExhausted)?;
+        self.next_id = 0;
+        self.paths_by_id.clear();
+        self.ids_by_path.clear();
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn insert_with_opaque_id(
+        &mut self,
+        opaque_id: impl Into<String>,
+        path: Vec<u8>,
+    ) -> Result<GitPathIdentity, GitPathRegistryError> {
+        validate_path_bytes(&path)?;
+        let opaque_id = opaque_id.into();
+        if self.paths_by_id.contains_key(&opaque_id) {
+            return Err(GitPathRegistryError::DuplicateOpaqueId);
+        }
+        let identity = path_identity(opaque_id.clone(), &path);
+        self.ids_by_path.insert(path.clone(), opaque_id.clone());
+        self.paths_by_id.insert(opaque_id, path);
+        Ok(identity)
+    }
+}
+
+fn validate_path_bytes(path: &[u8]) -> Result<(), GitPathRegistryError> {
+    if path.is_empty() {
+        return Err(GitPathRegistryError::EmptyPath);
+    }
+    if path.contains(&0) {
+        return Err(GitPathRegistryError::PathContainsNul);
+    }
+    Ok(())
+}
+
+fn path_identity(opaque_id: String, path: &[u8]) -> GitPathIdentity {
+    GitPathIdentity {
+        opaque_id,
+        display_path: safe_path_display(path),
+        utf8_path: std::str::from_utf8(path).ok().map(ToOwned::to_owned),
+    }
+}
+
+fn safe_path_display(path: &[u8]) -> String {
+    let mut display = String::with_capacity(path.len());
+    let mut remaining = path;
+    while !remaining.is_empty() {
+        match std::str::from_utf8(remaining) {
+            Ok(valid) => {
+                push_safe_valid_text(&mut display, valid);
+                break;
+            }
+            Err(error) => {
+                let valid_length = error.valid_up_to();
+                if valid_length > 0 {
+                    let valid = &remaining[..valid_length];
+                    if let Ok(valid) = std::str::from_utf8(valid) {
+                        push_safe_valid_text(&mut display, valid);
+                    }
+                }
+                let invalid_length = error.error_len().unwrap_or(remaining.len() - valid_length);
+                for byte in &remaining[valid_length..valid_length + invalid_length] {
+                    push_hex_escape(&mut display, *byte);
+                }
+                remaining = &remaining[valid_length + invalid_length..];
+            }
+        }
+    }
+    display
+}
+
+fn push_safe_valid_text(display: &mut String, text: &str) {
+    for character in text.chars() {
+        match character {
+            '\\' => display.push_str("\\\\"),
+            '\t' => display.push_str("\\t"),
+            '\n' => display.push_str("\\n"),
+            '\r' => display.push_str("\\r"),
+            character if character.is_control() => {
+                let mut bytes = [0; 4];
+                for byte in character.encode_utf8(&mut bytes).as_bytes() {
+                    push_hex_escape(display, *byte);
+                }
+            }
+            character => display.push(character),
+        }
+    }
+}
+
+fn push_hex_escape(display: &mut String, byte: u8) {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    display.push_str("\\x");
+    display.push(char::from(HEX[usize::from(byte >> 4)]));
+    display.push(char::from(HEX[usize::from(byte & 0x0f)]));
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]

@@ -392,6 +392,14 @@ cargo test
 - 테스트 선행 증거: 구현 전 `cargo test repository`는 repository error/session/classifier API 미정의 compile error로 실패했다. 구현 후 focused repository 테스트와 전체 suite가 통과했다.
 - 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/358 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 84 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux repository fixture 실행은 사용자가 확인할 항목으로 남긴다.
 
+### GIT-005 byte/NUL parser and path identity — 2026-07-15
+
+- 변경 파일: `src-tauri/src/git/parsers.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/domain/git.rs`, `src-tauri/src/git/repository.rs`, `specs/001-git-snapshot-integration/tasks.md`, `VALIDATION.md`.
+- 수용 기준: NUL-delimited byte output을 UTF-8 변환 없이 field slice로 보존하고 empty input은 빈 record set으로 처리한다. missing final NUL, empty field, invalid field count, input/field/record/record-count cap 초과를 서로 다른 typed error로 거절한다. repository session은 원본 path byte를 Rust-only registry에 소유하고 session scope와 refresh generation이 포함된 opaque ID만 frontend DTO에 제공한다. display path는 tab/newline/backslash/control/non-UTF-8 byte를 안전하게 escape하며 lookup key로 사용할 수 없다.
+- 실패/경계 조건: duplicate opaque ID, stale generation, unknown/display ID lookup, empty/NUL path를 거절한다. Unix lookup은 원본 byte를 그대로 반환하고 Windows에서는 exact UTF-8 변환이 불가능한 path를 명시적 unsupported error로 반환한다. generation과 ID counter overflow는 typed error로 종료한다.
+- 테스트 선행 증거: 구현 전 `cargo test parsers`는 `GitParseError`, `NulParseLimits`, `parse_nul_records`, `GitPathRegistry` API가 정의되지 않아 compile error로 실패했다. 구현 후 공백/tab/newline/control/non-UTF-8 byte 보존, truncated/extra/huge record, duplicate ID, session scope, refresh invalidation, Unix/Windows 변환 정책 6 tests가 통과했다.
+- 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/358 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 90 tests 통과/0 ignored. Windows/Linux runtime path 변환 smoke는 사용자 확인 항목으로 남긴다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.
