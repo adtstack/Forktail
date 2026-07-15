@@ -5,6 +5,7 @@ import type { FileDocument, MergeSession, WriteResult } from "./models";
 import type { AppLanguage } from "./settings";
 
 export type ConfirmSave = (message: string) => boolean;
+export type UnresolvedSavePolicy = "confirm-unresolved" | "block-unresolved";
 
 export const unresolvedSaveMessage = CORE_TEXT.en.unresolvedSaveMessage;
 
@@ -20,8 +21,13 @@ export interface SavedMergeState {
   message: string;
 }
 
-export function canSaveMergeResult(text: string, confirmSave: ConfirmSave): boolean {
+export function canSaveMergeResult(
+  text: string,
+  confirmSave: ConfirmSave,
+  unresolvedPolicy: UnresolvedSavePolicy = "confirm-unresolved",
+): boolean {
   if (!hasUnresolvedConflicts(text)) return true;
+  if (unresolvedPolicy === "block-unresolved") return false;
   return confirmSave(unresolvedSaveMessage);
 }
 

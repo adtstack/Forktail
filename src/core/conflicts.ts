@@ -1,9 +1,9 @@
 import type { ConflictBlock } from "./models";
 
-const START = "<<<<<<< ours";
-const BASE = "||||||| original";
-const SEPARATOR = "=======";
-const END = ">>>>>>> theirs";
+const START_MARKER = /^<{7}(?: .*)?$/;
+const BASE_MARKER = /^\|{7}(?: .*)?$/;
+const SEPARATOR_MARKER = /^={7}$/;
+const END_MARKER = /^>{7}(?: .*)?$/;
 
 interface LineToken {
   content: string;
@@ -46,13 +46,29 @@ function markerValue(line: string): string {
   return line.replace(/\r\n$|\r$|\n$/, "");
 }
 
+function isStartMarker(line: string): boolean {
+  return START_MARKER.test(markerValue(line));
+}
+
+function isBaseMarker(line: string): boolean {
+  return BASE_MARKER.test(markerValue(line));
+}
+
+function isSeparatorMarker(line: string): boolean {
+  return SEPARATOR_MARKER.test(markerValue(line));
+}
+
+function isEndMarker(line: string): boolean {
+  return END_MARKER.test(markerValue(line));
+}
+
 export function parseConflictBlocks(text: string): ConflictBlock[] {
   const lines = tokenizeLines(text);
   const conflicts: ConflictBlock[] = [];
 
   let index = 0;
   while (index < lines.length) {
-    if (markerValue(lines[index].content) !== START) {
+    if (!isStartMarker(lines[index].content)) {
       index += 1;
       continue;
     }
@@ -62,18 +78,31 @@ export function parseConflictBlocks(text: string): ConflictBlock[] {
     let separatorIndex = -1;
     let endIndex = -1;
     let restartIndex = -1;
+    let malformed = false;
 
     for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
-      const marker = markerValue(lines[cursor].content);
-      if (marker === START) {
+      const line = lines[cursor].content;
+      if (isStartMarker(line)) {
         restartIndex = cursor;
         break;
       }
-      if (baseIndex === -1 && marker === BASE) {
+      if (isBaseMarker(line)) {
+        if (baseIndex !== -1 || separatorIndex !== -1) {
+          malformed = true;
+          break;
+        }
         baseIndex = cursor;
-      } else if (baseIndex !== -1 && separatorIndex === -1 && marker === SEPARATOR) {
+      } else if (isSeparatorMarker(line)) {
+        if (separatorIndex !== -1) {
+          malformed = true;
+          break;
+        }
         separatorIndex = cursor;
-      } else if (separatorIndex !== -1 && marker === END) {
+      } else if (isEndMarker(line)) {
+        if (separatorIndex === -1) {
+          malformed = true;
+          break;
+        }
         endIndex = cursor;
         break;
       }
@@ -84,21 +113,24 @@ export function parseConflictBlocks(text: string): ConflictBlock[] {
       continue;
     }
 
-    if (baseIndex === -1 || separatorIndex === -1 || endIndex === -1) {
+    if (malformed || separatorIndex === -1 || endIndex === -1) {
       index += 1;
       continue;
     }
 
     const startOffset = lines[startIndex].startOffset;
     const endOffset = lines[endIndex].endOffset;
+    const oursEndIndex = baseIndex === -1 ? separatorIndex : baseIndex;
     conflicts.push({
       id: conflicts.length + 1,
       startOffset,
       endOffset,
       startLine: lines[startIndex].lineNumber,
       endLine: lines[endIndex].lineNumber,
-      ours: lines.slice(startIndex + 1, baseIndex).map((line) => line.content).join(""),
-      base: lines.slice(baseIndex + 1, separatorIndex).map((line) => line.content).join(""),
+      ours: lines.slice(startIndex + 1, oursEndIndex).map((line) => line.content).join(""),
+      base: baseIndex === -1
+        ? ""
+        : lines.slice(baseIndex + 1, separatorIndex).map((line) => line.content).join(""),
       theirs: lines.slice(separatorIndex + 1, endIndex).map((line) => line.content).join(""),
       raw: text.slice(startOffset, endOffset),
     });

@@ -70,7 +70,7 @@ describe("startup CLI session parser", () => {
     });
   });
 
-  it("maps Git mergetool arguments in %O %A %B %P order", () => {
+  it("maps Git mergetool arguments in $BASE $LOCAL $REMOTE $MERGED order", () => {
     expect(parseStartupSessionArgs(["--mergetool", "/base", "/ours", "/theirs", "/path"])).toEqual({
       status: "valid",
       source: "mergetool",

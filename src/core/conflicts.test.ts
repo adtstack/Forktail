@@ -13,6 +13,54 @@ describe("parseConflictBlocks", () => {
     expect(conflicts[0].startLine).toBe(2);
   });
 
+  it("parses Git diff3 markers with repository-provided labels", () => {
+    const text = [
+      "before",
+      "<<<<<<< HEAD",
+      "ours",
+      "||||||| 7a6b5c4 merge base",
+      "base",
+      "=======",
+      "theirs",
+      ">>>>>>> feature/topic",
+      "after",
+      "",
+    ].join("\n");
+
+    expect(parseConflictBlocks(text)).toEqual([
+      expect.objectContaining({
+        startLine: 2,
+        endLine: 8,
+        ours: "ours\n",
+        base: "base\n",
+        theirs: "theirs\n",
+      }),
+    ]);
+  });
+
+  it("parses Git merge markers without a base section", () => {
+    const text = [
+      "<<<<<<< HEAD",
+      "ours",
+      "=======",
+      "theirs",
+      ">>>>>>> feature/topic",
+      "",
+    ].join("\n");
+
+    const conflicts = parseConflictBlocks(text);
+
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toMatchObject({
+      ours: "ours\n",
+      base: "",
+      theirs: "theirs\n",
+    });
+    expect(resolveConflict(text, conflicts[0], "ours")).toBe("ours\n");
+    expect(resolveConflict(text, conflicts[0], "theirs")).toBe("theirs\n");
+    expect(resolveConflict(text, conflicts[0], "both")).toBe("ours\ntheirs\n");
+  });
+
   it("ignores incomplete markers", () => {
     expect(parseConflictBlocks("<<<<<<< ours\nunfinished")).toEqual([]);
   });
@@ -162,6 +210,12 @@ describe("hasUnresolvedConflicts", () => {
   it("detects standard unresolved conflict markers", () => {
     expect(hasUnresolvedConflicts(conflictText)).toBe(true);
     expect(hasUnresolvedConflicts("clean\ntext\n")).toBe(false);
+  });
+
+  it("detects unresolved base-less Git conflict markers", () => {
+    expect(
+      hasUnresolvedConflicts("<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature/topic\n"),
+    ).toBe(true);
   });
 
   it("does not warn for incomplete marker-like text", () => {

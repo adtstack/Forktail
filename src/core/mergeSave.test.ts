@@ -38,6 +38,21 @@ describe("canSaveMergeResult", () => {
     expect(canSaveMergeResult(unresolved, confirm)).toBe(false);
     expect(confirm).toHaveBeenCalledWith(unresolvedSaveMessage);
   });
+
+  it("hard-blocks unresolved Git markers when confirmation is disabled for mergetool", () => {
+    const confirm = vi.fn(() => true);
+    const gitUnresolved = "<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> feature/topic\n";
+
+    expect(canSaveMergeResult(gitUnresolved, confirm, "block-unresolved")).toBe(false);
+    expect(confirm).not.toHaveBeenCalled();
+  });
+
+  it("allows a clean mergetool result when unresolved confirmation is disabled", () => {
+    const confirm = vi.fn(() => true);
+
+    expect(canSaveMergeResult("clean\nresult\n", confirm, "block-unresolved")).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+  });
 });
 
 describe("mergeSaveStateAfterWrite", () => {
