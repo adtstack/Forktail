@@ -416,6 +416,14 @@ cargo test
 - 테스트 선행 증거: 구현 전 `cargo test refs`는 `GitRefError`, ref DTO, parser/list service가 정의되지 않아 compile error로 실패했다. 구현 후 pure record parser/cap/malformed tests, 실제 temp repository의 Unicode branch·remote-tracking ref·lightweight/annotated tag·fingerprint 불변·bounded result, pre-cancelled runner test 6건이 통과했다. session-scoped job ID duplicate/cancel/reuse/repository replacement·close tests 2건과 exact runner allowlist test도 통과했다.
 - 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/360 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 110 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux 실행은 사용자 확인 항목으로 남긴다.
 
+### GIT-201 lossless revision tree lookup — 2026-07-15
+
+- 변경 파일: `src-tauri/src/git/tree.rs`, `src-tauri/src/git/runner.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/domain/git.rs`, `src-tauri/src/lib.rs`, `src/core/gitModels.ts`, `src/core/gitModels.test.ts`, `specs/001-git-snapshot-integration/tasks.md`, `VALIDATION.md`.
+- 수용 기준: immutable full commit ID에 대해 exact `ls-tree -r -z --long --full-tree <id> -- [literal-prefix]`만 실행한다. mode `100644`/`100755`/`120000`/`160000`을 regular/executable/symlink/submodule로 분류하고 blob/commit type, full SHA-1/SHA-256 object ID, optional exact size를 보존한다. path byte는 UTF-8 decode 전에 파싱해 repository session registry에 등록하고 frontend에는 opaque/display/exact-UTF-8 path identity와 generation만 반환한다.
+- 실패/경계 조건: object format mismatch, 0/100,000 초과 limit, missing NUL/header tab, invalid header/mode/type/size/object ID, empty/absolute/dot-segment/duplicate path, stale/unknown prefix identity, Windows non-UTF-8 변환 불가, runner cap/cancel을 typed error로 거절한다. symlink target blob과 submodule commit은 일반 text/file traversal 대상으로 승격하지 않는다. runner stdout은 32 MiB로 제한하고 limit 초과 parsed entries는 `truncated=true`로 표시한다.
+- 테스트 선행 증거: 구현 전 `cargo test tree`는 tree DTO/error/parser/service가 정의되지 않아 compile error로 실패했다. 구현 후 pure byte parser의 regular/executable/symlink/submodule, SHA-256, tab/newline/non-UTF-8 path, size/mode/type/truncation/duplicate/limit tests와 실제 temp repository의 Git-index 기반 executable/symlink/gitlink fixture, literal prefix, raw path round-trip, cancellation, repository fingerprint 불변 테스트 6건이 통과했다.
+- 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/361 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 119 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux 실행은 사용자 확인 항목으로 남긴다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.

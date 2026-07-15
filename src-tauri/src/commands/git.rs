@@ -6,7 +6,8 @@ use crate::git::jobs::{GitJobError, GitJobs};
 use crate::git::refs::{GitRefError, list_refs};
 use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
 use crate::git::revision::{GitRevisionError, resolve_revision};
-use serde::Serialize;
+use crate::git::tree::{GitTreeError, list_tree};
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use tauri::State;
 
@@ -15,6 +16,13 @@ use tauri::State;
 pub struct GitRuntimeStatus {
     pub version: GitVersion,
     pub minimum_version: GitVersion,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitTreePathRequest {
+    pub opaque_id: String,
+    pub generation: u64,
 }
 
 #[tauri::command]
@@ -71,6 +79,40 @@ pub async fn list_git_refs(
         .map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
         list_refs(&session, &kinds, hard_limit, lease.cancellation())
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_git_tree(
+    repository_session_id: String,
+    commit: crate::GitObjectId,
+    path_prefix: Option<GitTreePathRequest>,
+    hard_limit: usize,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitTreeList> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let path_prefix = path_prefix
+            .as_ref()
+            .map(|prefix| (prefix.opaque_id.as_str(), prefix.generation));
+        list_tree(
+            &session,
+            &commit,
+            path_prefix,
+            hard_limit,
+            lease.cancellation(),
+        )
     })
     .await
     .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
@@ -170,6 +212,30 @@ impl From<GitRefError> for CommandError {
             | GitRefError::InvalidPeel
             | GitRefError::DuplicateRef
             | GitRefError::TooManyRecords => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
+impl From<GitTreeError> for CommandError {
+    fn from(error: GitTreeError) -> Self {
+        match error {
+            GitTreeError::Runner(error) => error.into(),
+            GitTreeError::InvalidObjectId => Self::git(AppErrorCode::GitInvalidRevision),
+            GitTreeError::ObjectMissingLocal => Self::git(AppErrorCode::GitObjectMissingLocal),
+            GitTreeError::InvalidObjectType | GitTreeError::InvalidMode => {
+                Self::git(AppErrorCode::GitObjectTypeUnsupported)
+            }
+            GitTreeError::UnknownPath | GitTreeError::PathUnsupported => {
+                Self::git(AppErrorCode::GitPathUnsupported)
+            }
+            GitTreeError::InvalidLimit
+            | GitTreeError::TruncatedOutput
+            | GitTreeError::InvalidHeader
+            | GitTreeError::InvalidSize
+            | GitTreeError::InvalidPath
+            | GitTreeError::DuplicatePath
+            | GitTreeError::StalePath
+            | GitTreeError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
         }
     }
 }
@@ -300,5 +366,34 @@ mod tests {
             CommandError::from(GitJobError::DuplicateJob).code,
             AppErrorCode::GitCommandFailed
         );
+    }
+
+    #[test]
+    fn maps_tree_failures_without_path_or_object_details() {
+        let cases = [
+            (
+                GitTreeError::InvalidObjectId,
+                AppErrorCode::GitInvalidRevision,
+            ),
+            (
+                GitTreeError::ObjectMissingLocal,
+                AppErrorCode::GitObjectMissingLocal,
+            ),
+            (
+                GitTreeError::InvalidObjectType,
+                AppErrorCode::GitObjectTypeUnsupported,
+            ),
+            (
+                GitTreeError::PathUnsupported,
+                AppErrorCode::GitPathUnsupported,
+            ),
+            (GitTreeError::DuplicatePath, AppErrorCode::GitCommandFailed),
+        ];
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("object ID"));
+            assert!(!error.message.contains("path bytes"));
+        }
     }
 }

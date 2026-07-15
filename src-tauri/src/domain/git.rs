@@ -141,6 +141,34 @@ pub struct GitRefList {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitTreeEntryKind {
+    RegularFile,
+    ExecutableFile,
+    Symlink,
+    Submodule,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitTreeEntry {
+    pub path: GitPathIdentity,
+    pub mode: String,
+    pub kind: GitTreeEntryKind,
+    pub object_id: GitObjectId,
+    pub object_type: GitObjectType,
+    pub size: Option<u64>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitTreeList {
+    pub entries: Vec<GitTreeEntry>,
+    pub truncated: bool,
+    pub generation: u64,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitPathIdentity {
@@ -397,7 +425,7 @@ mod tests {
     use super::{
         GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
         GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
-        GitRevision, GitRevisionKind,
+        GitRevision, GitRevisionKind, GitTreeEntry, GitTreeEntryKind, GitTreeList,
     };
     use serde_json::json;
 
@@ -544,6 +572,46 @@ mod tests {
                     },
                 ],
                 "truncated": false,
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_tree_entries_with_opaque_paths_and_mode_kind() {
+        let tree = GitTreeList {
+            entries: vec![GitTreeEntry {
+                path: GitPathIdentity::new(
+                    "repository-session-1:path:0:1",
+                    "bin/run.sh",
+                    Some("bin/run.sh"),
+                ),
+                mode: "100755".to_string(),
+                kind: GitTreeEntryKind::ExecutableFile,
+                object_id: sha1('a'),
+                object_type: GitObjectType::Blob,
+                size: Some(12),
+            }],
+            truncated: false,
+            generation: 0,
+        };
+
+        assert_eq!(
+            serde_json::to_value(tree).expect("serialize tree"),
+            json!({
+                "entries": [{
+                    "path": {
+                        "opaqueId": "repository-session-1:path:0:1",
+                        "displayPath": "bin/run.sh",
+                        "utf8Path": "bin/run.sh",
+                    },
+                    "mode": "100755",
+                    "kind": "executableFile",
+                    "objectId": { "algorithm": "sha1", "hex": "a".repeat(40) },
+                    "objectType": "blob",
+                    "size": 12,
+                }],
+                "truncated": false,
+                "generation": 0,
             })
         );
     }

@@ -18,6 +18,7 @@ pub const SAFE_GLOBAL_ARGUMENTS: [&str; 5] = [
 ];
 
 pub const REF_LIST_STDOUT_CAP: usize = 16 * 1024 * 1024;
+pub const TREE_LIST_STDOUT_CAP: usize = 32 * 1024 * 1024;
 const REF_LIST_FORMAT: &str =
     "%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00";
 
@@ -63,6 +64,11 @@ pub enum GitOperation {
         namespaces: Vec<RefNamespace>,
         max_records: usize,
     },
+    Tree {
+        repository: PathBuf,
+        commit_id: String,
+        path_prefix: Option<OsString>,
+    },
 }
 
 impl GitOperation {
@@ -103,6 +109,26 @@ impl GitOperation {
                         .iter()
                         .map(|namespace| OsString::from(namespace.pattern())),
                 );
+            }
+            Self::Tree {
+                repository,
+                commit_id,
+                path_prefix,
+            } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend([
+                    OsString::from("ls-tree"),
+                    OsString::from("-r"),
+                    OsString::from("-z"),
+                    OsString::from("--long"),
+                    OsString::from("--full-tree"),
+                    OsString::from(commit_id),
+                    OsString::from("--"),
+                ]);
+                if let Some(path_prefix) = path_prefix {
+                    arguments.push(path_prefix.clone());
+                }
             }
         }
         arguments
@@ -221,6 +247,7 @@ impl RunnerLimits {
             stdout_bytes: match operation {
                 GitOperation::Revision { .. } => 64 * 1024,
                 GitOperation::References { .. } => REF_LIST_STDOUT_CAP,
+                GitOperation::Tree { .. } => TREE_LIST_STDOUT_CAP,
                 GitOperation::Version | GitOperation::Repository { .. } => 8 * 1024 * 1024,
             },
             stderr_bytes: 256 * 1024,
@@ -347,10 +374,48 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
     if fixed_repository_query
         || validate_revision_query_arguments(query_arguments)
         || validate_ref_query_arguments(query_arguments)
+        || validate_tree_query_arguments(query_arguments)
     {
         Ok(())
     } else {
         Err(RunnerError::ForbiddenOperation)
+    }
+}
+
+fn validate_tree_query_arguments(arguments: &[OsString]) -> bool {
+    if !(7..=8).contains(&arguments.len())
+        || arguments[0] != "ls-tree"
+        || arguments[1] != "-r"
+        || arguments[2] != "-z"
+        || arguments[3] != "--long"
+        || arguments[4] != "--full-tree"
+        || arguments[6] != "--"
+    {
+        return false;
+    }
+    let Some(commit_id) = arguments[5].to_str() else {
+        return false;
+    };
+    if !matches!(commit_id.len(), 40 | 64)
+        || !commit_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+    {
+        return false;
+    }
+    if let Some(path_prefix) = arguments.get(7) {
+        let path = Path::new(path_prefix);
+        !path_prefix.is_empty()
+            && path_prefix.len() <= 4096
+            && !path.is_absolute()
+            && !path.components().any(|component| {
+                matches!(
+                    component,
+                    std::path::Component::ParentDir
+                        | std::path::Component::RootDir
+                        | std::path::Component::Prefix(_)
+                )
+            })
+    } else {
+        true
     }
 }
 
@@ -894,7 +959,7 @@ mod tests {
     use super::{
         CancellationToken, GitOperation, OutputStream, ProductionGitRunner, REF_LIST_STDOUT_CAP,
         RefNamespace, RepositoryQuery, RevisionQuery, RunnerError, RunnerLimits,
-        SAFE_GLOBAL_ARGUMENTS,
+        SAFE_GLOBAL_ARGUMENTS, TREE_LIST_STDOUT_CAP,
         fixture::{FixtureGitRunner, FixtureProcess},
         safe_environment_from, validate_approved_arguments,
     };
@@ -1075,6 +1140,74 @@ mod tests {
                 "--",
                 "refs/tags",
                 "refs/heads",
+            ],
+        ] {
+            let arguments = SAFE_GLOBAL_ARGUMENTS
+                .iter()
+                .copied()
+                .chain(["-C", repository.to_str().expect("UTF-8 fixture path")])
+                .chain(malformed)
+                .map(OsString::from)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                validate_approved_arguments(&arguments),
+                Err(RunnerError::ForbiddenOperation)
+            );
+        }
+    }
+
+    #[test]
+    fn tree_operation_allows_only_recursive_nul_long_full_tree_query() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let repository = std::env::temp_dir().join("tree repository 한글");
+        let commit_id = "a".repeat(40);
+        let plan = runner
+            .plan(GitOperation::Tree {
+                repository: repository.clone(),
+                commit_id: commit_id.clone(),
+                path_prefix: Some(OsString::from("dir/literal [name]")),
+            })
+            .expect("typed tree query should be approved");
+
+        assert!(validate_approved_arguments(&plan.arguments).is_ok());
+        assert_eq!(plan.limits.stdout_bytes, TREE_LIST_STDOUT_CAP);
+        assert_eq!(
+            &plan.arguments[SAFE_GLOBAL_ARGUMENTS.len() + 2..],
+            &[
+                "ls-tree",
+                "-r",
+                "-z",
+                "--long",
+                "--full-tree",
+                commit_id.as_str(),
+                "--",
+                "dir/literal [name]",
+            ]
+            .map(OsString::from)
+        );
+
+        for malformed in [
+            vec!["ls-tree", "-r", "-z", "--long", "--full-tree", "abcd", "--"],
+            vec![
+                "ls-tree",
+                "-r",
+                "-z",
+                "--long",
+                "--full-tree",
+                commit_id.as_str(),
+                "--",
+                "../escape",
+            ],
+            vec![
+                "ls-tree",
+                "-r",
+                "-t",
+                "-z",
+                "--long",
+                "--full-tree",
+                commit_id.as_str(),
+                "--",
             ],
         ] {
             let arguments = SAFE_GLOBAL_ARGUMENTS

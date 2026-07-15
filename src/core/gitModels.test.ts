@@ -7,6 +7,7 @@ import type {
   GitRefList,
   GitRevision,
   GitRepositorySummary,
+  GitTreeList,
 } from "./gitModels";
 
 const rustDtoSource = readFileSync(
@@ -110,6 +111,30 @@ describe("Git DTO contract", () => {
     expect(refs.refs[1]?.peeledObjectType).toBe("commit");
   });
 
+  it("keeps tree modes typed and paths opaque", () => {
+    const tree: GitTreeList = {
+      entries: [
+        {
+          path: {
+            opaqueId: "repository-session-1:path:0:1",
+            displayPath: "bin/run.sh",
+            utf8Path: "bin/run.sh",
+          },
+          mode: "100755",
+          kind: "executableFile",
+          objectId: { algorithm: "sha1", hex: "a".repeat(40) },
+          objectType: "blob",
+          size: 12,
+        },
+      ],
+      truncated: false,
+      generation: 0,
+    };
+
+    expect(tree.entries[0]?.kind).toBe("executableFile");
+    expect(tree.entries[0]?.path.opaqueId).toContain(":path:");
+  });
+
   it("keeps every head-state variant explicit", () => {
     const states: GitHeadState[] = [
       { kind: "unborn" },
@@ -130,6 +155,8 @@ describe("Git DTO contract", () => {
     expect(rustDtoSource).toContain("pub struct GitRevision");
     expect(rustDtoSource).toContain("pub struct GitRepositoryRef");
     expect(rustDtoSource).toContain("pub struct GitRefList");
+    expect(rustDtoSource).toContain("pub struct GitTreeEntry");
+    expect(rustDtoSource).toContain("pub struct GitTreeList");
     expect(rustDtoSource).toContain("pub struct GitRepositorySummary");
   });
 });

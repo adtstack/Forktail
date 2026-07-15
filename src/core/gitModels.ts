@@ -38,6 +38,27 @@ export interface GitRefList {
   truncated: boolean;
 }
 
+export type GitTreeEntryKind =
+  | "regularFile"
+  | "executableFile"
+  | "symlink"
+  | "submodule";
+
+export interface GitTreeEntry {
+  path: GitPathIdentity;
+  mode: string;
+  kind: GitTreeEntryKind;
+  objectId: GitObjectId;
+  objectType: GitObjectType;
+  size: number | null;
+}
+
+export interface GitTreeList {
+  entries: GitTreeEntry[];
+  truncated: boolean;
+  generation: number;
+}
+
 export interface GitPathIdentity {
   opaqueId: string;
   displayPath: string;
