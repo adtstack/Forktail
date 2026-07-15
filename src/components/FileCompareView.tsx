@@ -20,6 +20,7 @@ import {
   type TextDiffOptions,
   type WhitespaceCompareMode,
 } from "../core/diffOptions";
+import { compareSessionCapabilities } from "../core/difftoolSession";
 import {
   droppedFilePaths,
   paneDropRejectionMessage,
@@ -107,8 +108,11 @@ export function FileCompareView({
   onSwap,
 }: FileCompareViewProps) {
   const text = FILE_COMPARE_TEXT[languageMode];
+  const capabilities = compareSessionCapabilities(session);
+  const difftoolSession = session.origin === "difftool";
   const [viewSettings, setViewSettings] = useState(() => loadCompareViewSettings());
   const [editableSide, setEditableSide] = useState<CompareSide | "none">("none");
+  const activeEditableSide = capabilities.edit ? editableSide : "none";
   const [hunkCount, setHunkCount] = useState(0);
   const [activeHunk, setActiveHunk] = useState(0);
   const [pathCopyState, setPathCopyState] = useState<PathCopyState | null>(null);
@@ -132,7 +136,7 @@ export function FileCompareView({
     () => prepareDiffTexts(session.left.text, session.right.text, viewSettings.diffOptions),
     [session.left.text, session.right.text, viewSettings.diffOptions],
   );
-  const isEditing = editableSide !== "none";
+  const isEditing = activeEditableSide !== "none";
   const displayedDiffTexts = isEditing
     ? { left: session.left.text, right: session.right.text }
     : preparedDiffTexts;
@@ -144,12 +148,16 @@ export function FileCompareView({
     right: isVirtualFileDocument(session.right),
   }), [session.left, session.right]);
   const hasVirtualSide = virtualSides.left || virtualSides.right;
-  const activeVirtual = editableSide !== "none" && virtualSides[editableSide];
-  const activeDirty = editableSide === "none" || activeVirtual ? false : dirtySides[editableSide];
-  const anyDirty = (!virtualSides.left && dirtySides.left) || (!virtualSides.right && dirtySides.right);
-  const activeSideLabel = editableSide === "left"
+  const activeVirtual = activeEditableSide !== "none" && virtualSides[activeEditableSide];
+  const activeDirty = activeEditableSide === "none" || activeVirtual
+    ? false
+    : dirtySides[activeEditableSide];
+  const anyDirty = capabilities.edit && (
+    (!virtualSides.left && dirtySides.left) || (!virtualSides.right && dirtySides.right)
+  );
+  const activeSideLabel = activeEditableSide === "left"
     ? virtualSides.left ? `${text.left} (${text.missingFile})` : text.left
-    : editableSide === "right"
+    : activeEditableSide === "right"
       ? virtualSides.right ? `${text.right} (${text.missingFile})` : text.right
       : text.readOnly;
   const newlineDifference = finalNewlineDifference(
@@ -161,18 +169,31 @@ export function FileCompareView({
     () => compareSaveEncodingWarnings(session, languageMode),
     [languageMode, session],
   );
-  const activeChangedSide = activeChangedCompareSide(fileChangeNotice, editableSide);
+  const activeChangedSide = capabilities.save
+    ? activeChangedCompareSide(fileChangeNotice, activeEditableSide)
+    : null;
   const canApplyLeftToRight =
-    !busy && !binary && !hasVirtualSide && editableSide === "right" && navigation.canMove;
-  const canApplyRightToLeft =
-    !busy && !binary && !hasVirtualSide && editableSide === "left" && navigation.canMove;
-  const canUndoHunkCopy =
+    capabilities.hunkCopy &&
     !busy &&
     !binary &&
     !hasVirtualSide &&
-    editableSide !== "none" &&
-    hunkCopyUndo?.side === editableSide &&
-    hunkCopyUndo.after === session[editableSide].text;
+    activeEditableSide === "right" &&
+    navigation.canMove;
+  const canApplyRightToLeft =
+    capabilities.hunkCopy &&
+    !busy &&
+    !binary &&
+    !hasVirtualSide &&
+    activeEditableSide === "left" &&
+    navigation.canMove;
+  const canUndoHunkCopy =
+    capabilities.hunkCopy &&
+    !busy &&
+    !binary &&
+    !hasVirtualSide &&
+    activeEditableSide !== "none" &&
+    hunkCopyUndo?.side === activeEditableSide &&
+    hunkCopyUndo.after === session[activeEditableSide].text;
 
   const updateActiveHunkDecorations = useCallback((
     index: number,
@@ -238,6 +259,7 @@ export function FileCompareView({
 
   const replaceSideEditorText = useCallback(
     (side: CompareSide, text: string) => {
+      if (!capabilities.edit) return;
       const targetEditor = side === "left"
         ? diffEditorRef.current?.getOriginalEditor()
         : diffEditorRef.current?.getModifiedEditor();
@@ -254,11 +276,11 @@ export function FileCompareView({
 
       onTextChange(side, text);
     },
-    [onTextChange],
+    [capabilities.edit, onTextChange],
   );
 
   const applyCurrentHunk = useCallback((side: CompareSide) => {
-    if (editableSide !== side || binary) return;
+    if (!capabilities.hunkCopy || activeEditableSide !== side || binary || hasVirtualSide) return;
     const change = lineChangesRef.current[navigation.currentIndex];
     if (!change) return;
 
@@ -271,7 +293,9 @@ export function FileCompareView({
     replaceSideEditorText(side, nextText);
   }, [
     binary,
-    editableSide,
+    capabilities.hunkCopy,
+    activeEditableSide,
+    hasVirtualSide,
     navigation.currentIndex,
     replaceSideEditorText,
     session.left.text,
@@ -279,27 +303,42 @@ export function FileCompareView({
   ]);
 
   const undoLastHunkCopy = useCallback(() => {
-    if (!hunkCopyUndo || hunkCopyUndo.after !== session[hunkCopyUndo.side].text) return;
+    if (
+      !capabilities.hunkCopy ||
+      !hunkCopyUndo ||
+      hunkCopyUndo.after !== session[hunkCopyUndo.side].text
+    ) return;
 
     replaceSideEditorText(hunkCopyUndo.side, hunkCopyUndo.before);
     setHunkCopyUndo(null);
-  }, [hunkCopyUndo, replaceSideEditorText, session.left.text, session.right.text]);
+  }, [
+    capabilities.hunkCopy,
+    hunkCopyUndo,
+    replaceSideEditorText,
+    session.left.text,
+    session.right.text,
+  ]);
 
   const handleCommand = useCallback((commandId: AppCommandId) => {
+    if (!isFileCompareCommandAllowed(session, commandId)) return;
     if (commandId === "swapSides") {
       if (anyDirty) return;
       onSwap();
       return;
     }
     if (commandId === "saveAs") {
-      if (editableSide !== "none" && !virtualSides[editableSide]) {
-        onSaveSideAs(editableSide, viewSettings.saveLineEnding);
+      if (activeEditableSide !== "none" && !virtualSides[activeEditableSide]) {
+        onSaveSideAs(activeEditableSide, viewSettings.saveLineEnding);
       }
       return;
     }
     if (commandId === "save") {
-      if (editableSide !== "none" && !virtualSides[editableSide] && dirtySides[editableSide]) {
-        onSaveSide(editableSide, viewSettings.saveLineEnding);
+      if (
+        activeEditableSide !== "none" &&
+        !virtualSides[activeEditableSide] &&
+        dirtySides[activeEditableSide]
+      ) {
+        onSaveSide(activeEditableSide, viewSettings.saveLineEnding);
       }
       return;
     }
@@ -312,18 +351,19 @@ export function FileCompareView({
     }
   }, [
     anyDirty,
+    activeEditableSide,
     dirtySides,
-    editableSide,
     navigateDiff,
     onSaveSide,
     onSaveSideAs,
     onSwap,
+    session,
     virtualSides,
     viewSettings.saveLineEnding,
   ]);
 
   const handleSideDragOver = (side: CompareDropSide, event: DragEvent<HTMLElement>) => {
-    if (busy) return;
+    if (busy || !capabilities.replaceInput) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
     setDropSide(side);
@@ -336,7 +376,7 @@ export function FileCompareView({
   };
 
   const handleSideDrop = (side: CompareDropSide, event: DragEvent<HTMLElement>) => {
-    if (busy) return;
+    if (busy || !capabilities.replaceInput) return;
     event.preventDefault();
     setDropSide(null);
     const paths = droppedFilePaths(event.dataTransfer);
@@ -369,14 +409,17 @@ export function FileCompareView({
   );
 
   useEffect(() => {
-    editableSideRef.current = editableSide;
-  }, [editableSide]);
+    editableSideRef.current = activeEditableSide;
+  }, [activeEditableSide]);
 
   useEffect(() => {
-    if (editableSide !== "none" && virtualSides[editableSide]) {
+    if (
+      !capabilities.edit ||
+      (editableSide !== "none" && virtualSides[editableSide])
+    ) {
       setEditableSide("none");
     }
-  }, [editableSide, virtualSides]);
+  }, [capabilities.edit, editableSide, virtualSides]);
 
   useEffect(() => {
     onTextChangeRef.current = onTextChange;
@@ -429,12 +472,12 @@ export function FileCompareView({
         handleCommand("swapSides");
         return;
       }
-      if (editableSide !== "none" && matchesCommandShortcut("saveAs", event)) {
+      if (activeEditableSide !== "none" && matchesCommandShortcut("saveAs", event)) {
         event.preventDefault();
         handleCommand("saveAs");
         return;
       }
-      if (editableSide !== "none" && matchesCommandShortcut("save", event)) {
+      if (activeEditableSide !== "none" && matchesCommandShortcut("save", event)) {
         event.preventDefault();
         handleCommand("save");
         return;
@@ -452,7 +495,7 @@ export function FileCompareView({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [editableSide, handleCommand]);
+  }, [activeEditableSide, handleCommand]);
 
   useEffect(() => {
     const handleCommandEvent = (event: Event) => {
@@ -493,11 +536,15 @@ export function FileCompareView({
     <main className="workspace">
       <header className="toolbar command-toolbar">
         <div className="command-group">
-          <button className="command-button" onClick={onBack}>{backLabel ?? text.home}</button>
+          <button className="command-button" onClick={onBack}>
+            {difftoolSession ? text.closeForktail : backLabel ?? text.home}
+          </button>
           <button
             className="command-button"
-            onClick={onSwap}
-            disabled={anyDirty}
+            onClick={() => {
+              if (capabilities.swap) onSwap();
+            }}
+            disabled={!capabilities.swap || anyDirty}
             aria-keyshortcuts={commandAriaKeyshortcuts("swapSides")}
           >
             {text.swap}
@@ -564,8 +611,8 @@ export function FileCompareView({
             <span>{text.edit}</span>
             <select
               className="toolbar-select"
-              value={editableSide}
-              disabled={busy || binary}
+              value={activeEditableSide}
+              disabled={busy || binary || !capabilities.edit}
               onChange={(event) => setEditableSide(event.target.value as CompareSide | "none")}
             >
               <option value="none">{text.readOnly}</option>
@@ -582,14 +629,14 @@ export function FileCompareView({
             role="status"
             aria-live="polite"
             aria-label={
-              editableSide === "none"
+              activeEditableSide === "none"
                 ? text.noEditableSide
                 : activeDirty
                   ? text.sideDirtyAria(activeSideLabel)
                   : text.sideSavedAria(activeSideLabel)
             }
           >
-            {editableSide === "none" ? text.readOnly : activeDirty ? text.dirty : text.saved}
+            {activeEditableSide === "none" ? text.readOnly : activeDirty ? text.dirty : text.saved}
           </span>
         </div>
         <div className="toolbar-spacer" />
@@ -597,9 +644,18 @@ export function FileCompareView({
           <button
             className="command-button primary-button"
             onClick={() => {
-              if (editableSide !== "none") onSaveSide(editableSide, viewSettings.saveLineEnding);
+              if (capabilities.save && activeEditableSide !== "none") {
+                onSaveSide(activeEditableSide, viewSettings.saveLineEnding);
+              }
             }}
-            disabled={busy || binary || editableSide === "none" || activeVirtual || !activeDirty}
+            disabled={
+              !capabilities.save ||
+              busy ||
+              binary ||
+              activeEditableSide === "none" ||
+              activeVirtual ||
+              !activeDirty
+            }
             aria-keyshortcuts={commandAriaKeyshortcuts("save")}
           >
             {text.save}
@@ -607,9 +663,17 @@ export function FileCompareView({
           <button
             className="command-button"
             onClick={() => {
-              if (editableSide !== "none") onSaveSideAs(editableSide, viewSettings.saveLineEnding);
+              if (capabilities.saveAs && activeEditableSide !== "none") {
+                onSaveSideAs(activeEditableSide, viewSettings.saveLineEnding);
+              }
             }}
-            disabled={busy || binary || editableSide === "none" || activeVirtual}
+            disabled={
+              !capabilities.saveAs ||
+              busy ||
+              binary ||
+              activeEditableSide === "none" ||
+              activeVirtual
+            }
             aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
           >
             {text.saveAs}
@@ -617,20 +681,33 @@ export function FileCompareView({
           <button
             className="command-button"
             onClick={() => {
-              if (editableSide !== "none") onShowBackups(editableSide);
+              if (capabilities.backupRestore && activeEditableSide !== "none") {
+                onShowBackups(activeEditableSide);
+              }
             }}
-            disabled={busy || binary || editableSide === "none" || activeVirtual}
+            disabled={
+              !capabilities.backupRestore ||
+              busy ||
+              binary ||
+              activeEditableSide === "none" ||
+              activeVirtual
+            }
           >
             {text.backups}
           </button>
           <button
             className="command-button"
-            onClick={() => onExportReport(viewSettings.diffOptions)}
-            disabled={busy || binary}
+            onClick={() => {
+              if (capabilities.exportReport) onExportReport(viewSettings.diffOptions);
+            }}
+            disabled={!capabilities.exportReport || busy || binary}
           >
             {text.export}
           </button>
         </div>
+        {difftoolSession && (
+          <span className="badge" aria-label={text.difftoolSessionAria}>{text.difftool}</span>
+        )}
         <span className="badge" aria-label={text.languageAria(language)}>{language}</span>
       </header>
 
@@ -650,6 +727,7 @@ export function FileCompareView({
           <select
             className="toolbar-select"
             value={viewSettings.saveLineEnding}
+            disabled={!capabilities.save && !capabilities.saveAs}
             onChange={(event) =>
               setViewSettings((current) => ({
                 ...current,
@@ -759,7 +837,8 @@ export function FileCompareView({
           sideName={text.left}
           dropSide="left"
           dropActive={dropSide === "left"}
-          editing={editableSide === "left"}
+          editing={activeEditableSide === "left"}
+          dropEnabled={capabilities.replaceInput}
           path={session.left.path}
           document={session.left}
           text={text}
@@ -775,7 +854,8 @@ export function FileCompareView({
           sideName={text.right}
           dropSide="right"
           dropActive={dropSide === "right"}
-          editing={editableSide === "right"}
+          editing={activeEditableSide === "right"}
+          dropEnabled={capabilities.replaceInput}
           path={session.right.path}
           document={session.right}
           text={text}
@@ -787,6 +867,11 @@ export function FileCompareView({
           onDrop={handleSideDrop}
         />
       </div>
+      {difftoolSession && (
+        <div className="metadata-warning" role="status">
+          {text.difftoolReadOnlyNote}
+        </div>
+      )}
       {pathCopyState && (
         <div className="path-copy-status" role="status">
           <span>{pathCopyState.message}</span>
@@ -837,7 +922,7 @@ export function FileCompareView({
           {text.missingSideNote}
         </div>
       )}
-      {saveEncodingWarnings.length > 0 && (
+      {capabilities.save && saveEncodingWarnings.length > 0 && (
         <div className="metadata-warning" role="status">
           {saveEncodingWarnings.map((warning) => (
             <span key={warning.side}>
@@ -862,8 +947,18 @@ export function FileCompareView({
             language={editorLanguage}
             original={displayedDiffTexts.left}
             modified={displayedDiffTexts.right}
-            originalModelPath={modelPath("original", session.left.path, modelRevision, editableSide)}
-            modifiedModelPath={modelPath("modified", session.right.path, modelRevision, editableSide)}
+            originalModelPath={modelPath(
+              "original",
+              session.left.path,
+              modelRevision,
+              activeEditableSide,
+            )}
+            modifiedModelPath={modelPath(
+              "modified",
+              session.right.path,
+              modelRevision,
+              activeEditableSide,
+            )}
             keepCurrentOriginalModel
             keepCurrentModifiedModel
             theme={editorTheme}
@@ -877,8 +972,8 @@ export function FileCompareView({
               renderWhitespace: viewSettings.renderWhitespace,
               minimap: { enabled: false },
               renderOverviewRuler: true,
-              originalEditable: editableSide === "left",
-              readOnly: editableSide !== "right",
+              originalEditable: capabilities.edit && activeEditableSide === "left",
+              readOnly: !capabilities.edit || activeEditableSide !== "right",
               fontSize: 13,
               lineHeight: 20,
               scrollBeyondLastLine: false,
@@ -893,15 +988,19 @@ export function FileCompareView({
       <footer className="status-bar">
         <span>
           {formatFileStatus(session.left, text, languageMode)}
-          {editableSide === "left" && <strong className="status-editing">{text.editing}</strong>}
-          {!virtualSides.left && dirtySides.left && (
+          {activeEditableSide === "left" && (
+            <strong className="status-editing">{text.editing}</strong>
+          )}
+          {capabilities.edit && !virtualSides.left && dirtySides.left && (
             <strong className="status-dirty">{text.dirtyStatus}</strong>
           )}
         </span>
         <span>
           {formatFileStatus(session.right, text, languageMode)}
-          {editableSide === "right" && <strong className="status-editing">{text.editing}</strong>}
-          {!virtualSides.right && dirtySides.right && (
+          {activeEditableSide === "right" && (
+            <strong className="status-editing">{text.editing}</strong>
+          )}
+          {capabilities.edit && !virtualSides.right && dirtySides.right && (
             <strong className="status-dirty">{text.dirtyStatus}</strong>
           )}
         </span>
@@ -915,6 +1014,7 @@ export function FileHeading({
   sideName,
   dropSide,
   dropActive,
+  dropEnabled = true,
   editing,
   path,
   document,
@@ -928,6 +1028,7 @@ export function FileHeading({
   sideName: string;
   dropSide: CompareDropSide;
   dropActive: boolean;
+  dropEnabled?: boolean;
   editing: boolean;
   path: string;
   document: CompareSession["left"];
@@ -944,10 +1045,11 @@ export function FileHeading({
       className={`file-heading${dropActive ? " drop-active" : ""}`}
       title={path}
       role="group"
+      aria-disabled={!dropEnabled}
       aria-label={text.fileHeadingAria(sideName, document.name, path)}
-      onDragOver={(event) => onDragOver(dropSide, event)}
-      onDragLeave={(event) => onDragLeave(dropSide, event)}
-      onDrop={(event) => onDrop(dropSide, event)}
+      onDragOver={dropEnabled ? (event) => onDragOver(dropSide, event) : undefined}
+      onDragLeave={dropEnabled ? (event) => onDragLeave(dropSide, event) : undefined}
+      onDrop={dropEnabled ? (event) => onDrop(dropSide, event) : undefined}
     >
       <span className="side-label">{sideLabel}</span>
       <strong>{document.name}</strong>
@@ -972,6 +1074,18 @@ export function activeChangedCompareSide(
     ? fileChangeNotice.leftChanged
     : fileChangeNotice.rightChanged;
   return activeSideChanged ? editableSide : null;
+}
+
+export function isFileCompareCommandAllowed(
+  session: Pick<CompareSession, "origin">,
+  commandId: AppCommandId,
+): boolean {
+  const capabilities = compareSessionCapabilities(session);
+
+  if (commandId === "swapSides") return capabilities.swap;
+  if (commandId === "save") return capabilities.save;
+  if (commandId === "saveAs") return capabilities.saveAs;
+  return true;
 }
 
 function formatBytes(bytes: number): string {

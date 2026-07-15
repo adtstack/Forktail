@@ -136,10 +136,20 @@ export interface ConflictBlock {
   raw: string;
 }
 
-export interface CompareSession {
+interface CompareSessionBase {
   left: FileDocument;
   right: FileDocument;
 }
+
+export interface FileCompareSession extends CompareSessionBase {
+  origin: "files";
+}
+
+export interface DifftoolCompareSession extends CompareSessionBase {
+  origin: "difftool";
+}
+
+export type CompareSession = FileCompareSession | DifftoolCompareSession;
 
 interface MergeSessionBase {
   base: FileDocument;

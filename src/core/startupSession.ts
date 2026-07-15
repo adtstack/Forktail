@@ -1,6 +1,9 @@
-import { DEFAULT_FOLDER_SCAN_OPTIONS, type ActiveSession } from "./settings";
+import {
+  DEFAULT_FOLDER_SCAN_OPTIONS,
+  type ActiveSession,
+  type AppLanguage,
+} from "./settings";
 import { CORE_TEXT } from "./i18n";
-import type { AppLanguage } from "./settings";
 
 export interface MergetoolStartupSession {
   kind: "mergetool";
@@ -10,7 +13,13 @@ export interface MergetoolStartupSession {
   outputPath: string;
 }
 
-export type StartupSession = ActiveSession | MergetoolStartupSession;
+export interface DifftoolStartupSession {
+  kind: "difftool";
+  localPath: string | null;
+  remotePath: string | null;
+}
+
+export type StartupSession = ActiveSession | DifftoolStartupSession | MergetoolStartupSession;
 
 export type StartupSessionParseResult =
   | { status: "none" }
@@ -29,12 +38,14 @@ export type StartupSessionParseResult =
       session: Extract<ActiveSession, { kind: "merge" }>;
       source: "merge";
     }
+  | { status: "valid"; session: DifftoolStartupSession; source: "difftool" }
   | { status: "valid"; session: MergetoolStartupSession; source: "mergetool" }
   | { status: "invalid"; message: string };
 
-export type StartupSessionSource = "compare" | "folders" | "merge" | "mergetool";
+export type StartupSessionSource = "compare" | "difftool" | "folders" | "merge" | "mergetool";
 
 const COMPARE_FLAGS = new Set(["--compare", "compare"]);
+const DIFFTOOL_FLAGS = new Set(["--difftool", "--diff-tool", "difftool"]);
 const FOLDER_FLAGS = new Set(["--folders", "--folder", "folders", "folder"]);
 const MERGE_FLAGS = new Set(["--merge", "merge"]);
 const MERGETOOL_FLAGS = new Set(["--mergetool", "--merge-tool", "mergetool", "merge-tool"]);
@@ -49,6 +60,9 @@ export function parseStartupSessionArgs(
   if (commandIndex < 0) return { status: "none" };
 
   const rawCommand = rawAppArgs[commandIndex];
+  if (DIFFTOOL_FLAGS.has(rawCommand)) {
+    return difftoolSession(rawAppArgs.slice(commandIndex + 1), language);
+  }
   if (MERGETOOL_FLAGS.has(rawCommand)) {
     return mergetoolSession(rawAppArgs.slice(commandIndex + 1), language);
   }
@@ -62,6 +76,27 @@ export function parseStartupSessionArgs(
     return invalidStartupArgs(language);
   }
   return compareSession(appArgs, language);
+}
+
+function difftoolSession(
+  paths: string[],
+  language: AppLanguage,
+): StartupSessionParseResult {
+  if (paths.length !== 2) return invalidStartupArgs(language);
+
+  const localPath = difftoolPath(paths[0]);
+  const remotePath = difftoolPath(paths[1]);
+  if (localPath === null && remotePath === null) return invalidStartupArgs(language);
+
+  return {
+    status: "valid",
+    source: "difftool",
+    session: { kind: "difftool", localPath, remotePath },
+  };
+}
+
+function difftoolPath(path: string): string | null {
+  return path === "" || path === "/dev/null" ? null : path;
 }
 
 function compareSession(paths: string[], language: AppLanguage): StartupSessionParseResult {

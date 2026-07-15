@@ -24,10 +24,10 @@
 - [X] T003 MRG-012 Git marker parser와 mergetool unresolved hard-block policy를 `src/core/conflicts.ts`, `src/core/mergeSave.ts`에 구현한다
 - [X] T004 MRG-014 missing Base, 기존 `$MERGED` Result/fingerprint, mergetool origin, dirty close, Git temp path 비영속화 테스트를 `src/core/mergetoolSession.test.ts`, `src/core/startupSession.test.ts`, `src/core/settings.test.ts`, `src/components/MergeView.test.tsx`에 먼저 추가한다
 - [X] T005 MRG-014 mergetool 전용 session adapter와 `$MERGED`-only save/close lifecycle을 `src/core/mergetoolSession.ts`, `src/core/startupSession.ts`, `src/core/settings.ts`, `src/App.tsx`, `src/components/MergeView.tsx`에 구현한다
-- [ ] T006 INT-002 `$LOCAL`/`$REMOTE` read-only difftool parser와 Windows/macOS/Linux config quote snapshot 테스트를 `src/core/startupSession.test.ts`, `src/core/gitToolConfig.test.ts`, `src/components/FileCompareView.test.tsx`에 먼저 추가한다
-- [ ] T007 INT-002 `--difftool` read-only session과 OS별 copy-only config generator를 `src/core/startupSession.ts`, `src/core/gitToolConfig.ts`, `src/core/models.ts`, `src/App.tsx`, `src/components/FileCompareView.tsx`에 구현한다
-- [ ] T008 INT-002 difftool/mergetool config 출력, `trustExitCode=false`, `hideResolved=false`, 자동 config 수정 금지 안내를 `docs/14_PRODUCT_GAP_ROADMAP.md`, `README.md`, `VALIDATION.md`에 확정한다
-- [ ] T009 MRG-014 Windows/macOS/Linux packaged mergetool save/no-save/unresolved/temp/wait 증거를 `VALIDATION.md`와 `docs/20_GIT_TEST_PLAN.md`에 기록한다
+- [X] T006 INT-002 `$LOCAL`/`$REMOTE` read-only difftool parser와 Windows/macOS/Linux config quote snapshot 테스트를 `src/core/startupSession.test.ts`, `src/core/gitToolConfig.test.ts`, `src/components/FileCompareView.test.tsx`에 먼저 추가한다
+- [X] T007 INT-002 `--difftool` read-only session, packaged executable path command, OS별 copy-only config UI를 `src/core/startupSession.ts`, `src/core/gitToolConfig.ts`, `src/core/models.ts`, `src/core/bridge.ts`, `src-tauri/src/commands/system.rs`, `src/App.tsx`, `src/components/FileCompareView.tsx`, `src/components/GitToolSetup.tsx`에 구현한다
+- [X] T008 INT-002 difftool/mergetool config 출력, `trustExitCode=false`, `hideResolved=false`, 자동 config/default tool 수정 금지 안내를 `docs/14_PRODUCT_GAP_ROADMAP.md`, `README.md`, `VALIDATION.md`에 확정한다
+- [ ] T009 INT-002/MRG-014 Windows/macOS/Linux packaged difftool wait/temp/modified/added/deleted/read-only와 mergetool save/no-save/unresolved/missing-Base/temp/wait 증거를 `VALIDATION.md`와 `docs/20_GIT_TEST_PLAN.md`에 기록한다
 
 **Checkpoint**: 시작 gate가 통과되지 않으면 Phase 2 이후 이슈를 승격하지 않는다.
 

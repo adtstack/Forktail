@@ -88,6 +88,14 @@ describe("StartPage", () => {
     expect(markup).toContain("aria-pressed=\"true\">한국어");
   });
 
+  it("integrates the copy-only Git tool setup into the start settings area", () => {
+    const markup = renderStartPage();
+
+    expect(markup).toContain("aria-label=\"Git tool setup\"");
+    expect(markup).toContain("Copy difftool snippet");
+    expect(markup).toContain("Copy mergetool snippet");
+  });
+
   it("shows an action to remove a recent session that failed to reopen", () => {
     const markup = renderStartPage({
       recentSessionFailure: {

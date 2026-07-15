@@ -84,6 +84,7 @@ describe("compareSaveStateAfterWrite", () => {
       }),
     ).toEqual({
       session: {
+        origin: "files",
         left: session.left,
         right: {
           ...session.right,
@@ -119,6 +120,7 @@ describe("compareSaveStateAfterWrite", () => {
       }),
     ).toEqual({
       session: {
+        origin: "files",
         left: {
           ...session.left,
           path: "/out/left-copy.txt",
@@ -299,6 +301,7 @@ describe("writePreconditionFromDocument", () => {
 
 function compareSession(): CompareSession {
   return {
+    origin: "files",
     left: document("/repo/left.txt", "left\ntext"),
     right: document("/repo/right.txt", "right\n"),
   };

@@ -26,7 +26,8 @@ export interface DiffReportInput {
   generatedAt?: Date;
 }
 
-export function compareReportDefaultPath(session: CompareSession): string {
+export function compareReportDefaultPath(session: CompareSession): string | undefined {
+  if (session.origin === "difftool") return undefined;
   return `${session.right.path}.diff.txt`;
 }
 

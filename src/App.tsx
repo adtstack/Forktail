@@ -23,6 +23,7 @@ import type { CompareDropSide } from "./core/dropPaths";
 import {
   APP_COMMAND_EVENT,
   commandIdFromEvent,
+  isShellOpenCommandAllowed,
   matchesCommandShortcut,
   type AppCommandId,
 } from "./core/commands";
@@ -82,6 +83,7 @@ import {
   saveFolderScanOptions,
   saveRecentSessions,
   upsertRecentSession,
+  persistentCompareSessionInput,
   persistentMergeSessionInput,
   type ActiveSession,
   type AppLanguage,
@@ -97,8 +99,13 @@ import {
 import { APP_TEXT, MERGE_VIEW_TEXT, localeForLanguage } from "./core/i18n";
 import {
   parseStartupSessionArgs,
+  type DifftoolStartupSession,
   type MergetoolStartupSession,
 } from "./core/startupSession";
+import {
+  buildDifftoolSession,
+  compareSessionCapabilities,
+} from "./core/difftoolSession";
 import {
   buildMergetoolSession,
   isMissingMergetoolBaseError,
@@ -260,6 +267,7 @@ export default function App() {
   const updateCompareSideText = useCallback((side: CompareSide, text: string) => {
     setCompareSession((current) => {
       if (!current || current[side].text === text) return current;
+      if (!compareSessionCapabilities(current).edit) return current;
       if (isVirtualFileDocument(current[side])) return current;
       return {
         ...current,
@@ -381,7 +389,7 @@ export default function App() {
         ? readTextFile(compareSession.right.path)
         : Promise.resolve(compareSession.right),
     ]);
-    setCleanCompareSession({ left, right });
+    setCleanCompareSession({ ...compareSession, left, right });
     setCompareFileChangeNotice(null);
     setSuppressedCompareFileChangeKey(null);
     setMessage(appText.changedFilesReloaded);
@@ -468,7 +476,7 @@ export default function App() {
           readTextFile(session.leftPath),
           readTextFile(session.rightPath),
         ]);
-        setCleanCompareSession({ left, right });
+        setCleanCompareSession({ origin: "files", left, right });
       }
       setCompareBackTarget("home");
       if (options.remember) rememberRecentSession(session);
@@ -566,6 +574,28 @@ export default function App() {
     setMode("merge");
   }), [appText, run, setCleanMergeSession]);
 
+  const restoreDifftoolSession = useCallback((
+    startup: DifftoolStartupSession,
+  ) => run(async () => {
+    if (!isTauriRuntime()) {
+      throw new Error(appText.demoRestoreOnly);
+    }
+
+    const [local, remote] = await Promise.all([
+      startup.localPath == null
+        ? Promise.resolve(null)
+        : readTextFile(startup.localPath),
+      startup.remotePath == null
+        ? Promise.resolve(null)
+        : readTextFile(startup.remotePath),
+    ]);
+    const session = buildDifftoolSession(startup, { local, remote });
+    saveActiveSession(null);
+    setCleanCompareSession(session);
+    setCompareBackTarget("home");
+    setMode("compare");
+  }), [appText, run, setCleanCompareSession]);
+
   useEffect(() => {
     saveAppearanceSettings({ language: languageMode, theme: themeMode });
   }, [languageMode, themeMode]);
@@ -628,7 +658,11 @@ export default function App() {
         try {
           const startupSession = parseStartupSessionArgs(await startupArgs(), languageMode);
           if (startupSession.status === "valid") {
-            if (startupSession.source === "mergetool") {
+            if (startupSession.source === "difftool") {
+              saveActiveSession(null);
+              await restoreDifftoolSession(startupSession.session);
+            } else if (startupSession.source === "mergetool") {
+              saveActiveSession(null);
               await restoreMergetoolSession(startupSession.session);
             } else {
               await restoreStoredSession(startupSession.session, { remember: true });
@@ -655,7 +689,7 @@ export default function App() {
       .finally(() => {
         setActiveSessionStorageReady(true);
       });
-  }, [languageMode, restoreMergetoolSession, restoreStoredSession]);
+  }, [languageMode, restoreDifftoolSession, restoreMergetoolSession, restoreStoredSession]);
 
   useEffect(() => {
     if (!activeSessionStorageReady) return;
@@ -666,11 +700,7 @@ export default function App() {
         return;
       }
 
-      saveActiveSession({
-        kind: "compare",
-        leftPath: compareSession.left.path,
-        rightPath: compareSession.right.path,
-      });
+      saveActiveSession(persistentCompareSessionInput(compareSession));
       return;
     }
 
@@ -767,7 +797,7 @@ export default function App() {
     });
   };
 
-  const closeMergetoolWindow = () => {
+  const closeExternalGitToolWindow = () => {
     requestLeaveActiveSession(() => {
       allowWindowClose.current = true;
       void closeCurrentWindow().catch((caught) => {
@@ -792,7 +822,7 @@ export default function App() {
     const rightPath = await chooseTextFile(appText.chooseRightFile);
     if (!rightPath) return;
     const [left, right] = await Promise.all([readTextFile(leftPath), readTextFile(rightPath)]);
-    setCleanCompareSession({ left, right });
+    setCleanCompareSession({ origin: "files", left, right });
     setCompareBackTarget("home");
     rememberRecentSession({ kind: "compare", leftPath, rightPath });
     setMode("compare");
@@ -802,13 +832,14 @@ export default function App() {
     requestLeaveActiveSession(() => run(async () => {
       const [leftPath, rightPath] = paths;
       const [left, right] = await Promise.all([readTextFile(leftPath), readTextFile(rightPath)]);
-      setCleanCompareSession({ left, right });
+      setCleanCompareSession({ origin: "files", left, right });
       setCompareBackTarget("home");
       rememberRecentSession({ kind: "compare", leftPath, rightPath });
       setMode("compare");
     }));
 
   const replaceDroppedCompareSide = (side: CompareDropSide, path: string) => {
+    if (compareSession && !compareSessionCapabilities(compareSession).replaceInput) return;
     const replaceSide = () => {
       void run(async () => {
         if (!compareSession) return;
@@ -912,7 +943,7 @@ export default function App() {
             ),
           ),
     ]);
-    const session = { left, right };
+    const session: CompareSession = { origin: "files", left, right };
     setCleanCompareSession(session);
     setCompareBackTarget("folders");
     if (!compareSessionHasVirtualDocument(session)) {
@@ -971,7 +1002,7 @@ export default function App() {
         readTextFile(session.leftPath),
         readTextFile(session.rightPath),
       ]);
-      setCleanCompareSession({ left, right });
+      setCleanCompareSession({ origin: "files", left, right });
       setCompareBackTarget("home");
       rememberRecentSession({
         kind: "compare",
@@ -1035,6 +1066,7 @@ export default function App() {
     lineEndingMode: SaveLineEndingMode = "original",
   ) => run(async () => {
     if (!compareSession) return;
+    if (!compareSessionCapabilities(compareSession).save) return;
     const target = compareSession[side];
     if (isVirtualFileDocument(target)) {
       throw new Error(appText.virtualCompareSaveDisabled);
@@ -1066,13 +1098,10 @@ export default function App() {
     setCompareOutputVersion((current) => ({ ...current, [side]: saved.outputVersion }));
     setCompareFileChangeNotice(null);
     setSuppressedCompareFileChangeKey(null);
-    if (!compareSessionHasVirtualDocument(saved.session)) {
-      rememberRecentSession({
-        kind: "compare",
-        leftPath: saved.session.left.path,
-        rightPath: saved.session.right.path,
-      });
-    }
+    const persistentSession = compareSessionHasVirtualDocument(saved.session)
+      ? null
+      : persistentCompareSessionInput(saved.session);
+    if (persistentSession) rememberRecentSession(persistentSession);
     setMessage(appText.sideSaved(side, written.backupPath));
   }), [appText, compareOutputVersion, compareSession, rememberRecentSession, run]);
 
@@ -1090,6 +1119,7 @@ export default function App() {
 
   const showCompareBackups = useCallback((side: CompareSide) => run(async () => {
     if (!compareSession) return;
+    if (!compareSessionCapabilities(compareSession).backupRestore) return;
     const target = compareSession[side];
     if (isVirtualFileDocument(target)) {
       throw new Error(appText.virtualCompareSaveDisabled);
@@ -1197,6 +1227,11 @@ export default function App() {
 
   const restoreBackup = useCallback((backup: FileBackup) => run(async () => {
     if (!backupDialog) return;
+    if (
+      backupDialog.kind === "compare" &&
+      compareSession &&
+      !compareSessionCapabilities(compareSession).backupRestore
+    ) return;
     const precondition = backupDialog.kind === "compare" && compareSession
       ? compareSavePreconditionForPath(
           compareSession,
@@ -1274,6 +1309,12 @@ export default function App() {
   }, [languageMode, mergeSession, saveMergeNow]);
 
   const handleShellCommand = useCallback((commandId: AppCommandId) => {
+    if (!isShellOpenCommandAllowed(commandId, {
+      mode,
+      compareOrigin: compareSession?.origin ?? null,
+      mergeOrigin: mergeSession?.origin ?? null,
+    })) return;
+
     if (commandId === "openMerge") {
       openMerge();
       return;
@@ -1285,7 +1326,7 @@ export default function App() {
     if (commandId === "openCompare") {
       openCompare();
     }
-  }, [openCompare, openFolders, openMerge]);
+  }, [compareSession?.origin, mergeSession?.origin, mode, openCompare, openFolders, openMerge]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1482,7 +1523,11 @@ export default function App() {
             modelRevision={compareModelRevision}
             dirtySides={compareDirtySides}
             backLabel={compareBackTarget === "folders" ? appText.folderResults : undefined}
-            onBack={backFromCompare}
+            onBack={
+              compareSession.origin === "difftool"
+                ? closeExternalGitToolWindow
+                : backFromCompare
+            }
             onCheckFileVersions={() => {
               void checkCompareFileVersions();
             }}
@@ -1504,9 +1549,14 @@ export default function App() {
             }
             onExportReport={exportCompareReport}
             onShowBackups={showCompareBackups}
-            onSwap={() =>
-              setCleanCompareSession({ left: compareSession.right, right: compareSession.left })
-            }
+            onSwap={() => {
+              if (!compareSessionCapabilities(compareSession).swap) return;
+              setCleanCompareSession({
+                ...compareSession,
+                left: compareSession.right,
+                right: compareSession.left,
+              });
+            }}
           />
         )}
 
@@ -1534,7 +1584,11 @@ export default function App() {
             dirty={mergeHasUnsavedChanges}
             editorTheme={editorTheme}
             recoveryDraft={mergeRecoveryDraft}
-            onBack={mergeSession.origin === "mergetool" ? closeMergetoolWindow : backHome}
+            onBack={
+              mergeSession.origin === "mergetool"
+                ? closeExternalGitToolWindow
+                : backHome
+            }
             onResultChange={updateMergeResult}
             onRecoveryDraftsEnabledChange={setMergeRecoveryEnabled}
             onRestoreRecoveryDraft={() => {

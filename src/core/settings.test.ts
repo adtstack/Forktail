@@ -14,6 +14,7 @@ import {
   loadMergeSettings,
   loadRecentSessions,
   persistentMergeSessionInput,
+  persistentCompareSessionInput,
   removeLegacyMergetoolRecentSession,
   removeRecentSession,
   sanitizeActiveSession,
@@ -38,7 +39,7 @@ import {
   type MergeSettings,
   type RecentSession,
 } from "./settings";
-import type { FileDocument, MergeSession } from "./models";
+import type { CompareSession, FileDocument, MergeSession } from "./models";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -428,6 +429,25 @@ describe("active session restore settings", () => {
     ].join("\n");
     expect(serialized).not.toContain("/tmp/git/");
     expect(serialized).not.toContain("/repo/merged.txt");
+  });
+
+  it("does not convert difftool temporary paths into a persistent session", () => {
+    const storage = new MemoryStorage();
+    const session: CompareSession = {
+      origin: "difftool",
+      left: testDocument("/tmp/git/LOCAL"),
+      right: testDocument("/tmp/git/REMOTE"),
+    };
+
+    expect(persistentCompareSessionInput(session)).toBeNull();
+    saveActiveSession(null, storage);
+    saveRecentSessions([], storage);
+
+    const serialized = [
+      storage.getItem("forktail.active-session.v1"),
+      storage.getItem("forktail.recent-sessions.v1"),
+    ].join("\n");
+    expect(serialized).not.toContain("/tmp/git/");
   });
 
   it("purges a legacy recent entry that contains the current mergetool paths", () => {

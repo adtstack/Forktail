@@ -10,6 +10,7 @@ import {
   themeOptionsForLanguage,
 } from "../core/i18n";
 import type { AppLanguage, RecentSession, ThemeMode } from "../core/settings";
+import { GitToolSetup } from "./GitToolSetup";
 
 interface StartPageProps {
   busy: boolean;
@@ -245,6 +246,8 @@ export function StartPage({
             </section>
           </aside>
         </section>
+
+        <GitToolSetup languageMode={languageMode} />
       </section>
     </main>
   );

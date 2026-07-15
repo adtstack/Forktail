@@ -45,6 +45,7 @@ describe("fileDocumentVersionChanged", () => {
 describe("buildCompareFileChangeNotice", () => {
   it("returns null when both files still match the opened versions", () => {
     const session = {
+      origin: "files" as const,
       left: document("/work/left.txt", 10, 1000),
       right: document("/work/right.txt", 20, 2000),
     };
@@ -60,6 +61,7 @@ describe("buildCompareFileChangeNotice", () => {
 
   it("describes which compare side changed", () => {
     const session = {
+      origin: "files" as const,
       left: document("/work/left.txt", 10, 1000),
       right: document("/work/right.txt", 20, 2000),
     };
@@ -86,6 +88,7 @@ describe("buildCompareFileChangeNotice", () => {
 
   it("ignores virtual missing sides when building change notices", () => {
     const session = {
+      origin: "files" as const,
       left: virtualMissingFileDocument("/work/left.txt"),
       right: document("/work/right.txt", 20, 2000),
     };

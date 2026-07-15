@@ -204,6 +204,18 @@ base/ours/theirs read
 
 전체 결과 재파싱은 일반 파일 크기에서 단순하고 정확하다. 성능 문제가 측정되기 전 incremental parser를 만들지 않는다.
 
+### Git difftool 계약
+
+custom `git difftool`은 `$LOCAL`, `$REMOTE`를 command에 넘긴다. 목표 호출은 다음 두 경로의 **위치를 보존한 채** 전달한다.
+
+```text
+forktail --difftool "$LOCAL" "$REMOTE"
+```
+
+added/deleted file에서 Git은 한쪽을 빈 인자 또는 `/dev/null`로 전달할 수 있다. config generator가 `/dev/null`을 빈 인자로 정규화하고 CLI parser는 이를 missing document로 보존한다. 두 쪽이 모두 missing이면 잘못된 호출로 거절한다.
+
+difftool session은 두 입력을 read-only로 연다. 편집, Save/Save As, hunk 적용, 좌우 교환, Drag & Drop 교체, backup restore를 허용하지 않고 Git 임시 path를 recent/active session에 저장하지 않는다. plain text diff report는 사용자가 별도 경로를 명시적으로 고르는 export이므로 허용한다. `Close Forktail`은 dirty 확인 없이 실제 Tauri 창과 process를 닫아 Git의 wait를 끝낸다.
+
 ### Git mergetool 계약
 
 custom `git mergetool`은 `$BASE`, `$LOCAL`, `$REMOTE`, `$MERGED` 환경 변수를 command에 넘긴다. 목표 호출은 다음 네 경로를 순서대로 전달한다.
@@ -224,6 +236,8 @@ mergetool session은 `$MERGED`의 기존 내용을 초기 Result로 읽고 open 
 Phase 1 GUI는 Save & Close/Abort를 안정적인 exit code로 전달하지 않는다. mergetool 화면의 `Close Forktail`은 dirty Result의 discard 확인 뒤 실제 Tauri 창과 프로세스를 닫아 Git의 wait를 끝내지만, 저장 성공을 exit code로 주장하지 않는다. Git 설정은 `trustExitCode = false`와 tool-specific `hideResolved = false`를 사용한다. Git은 target timestamp와 사용자 확인 흐름으로 성공 여부를 판단하므로 packaged app이 닫힐 때까지 Git 호출이 기다리는지 세 OS에서 검증해야 한다. Forktail 프로세스가 실행 중일 때는 index를 바꾸지 않지만, 프로세스 종료 뒤 사용자가 성공을 확인하면 `git mergetool` wrapper가 해당 path를 stage할 수 있다. 저장은 일반 safe save의 precondition/backup/atomic replace를 재사용하며, Git이 만드는 `.orig`와 Forktail의 `.bak.*`가 함께 남을 수 있음을 안내한다.
 
 repository-aware branch/commit/index 비교는 이 adapter와 별개인 Phase 1 이후 후보이며 `docs/17_GIT_INTEGRATION.md`를 따른다.
+
+Git config setup UI는 narrow Rust command로 packaged process의 absolute executable path만 받는다. macOS/Windows는 `current_exe`, Linux AppImage는 임시 mount 내부 executable 대신 `APPIMAGE` artifact path를 우선한다. dev build나 감지 실패에서는 copy 가능한 hard-coded default를 만들지 않고 사용자가 실제 absolute path를 입력하게 한다. 생성기는 snippet을 표시·복사할 뿐 `.gitconfig`를 쓰거나 default Git tool을 바꾸지 않는다.
 
 ## 8. 저장 내구성
 

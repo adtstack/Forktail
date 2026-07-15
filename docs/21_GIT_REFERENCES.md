@@ -377,7 +377,7 @@ custom merge driver      : %O    %A     %B      (%A에 결과 기록, %P는 path
 
 - `%O %A %B %P`를 `git mergetool` 인자라고 문서화하지 않는다.
 - custom merge driver는 자동 merge 단계에서 실행되고 `%A`를 갱신한 뒤 clean이면 0, conflict이면 non-zero를 반환해야 한다. interactive GUI의 저장/닫기 lifecycle과 별개다.
-- 현재 Phase 1 예외는 `MRG-009`의 interactive mergetool adapter뿐이다. difftool과 repository-aware Git은 후속 후보이며, custom merge driver는 별도 PRD/ADR 없이는 활성화하지 않는다.
+- 현재 Phase 1 외부 tool 예외는 `INT-002`의 read-only difftool adapter와 `MRG-009`/`MRG-014`의 interactive mergetool adapter뿐이다. repository-aware Git은 별도 후속 트랙이며, custom merge driver는 별도 PRD/ADR 없이는 활성화하지 않는다.
 - 저장소가 지정한 diff driver/textconv를 실행하지 않는 조회에는 `git diff --no-ext-diff --no-textconv`를 사용한다.
 
 ## 5. forktail 구현 체크리스트
@@ -392,9 +392,10 @@ custom merge driver      : %O    %A     %B      (%A에 결과 기록, %P는 path
 - [ ] diff 조회에 `--no-ext-diff --no-textconv`를 명시하고 악성/실패 external helper가 실행되지 않는지 테스트한다.
 - [ ] SHA-1 object ID 길이를 하드코딩하지 않고 SHA-256 repository fixture를 검토한다.
 - [ ] normal, bare, linked worktree, submodule repository 경계를 테스트한다.
-- [ ] mergetool은 `$BASE/$LOCAL/$REMOTE/$MERGED`, merge driver는 `%O/%A/%B`와 `%A` output이라는 계약을 각각 snapshot test로 고정한다.
+- [x] mergetool은 `$BASE/$LOCAL/$REMOTE/$MERGED`, difftool은 `$LOCAL/$REMOTE`, merge driver는 `%O/%A/%B`와 `%A` output이라는 계약을 parser/config snapshot test로 고정한다.
 - [ ] mergetool의 save/abort/unresolved/backup/exit lifecycle을 packaged binary로 세 OS에서 smoke test한다.
-- [ ] difftool 임시 입력은 기본 read-only이며 `--dir-diff` 지원 여부를 명시한다.
+- [x] difftool 임시 입력은 read-only이고 added/deleted missing side를 보존하며 `--dir-diff`는 지원 범위에서 제외한다고 명시한다.
+- [ ] difftool wait/temp/modified/added/deleted lifecycle을 packaged binary로 세 OS에서 smoke test한다.
 - [ ] stage 0 index snapshot과 stage 1/2/3 conflict snapshot을 다른 계약으로 파싱하고 three-state compare가 index를 바꾸지 않는지 검증한다.
 - [ ] bounded file history를 추가하면 자동 fetch 없이 metadata만 읽고 full graph로 범위를 넓히지 않는다.
 

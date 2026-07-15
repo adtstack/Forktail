@@ -124,6 +124,7 @@ describe("MergeView Git mergetool mode", () => {
     expect(markup).toContain("Git mergetool");
     expect(markup).toContain("Fixed $MERGED output: /repo/MERGED");
     expect(markup).toContain("Save writes only to this file.");
+    expect(markup).toContain("Git .orig and Forktail .bak.&lt;timestamp&gt; files can both remain.");
     expect(markup).toContain("BASE (missing)");
     expect(markup).toContain("aria-label=\"BASE source (missing)\"");
     expect(markup).toContain("aria-label=\"Merge result has unsaved changes\"");

@@ -15,7 +15,12 @@ import {
   SAVE_LINE_ENDING_MODES,
   type SaveLineEndingMode,
 } from "./lineEndings";
-import type { FolderCompareMode, FolderScanOptions, MergeSession } from "./models";
+import type {
+  CompareSession,
+  FolderCompareMode,
+  FolderScanOptions,
+  MergeSession,
+} from "./models";
 
 const COMPARE_VIEW_SETTINGS_KEY = "forktail.compare-view.v1";
 const FOLDER_SCAN_OPTIONS_KEY = "forktail.folder-scan-options.v1";
@@ -93,6 +98,7 @@ export interface RecentMergeSession extends RecentSessionBase {
 }
 
 export type PersistentMergeSessionInput = Omit<RecentMergeSession, "id" | "updatedAt">;
+export type PersistentCompareSessionInput = Omit<RecentCompareSession, "id" | "updatedAt">;
 
 export interface EphemeralMergetoolPaths {
   basePath: string | null;
@@ -327,6 +333,18 @@ export function persistentMergeSessionInput(
     oursPath: session.ours.path,
     theirsPath: session.theirs.path,
     outputPath: session.outputPath,
+  };
+}
+
+export function persistentCompareSessionInput(
+  session: CompareSession,
+): PersistentCompareSessionInput | null {
+  if (session.origin === "difftool") return null;
+
+  return {
+    kind: "compare",
+    leftPath: session.left.path,
+    rightPath: session.right.path,
   };
 }
 

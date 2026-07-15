@@ -20,6 +20,12 @@ export type AppCommandId =
 
 export const APP_COMMAND_EVENT = "forktail-command";
 
+export interface ShellOpenCommandContext {
+  mode: "home" | "compare" | "folders" | "merge";
+  compareOrigin: "files" | "difftool" | null;
+  mergeOrigin: "files" | "mergetool" | null;
+}
+
 export interface KeyboardShortcutLike {
   key: string;
   ctrlKey: boolean;
@@ -146,6 +152,24 @@ export function commandShortcutCollisions(): string[] {
   }
 
   return collisions;
+}
+
+export function isShellOpenCommandAllowed(
+  commandId: AppCommandId,
+  context: ShellOpenCommandContext,
+): boolean {
+  if (
+    commandId !== "openCompare" &&
+    commandId !== "openFolders" &&
+    commandId !== "openMerge"
+  ) {
+    return false;
+  }
+
+  const externalGitToolActive =
+    (context.mode === "compare" && context.compareOrigin === "difftool") ||
+    (context.mode === "merge" && context.mergeOrigin === "mergetool");
+  return !externalGitToolActive;
 }
 
 function command(id: AppCommandId, label: string, shortcuts: readonly ShortcutSpec[]): AppCommand {

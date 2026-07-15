@@ -285,7 +285,7 @@ export const CORE_TEXT = {
       return `${sides.join(" and ")} file changed after it was opened. Reload or keep the current compare content.`;
     },
     startupInvalidArgs:
-      "Could not parse startup arguments. Usage: forktail left right, forktail --folders left right, forktail --merge base ours theirs [output], forktail --mergetool base ours theirs output",
+      "Could not parse startup arguments. Usage: forktail left right, forktail --folders left right, forktail --merge base ours theirs [output], forktail --difftool local remote, forktail --mergetool base ours theirs output",
     errors: {
       fallback: "Could not complete the action. Check paths and permissions, then try again.",
       unknown: "An unknown error occurred.",
@@ -359,7 +359,7 @@ export const CORE_TEXT = {
       return `${sides.join("과 ")} 파일이 열린 뒤 변경됐습니다. 다시 읽거나 현재 비교 내용을 유지하세요.`;
     },
     startupInvalidArgs:
-      "시작 인자를 이해하지 못했습니다. 사용법: forktail left right, forktail --folders left right, forktail --merge base ours theirs [output], forktail --mergetool base ours theirs output",
+      "시작 인자를 이해하지 못했습니다. 사용법: forktail left right, forktail --folders left right, forktail --merge base ours theirs [output], forktail --difftool local remote, forktail --mergetool base ours theirs output",
     errors: {
       fallback: "작업을 완료하지 못했습니다. 입력 경로와 권한을 확인한 뒤 다시 시도하세요.",
       unknown: "알 수 없는 오류가 발생했습니다.",
@@ -404,6 +404,11 @@ export const CORE_TEXT = {
 export const FILE_COMPARE_TEXT = {
   en: {
     home: "Home",
+    closeForktail: "Close Forktail",
+    difftool: "GIT DIFFTOOL",
+    difftoolSessionAria: "Git difftool session",
+    difftoolReadOnlyNote:
+      "Git difftool inputs are temporary read-only snapshots. Export is available; editing, saving, swapping, and replacing inputs are disabled.",
     swap: "Swap",
     changeNavigationAria: "Change navigation",
     previousChange: "Prev",
@@ -471,6 +476,11 @@ export const FILE_COMPARE_TEXT = {
   },
   ko: {
     home: "홈",
+    closeForktail: "Forktail 닫기",
+    difftool: "GIT DIFFTOOL",
+    difftoolSessionAria: "Git difftool 세션",
+    difftoolReadOnlyNote:
+      "Git difftool 입력은 임시 읽기 전용 snapshot입니다. 리포트 저장만 가능하며 편집, 저장, 좌우 교환, 입력 교체는 비활성화됩니다.",
     swap: "좌우 교환",
     changeNavigationAria: "변경 탐색",
     previousChange: "이전 변경",
@@ -703,7 +713,7 @@ export const MERGE_VIEW_TEXT = {
     backups: "Backups",
     mergetoolMode: "Git mergetool",
     mergetoolFixedOutput: (path: string) =>
-      `Fixed $MERGED output: ${path}. Save writes only to this file.`,
+      `Fixed $MERGED output: ${path}. Save writes only to this file. Depending on Git backup settings, Git .orig and Forktail .bak.<timestamp> files can both remain.`,
     missingSource: (label: string) => `${label} (missing)`,
     draftWarning: "An unsaved merge draft is available. Original file contents were not cached.",
     restoreDraft: "Restore draft",
@@ -757,7 +767,7 @@ export const MERGE_VIEW_TEXT = {
     backups: "백업 복원",
     mergetoolMode: "Git mergetool",
     mergetoolFixedOutput: (path: string) =>
-      `고정 $MERGED 출력: ${path}. 저장은 이 파일에만 기록합니다.`,
+      `고정 $MERGED 출력: ${path}. 저장은 이 파일에만 기록합니다. Git 백업 설정에 따라 Git .orig와 Forktail .bak.<timestamp> 파일이 함께 남을 수 있습니다.`,
     missingSource: (label: string) => `${label} (없음)`,
     draftWarning: "이전에 저장하지 못한 병합 결과 draft가 있습니다. 원본 파일 내용은 별도 캐시하지 않았습니다.",
     restoreDraft: "draft 복구",

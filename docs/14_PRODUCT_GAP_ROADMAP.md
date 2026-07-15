@@ -799,9 +799,11 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 
 범위:
 
-- 앱 안에서 명령어를 복사할 수 있게 하거나, CLI로 `forktail --print-git-config`를 제공한다.
+- 앱 안에서 Windows/macOS/Linux의 absolute executable path를 입력받아 difftool/mergetool snippet을 확인하고 복사할 수 있게 한다.
+- packaged runtime은 실제 current executable을 제안한다. Linux AppImage는 임시 mount 내부 binary가 아니라 `APPIMAGE`의 stable artifact path를 사용하며, 감지 실패 시 빈 입력과 OS별 형태 예시만 보여준다.
 - 실제 `.gitconfig` 자동 수정은 첫 버전에서 제외한다.
 - difftool은 `$LOCAL`/`$REMOTE`, mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 사용한다.
+- added/deleted difftool side와 missing merge Base의 `/dev/null`은 빈 positional argument로 정규화한다.
 - generated mergetool config에는 tool-specific `mergetool.forktail.hideResolved=false`를 포함한다.
 - `%O/%A/%B/%P` custom merge driver 설정은 생성하지 않는다.
 
@@ -811,6 +813,7 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 - difftool과 mergetool 설정을 구분한다.
 - 현재 GUI lifecycle에서는 `trustExitCode = false`가 필요한 이유를 짧게 설명한다.
 - generated config text가 shell로 평가된다는 점을 반영해 OS별 path 공백/quote snapshot을 검증한다.
+- `diff.tool`, `merge.tool` 같은 default 변경은 생성하지 않고 사용자가 `--tool=forktail`을 명시한다.
 
 필요 테스트:
 

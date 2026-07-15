@@ -21,6 +21,7 @@ pub fn run() {
             folders::scan_directories,
             merge::merge_texts,
             startup::startup_args,
+            system::git_tool_executable_path,
             system::reveal_path,
         ])
         .run(tauri::generate_context!())

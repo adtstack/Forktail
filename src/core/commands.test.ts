@@ -3,6 +3,7 @@ import {
   commandAriaKeyshortcuts,
   commandShortcutCollisions,
   isAppCommandId,
+  isShellOpenCommandAllowed,
   matchesCommandShortcut,
   type KeyboardShortcutLike,
 } from "./commands";
@@ -84,5 +85,31 @@ describe("command registry", () => {
     expect(isAppCommandId("acceptBoth")).toBe(true);
     expect(isAppCommandId("unknown")).toBe(false);
     expect(isAppCommandId(null)).toBe(false);
+  });
+
+  it("blocks keyboard and native open commands while an external Git tool owns the window", () => {
+    for (const commandId of ["openCompare", "openFolders", "openMerge"] as const) {
+      expect(isShellOpenCommandAllowed(commandId, {
+        mode: "compare",
+        compareOrigin: "difftool",
+        mergeOrigin: null,
+      })).toBe(false);
+      expect(isShellOpenCommandAllowed(commandId, {
+        mode: "merge",
+        compareOrigin: null,
+        mergeOrigin: "mergetool",
+      })).toBe(false);
+      expect(isShellOpenCommandAllowed(commandId, {
+        mode: "compare",
+        compareOrigin: "files",
+        mergeOrigin: null,
+      })).toBe(true);
+    }
+
+    expect(isShellOpenCommandAllowed("save", {
+      mode: "home",
+      compareOrigin: null,
+      mergeOrigin: null,
+    })).toBe(false);
   });
 });

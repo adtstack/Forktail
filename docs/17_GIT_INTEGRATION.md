@@ -45,12 +45,12 @@ repository-aware Git 작업은 다음 조건을 만족한 뒤 시작한다.
 - `RTM-001`, `RTM-002`: 실제 Tauri runtime과 packaged WebView smoke가 안정됨
 - `SAV-007`, `SAV-008`: Windows atomic replace와 외부 변경 precondition이 검증됨
 - `MRG-012`: 기본 Git marker와 base 없는 marker를 안전하게 파싱함
-- `MRG-014`: 세 OS packaged `git mergetool` lifecycle smoke가 끝남
-- `INT-002`: 자동 `.gitconfig` 수정 없이 안전한 설정 안내가 확정됨
+- `MRG-014`/`INT-002`: 세 OS packaged `git difftool`/`git mergetool` lifecycle smoke가 끝남
+- `INT-002`: 자동 `.gitconfig` 수정이나 default tool 변경 없이 안전한 설정 안내가 확정됨
 - `GIT-000`: Git CLI 2.45.0+와 fail-closed capability gate, positive allowlist,
   no-network/no-mutation runner 결정을 `ADR-010`으로 승인함
 
-현재 코드의 `--mergetool` 인자 parser는 scaffold다. 다음이 확인되기 전에는 완성된 Git integration으로 표시하지 않는다.
+현재 코드는 `--difftool` read-only adapter와 `--mergetool` `$MERGED`-only adapter의 source/unit 계약까지 구현했다. 다음 source 계약은 고정됐지만, 세 OS packaged lifecycle evidence가 끝나기 전에는 완성된 Git integration으로 표시하지 않는다.
 
 - session origin을 일반 merge와 구분한다.
 - Git이 만든 `$MERGED`를 초기 Result로 읽고 fingerprint를 보관한다.
@@ -621,7 +621,7 @@ Base/Left/Right는 모두 immutable blob이다. 결과는 기존 `diffy` engine�
 
 | Git 기능 | 입력 | 쓰기 대상 | 초기 지원 |
 |---|---|---|---|
-| custom difftool | `$LOCAL`, `$REMOTE`; `$MERGED`는 비교 path label | 없음 | read-only 후보 |
+| custom difftool | `$LOCAL`, `$REMOTE`; `$MERGED`는 비교 path label | 없음 | `INT-002` read-only |
 | custom mergetool | `$BASE`, `$LOCAL`, `$REMOTE`, `$MERGED` | `$MERGED` | `MRG-009`/`MRG-014` |
 | custom merge driver | `%O`, `%A`, `%B`, `%L`, `%P` | `%A`를 직접 덮어씀 | 제외 |
 
@@ -634,6 +634,8 @@ mergetool 목표 command 형태:
 ```
 
 실제 `.gitconfig` 문자열은 Git이 shell로 평가하므로 OS별 executable path quoting을 `INT-002`에서 별도 생성·검증한다. 사용자가 검증되지 않은 예시를 그대로 붙여 넣게 하지 않는다.
+
+difftool 목표 command 형태는 `<forktail-executable> --difftool "$LOCAL" "$REMOTE"`다. added/deleted file의 `/dev/null`은 generator가 빈 positional slot으로 정규화하고, 앱은 missing document로 표시한다. 두 source는 편집/저장/hunk 적용/교환/입력 교체/경로 영속화를 허용하지 않는다. 사용자가 별도 위치를 고르는 report export만 허용하며 Git 임시 path를 기본 저장 위치로 제안하지 않는다.
 
 현재 GUI는 저장/취소를 신뢰 가능한 exit code로 전달하지 않으므로 generated config는 다음을 유지한다.
 
@@ -725,8 +727,8 @@ raw command, raw stderr, 파일 내용은 사용자 메시지나 분석 이벤�
 ```text
 Phase 1 안정화
   → MRG-009 계약 수정
-  → MRG-014 세 OS packaged mergetool smoke
-  → INT-002 안전한 설정 출력
+  → INT-002 안전한 설정 출력과 read-only difftool adapter
+  → INT-002/MRG-014 세 OS packaged difftool/mergetool smoke
   → GIT-000 ADR/제품 게이트
   → runner + 오류 + byte parser
   → repository + revision

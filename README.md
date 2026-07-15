@@ -28,7 +28,9 @@ Beyond Compare에서 자주 쓰는 핵심 흐름을 무료·로컬 우선 데스
 - UTF-8이 아닌 입력이나 디코딩 손실 입력을 현재 UTF-8 저장 경로로 저장할 때의 경고
 - 폴더 필터/정렬/옵션, 진행률·취소 UI, expand/collapse, 가상 스크롤 기반 목록, copy/sync dry-run 요약
 - 폴더 대소문자/Unicode 정규화 경로 충돌 경고
-- CLI 시작 인자 parser와 Tauri startup command scaffold: `forktail left right`, `--folders`, `--merge`, `--mergetool`
+- CLI 시작 인자 parser와 Tauri startup command scaffold: `forktail left right`, `--folders`, `--merge`, `--difftool`, `--mergetool`
+- Git difftool 입력의 read-only 비교와 mergetool `$MERGED`-only safe-save adapter
+- 시작 화면의 copy-only Git difftool/mergetool config generator
 - 최근 세션, 마지막 화면 자동 복원, 테마 설정, 경로 복사 fallback, native reveal scaffold, 외부 변경 감지 배너
 - 3-way 병합 결과 draft opt-in 복구
 - 공통 command registry 기반 키보드 단축키, 접근성 shortcut 속성, native menu scaffold
@@ -93,6 +95,25 @@ npm run dev
 ```
 
 브라우저에서는 로컬 파일 접근 대신 시작 화면의 데모 버튼을 사용합니다.
+
+### Git external tool 수동 설정
+
+시작 화면의 **Git tool setup**은 packaged runtime에서 현재 executable의 absolute path를 감지하고 difftool/mergetool snippet을 각각 복사할 수 있게 합니다. 감지에 실패하거나 다른 artifact를 설정할 때는 실제 설치 위치를 직접 입력합니다. 형태 예시는 다음과 같습니다.
+
+```text
+Windows  C:\Users\<사용자>\AppData\Local\forktail\forktail.exe
+macOS    /Applications/forktail.app/Contents/MacOS/forktail
+Linux    /home/<사용자>/Applications/forktail.AppImage
+```
+
+생성기는 `.gitconfig`를 수정하지 않고 `diff.tool`/`merge.tool` 기본값도 바꾸지 않습니다. 필요한 snippet만 사용자가 직접 Git config에 붙여 넣고 다음처럼 명시적으로 실행합니다.
+
+```bash
+git difftool --tool=forktail --no-prompt
+git mergetool --tool=forktail
+```
+
+difftool은 `$LOCAL`/`$REMOTE`를 read-only로 열며 added/deleted file의 `/dev/null` side를 missing으로 표시합니다. mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 받고 `$MERGED`만 저장합니다. 생성된 mergetool 설정은 `trustExitCode = false`, `hideResolved = false`를 유지합니다. 현재 GUI 종료 code는 저장 성공 여부를 신뢰성 있게 전달하지 않으므로 Git의 후속 확인 흐름을 사용해야 합니다. Git backup 설정에 따라 Git의 `.orig`와 Forktail safe-save의 `.bak.<timestamp>`가 함께 남을 수 있습니다. `%O/%A/%B/%P` custom merge driver 설정은 지원하지 않습니다.
 
 macOS 앱 번들을 만들려면:
 

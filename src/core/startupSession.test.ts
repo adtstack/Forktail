@@ -32,6 +32,69 @@ describe("startup CLI session parser", () => {
     });
   });
 
+  it("maps Git difftool arguments in $LOCAL $REMOTE order", () => {
+    for (const command of ["--difftool", "--diff-tool", "difftool"] as const) {
+      expect(parseStartupSessionArgs([command, "/tmp/로컬 file", " /tmp/REMOTE "])).toEqual({
+        status: "valid",
+        source: "difftool",
+        session: {
+          kind: "difftool",
+          localPath: "/tmp/로컬 file",
+          remotePath: " /tmp/REMOTE ",
+        },
+      });
+    }
+  });
+
+  it("keeps difftool source and session kinds correlated for narrowing", () => {
+    const result = parseStartupSessionArgs(["--difftool", "/local", "/remote"]);
+
+    if (result.status !== "valid" || result.source !== "difftool") {
+      throw new Error("Expected a difftool startup session");
+    }
+
+    expect(result.session.kind).toBe("difftool");
+    expect(result.session.localPath).toBe("/local");
+  });
+
+  it("maps an empty slot or literal /dev/null to an explicit missing difftool side", () => {
+    expect(parseStartupSessionArgs(["--difftool", "", "/remote"])).toEqual({
+      status: "valid",
+      source: "difftool",
+      session: { kind: "difftool", localPath: null, remotePath: "/remote" },
+    });
+    expect(parseStartupSessionArgs(["--difftool", "/local", "/dev/null"])).toEqual({
+      status: "valid",
+      source: "difftool",
+      session: { kind: "difftool", localPath: "/local", remotePath: null },
+    });
+  });
+
+  it("rejects difftool invocations without exactly two slots or with both sides missing", () => {
+    for (const args of [
+      ["--difftool"],
+      ["--difftool", "/local"],
+      ["--difftool", "/local", "/remote", "/extra"],
+      ["--difftool", "", ""],
+      ["--difftool", "/dev/null", ""],
+      ["--difftool", "/dev/null", "/dev/null"],
+    ]) {
+      expect(parseStartupSessionArgs(args).status, JSON.stringify(args)).toBe("invalid");
+    }
+  });
+
+  it("treats only the exact /dev/null literal as a missing difftool side", () => {
+    expect(parseStartupSessionArgs(["--difftool", "/DEV/NULL", "/dev/null "])).toEqual({
+      status: "valid",
+      source: "difftool",
+      session: {
+        kind: "difftool",
+        localPath: "/DEV/NULL",
+        remotePath: "/dev/null ",
+      },
+    });
+  });
+
   it("opens folder sessions with default scan options", () => {
     expect(parseStartupSessionArgs(["--folders", "/left", "/right"])).toEqual({
       status: "valid",

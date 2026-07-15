@@ -36,6 +36,7 @@ export function demoCompareSession(): CompareSession {
   const right = `export function calculateTotal(items: Item[], taxRate = 0): number {\n  const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);\n  return subtotal * (1 + taxRate);\n}\n`;
   const rightWithoutFinalNewline = right.replace(/\n$/, "");
   return {
+    origin: "files",
     left: document(DEMO_COMPARE_LEFT_PATH, left),
     right: document(DEMO_COMPARE_RIGHT_PATH, rightWithoutFinalNewline),
   };
@@ -66,12 +67,14 @@ export function demoFolderEntryCompareSession(entry: FolderEntry): CompareSessio
   if (entry.relativePath === "README.md" && leftPath && rightPath) {
     const text = `# forktail\n\nLocal-first text and folder comparison.\n`;
     return {
+      origin: "files",
       left: document(leftPath, text),
       right: document(rightPath, text),
     };
   }
 
   return {
+    origin: "files",
     left: leftPath
       ? document(leftPath, `left/${entry.relativePath}\n`)
       : virtualMissingFileDocument(folderExpectedPath(DEMO_FOLDER_LEFT_ROOT, entry.relativePath)),

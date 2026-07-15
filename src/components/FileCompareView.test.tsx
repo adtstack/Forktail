@@ -4,13 +4,28 @@ import type { CompareFileChangeNotice } from "../core/fileVersion";
 import { FILE_COMPARE_TEXT } from "../core/i18n";
 import type { CompareSession, FileDocument } from "../core/models";
 import { virtualMissingFileDocument } from "../core/virtualDocument";
-import { activeChangedCompareSide, FileCompareView, FileHeading } from "./FileCompareView";
+import {
+  activeChangedCompareSide,
+  FileCompareView,
+  FileHeading,
+  isFileCompareCommandAllowed,
+} from "./FileCompareView";
 
 vi.mock("../monaco", () => ({
   loadMonacoLanguage: () => Promise.resolve(),
 }));
 vi.mock("@monaco-editor/react", () => ({
-  DiffEditor: () => <div role="textbox" />,
+  DiffEditor: ({
+    options,
+  }: {
+    options: { originalEditable?: boolean; readOnly?: boolean };
+  }) => (
+    <div
+      role="textbox"
+      data-original-editable={String(options.originalEditable)}
+      data-modified-read-only={String(options.readOnly)}
+    />
+  ),
 }));
 
 const document: FileDocument = {
@@ -76,6 +91,12 @@ function renderCompareView(
   );
 }
 
+function buttonMarkup(markup: string, label: string): string {
+  const match = markup.match(new RegExp(`<button[^>]*>\\s*${label}\\s*</button>`));
+  if (!match) throw new Error(`Button not found: ${label}`);
+  return match[0];
+}
+
 describe("FileHeading", () => {
   it("marks the editable pane with an EDITING badge", () => {
     expect(renderHeading(true)).toContain("EDITING");
@@ -86,6 +107,7 @@ describe("FileHeading", () => {
 describe("FileCompareView save encoding warning", () => {
   it("warns that unsupported legacy encodings are rewritten through the UTF-8 fallback save path", () => {
     const markup = renderCompareView({
+      origin: "files",
       left: {
         ...document,
         path: "demo/legacy-left.txt",
@@ -104,6 +126,7 @@ describe("FileCompareView save encoding warning", () => {
 describe("FileCompareView TXT controls", () => {
   it("renders diff navigation, compare options, save, hunk copy, and report controls", () => {
     const markup = renderCompareView({
+      origin: "files",
       left: { ...document, path: "demo/left.ts", name: "left.ts", text: "left\n" },
       right: document,
     });
@@ -135,10 +158,14 @@ describe("FileCompareView TXT controls", () => {
     expect(markup).toContain("aria-keyshortcuts=\"Shift+F7\"");
     expect(markup).toContain("aria-keyshortcuts=\"F7\"");
     expect(markup).toContain("aria-live=\"polite\"");
+    expect(buttonMarkup(markup, "Swap")).not.toContain("disabled");
+    expect(buttonMarkup(markup, "Export")).not.toContain("disabled");
+    expect(markup).toContain('<select class="toolbar-select"><option value="none"');
   });
 
   it("uses a custom back label for folder-originated compare sessions", () => {
     const markup = renderCompareView({
+      origin: "files",
       left: { ...document, path: "demo/left.ts", name: "left.ts", text: "left\n" },
       right: document,
     }, null, "Folder Results");
@@ -148,6 +175,7 @@ describe("FileCompareView TXT controls", () => {
 
   it("shows a virtual missing side without making it editable", () => {
     const markup = renderCompareView({
+      origin: "files",
       left: { ...document, path: "demo/left.ts", name: "left.ts", text: "left\n" },
       right: virtualMissingFileDocument("/demo/right/left.ts"),
     });
@@ -161,6 +189,7 @@ describe("FileCompareView TXT controls", () => {
   it("shows final-newline and external-change recovery actions", () => {
     const markup = renderCompareView(
       {
+        origin: "files",
         left: {
           ...document,
           path: "demo/left.ts",
@@ -181,6 +210,62 @@ describe("FileCompareView TXT controls", () => {
     expect(markup).toContain("Reload");
     expect(markup).toContain("Keep Current");
     expect(markup).toContain("Check Again");
+  });
+
+  it("keeps Git difftool inputs read-only while retaining report export and close", () => {
+    const markup = renderCompareView({
+      origin: "difftool",
+      left: { ...document, path: "/tmp/git-local", name: "feature.ts", text: "left\n" },
+      right: { ...document, path: "/tmp/git-remote", name: "feature.ts", text: "right\n" },
+    });
+
+    expect(markup).toContain("GIT DIFFTOOL");
+    expect(markup).toContain("temporary read-only snapshots");
+    expect(buttonMarkup(markup, "Close Forktail")).not.toContain("disabled");
+    expect(markup).not.toContain(">Home</button>");
+    expect(markup).toContain('data-original-editable="false"');
+    expect(markup).toContain('data-modified-read-only="true"');
+
+    for (const label of [
+      "Swap",
+      "L -&gt; R",
+      "R -&gt; L",
+      "Undo hunk",
+      "Save",
+      "Save As",
+      "Backups",
+    ]) {
+      expect(buttonMarkup(markup, label)).toContain("disabled");
+    }
+    expect(buttonMarkup(markup, "Export")).not.toContain("disabled");
+    expect(markup).toContain('<select class="toolbar-select" disabled=""><option value="none"');
+    expect(markup.match(/aria-disabled="true"/g)).toHaveLength(2);
+  });
+
+  it("preserves the missing-side presentation for read-only difftool input", () => {
+    const markup = renderCompareView({
+      origin: "difftool",
+      left: virtualMissingFileDocument("/tmp/git-local"),
+      right: { ...document, path: "/tmp/git-remote", name: "feature.ts", text: "right\n" },
+    });
+
+    expect(markup).toContain("Missing");
+    expect(markup).toContain("empty virtual file");
+    expect(markup).toContain("Missing · 0 B");
+    expect(buttonMarkup(markup, "Export")).not.toContain("disabled");
+  });
+
+  it("blocks save and swap commands for difftool sessions before callbacks run", () => {
+    const session = {
+      origin: "difftool",
+      left: document,
+      right: document,
+    } satisfies CompareSession;
+
+    expect(isFileCompareCommandAllowed(session, "save")).toBe(false);
+    expect(isFileCompareCommandAllowed(session, "saveAs")).toBe(false);
+    expect(isFileCompareCommandAllowed(session, "swapSides")).toBe(false);
+    expect(isFileCompareCommandAllowed(session, "nextDiff")).toBe(true);
   });
 });
 

@@ -66,10 +66,17 @@ describe("compareReportDefaultPath", () => {
   it("uses the right file path with a text diff suffix", () => {
     expect(compareReportDefaultPath(compareSession("left\n", "right\n"))).toBe("/repo/right.txt.diff.txt");
   });
+
+  it("does not suggest a Git temporary path for difftool report export", () => {
+    const session = compareSession("left\n", "right\n");
+
+    expect(compareReportDefaultPath({ ...session, origin: "difftool" })).toBeUndefined();
+  });
 });
 
 function compareSession(leftText: string, rightText: string): CompareSession {
   return {
+    origin: "files",
     left: document("/repo/left.txt", leftText),
     right: document("/repo/right.txt", rightText),
   };

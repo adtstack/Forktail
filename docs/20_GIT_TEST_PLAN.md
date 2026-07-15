@@ -703,7 +703,7 @@ repository-aware conflict 화면의 성공 메시지는 파일 저장만 완료�
 ```text
 temp repo에 두 commit 생성
 → repo-local difftool config
-→ git difftool --no-prompt 실행
+→ git difftool --tool=forktail --no-prompt 실행
 → LOCAL/REMOTE가 올바른 pane에 열림
 → snapshot은 read-only
 → window를 닫을 때까지 Git tool process가 기다림
@@ -725,6 +725,7 @@ temp repo에 두 commit 생성
 ```text
 temp repo에 실제 conflict 생성
 → repo-local mergetool config (`trustExitCode=false`, `hideResolved=false`)
+→ git mergetool --tool=forktail 실행
 → BASE/LOCAL/REMOTE/MERGED 전달; 빈 BASE 인자도 보존
 → MERGED fingerprint 저장
 → 사용자 resolve/save
@@ -754,6 +755,34 @@ temp repo에 실제 conflict 생성
 | Linux | AppImage/지원 binary, executable bit, desktop 환경과 무관한 process wait, oldest supported glibc |
 
 macOS의 단순 `open App.app`처럼 즉시 반환하는 launcher는 Git tool 계약으로 인정하지 않는다. Git이 session window 종료까지 기다릴 수 있는 실행 경로를 검증해야 한다.
+
+### 12.5 T009 evidence record
+
+실행 결과의 단일 기록 위치는 `VALIDATION.md`의 **INT-002/MRG-014 Git external tool 검증** 표다. `pending`을 `pass`로 바꾸려면 한 OS에서 다음 evidence를 모두 남긴다.
+
+```text
+Date / OS / architecture / Git version / forktail version
+Artifact path 또는 release artifact identity
+격리된 HOME과 repository-local config 사용 여부
+
+Difftool:
+- packaged process wait
+- LOCAL/REMOTE temp lifetime
+- modified/added/deleted read-only 표시
+- no-save close와 report export 분리
+
+Mergetool:
+- missing Base
+- save 뒤 MERGED-only 변경
+- no-save close 뒤 원본 유지
+- unresolved save hard block
+- process 종료 전 index 불변
+- process 종료 뒤 Git 사용자 확인 흐름
+
+Notes: 파일 내용, 전체 home path, raw stderr는 기록하지 않음
+```
+
+한 사례라도 미실행이면 해당 OS/tool cell은 `pending` 또는 `fail`로 유지한다. 다른 OS의 결과나 unit test로 대체하지 않는다.
 
 ## 13. 성능과 대규모 repository
 

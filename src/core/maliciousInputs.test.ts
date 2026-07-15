@@ -71,6 +71,7 @@ describe("SEC-004 malicious input coverage", () => {
 
 function compareSession(leftText: string, rightText: string): CompareSession {
   return {
+    origin: "files",
     left: document("/repo/left.txt", leftText),
     right: document("/repo/right.txt", rightText),
   };

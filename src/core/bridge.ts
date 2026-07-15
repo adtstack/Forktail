@@ -123,6 +123,11 @@ export async function startupArgs(): Promise<string[]> {
   return invoke<string[]>("startup_args");
 }
 
+export async function gitToolExecutablePath(): Promise<string> {
+  requireTauri();
+  return invoke<string>("git_tool_executable_path");
+}
+
 export async function revealPath(path: string): Promise<void> {
   requireTauri();
   return invoke<void>("reveal_path", { path });
