@@ -176,6 +176,18 @@ describe("Git compare session adapter", () => {
       ));
       expect(result).toMatchObject({ kind: "notice" });
     }
+
+    const sparse = adaptGitCompareSession(gitSession(
+      snapshot({ kind: "text", text: "index" }, "index"),
+      snapshot({
+        kind: "unavailable",
+        reason: "sparseWorkingTreeMissing",
+      }, "working tree"),
+    ));
+    expect(sparse).toMatchObject({
+      kind: "notice",
+      unavailableReasons: ["sparseWorkingTreeMissing"],
+    });
   });
 
   it("disables mutation and persistence capabilities for committed snapshots", () => {

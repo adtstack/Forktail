@@ -22,7 +22,9 @@ import {
   listGitRefs,
   mergeTexts,
   openGitRevisionCompare,
+  openGitIndexCompare,
   readTextFile,
+  readGitStatus,
   revealPath,
   restoreTextFileBackup,
   resolveGitRevision,
@@ -39,9 +41,12 @@ import {
   gitRevisionFieldWithInput,
   gitRevisionFromRepositoryHead,
   gitChangedFileKey,
+  gitWorkingTreeRowKey,
+  gitWorkingTreeRows,
   isCurrentGitRequest,
   sameResolvedGitRevisions,
   selectedGitChangedFileKeyAfterRefresh,
+  selectedGitWorkingTreeRowKeyAfterRefresh,
   type GitChangedFileFilter,
   type GitChangedFileLoadState,
   type GitChangedFileStatusFilter,
@@ -49,8 +54,16 @@ import {
   type GitRevisionFieldState,
   type GitRevisionSide,
   type GitSnapshotSelectionState,
+  type GitWorkingTreeFilter,
+  type GitWorkingTreeLoadState,
+  type GitWorkingTreeRow,
+  type GitWorkingTreeSection,
 } from "./core/gitSession";
-import type { GitChangedFile, GitRepositorySummary } from "./core/gitModels";
+import type {
+  GitChangedFile,
+  GitIndexComparison,
+  GitRepositorySummary,
+} from "./core/gitModels";
 import { buildDiffReport, compareReportDefaultPath } from "./core/diffReport";
 import type { CompareDropSide } from "./core/dropPaths";
 import {
@@ -219,6 +232,18 @@ export default function App() {
     useState<Set<string>>(() => new Set());
   const [gitSnapshotSelectionState, setGitSnapshotSelectionState] =
     useState<GitSnapshotSelectionState>({ kind: "idle" });
+  const [gitWorkingTreeState, setGitWorkingTreeState] =
+    useState<GitWorkingTreeLoadState>({ kind: "idle" });
+  const [gitWorkingTreeFilter, setGitWorkingTreeFilter] = useState<GitWorkingTreeFilter>({
+    query: "",
+    section: "all",
+  });
+  const [gitWorkingTreeComparison, setGitWorkingTreeComparison] =
+    useState<GitIndexComparison>("headToWorkingTree");
+  const [selectedGitWorkingTreeKey, setSelectedGitWorkingTreeKey] =
+    useState<string | null>(null);
+  const [gitWorkingTreeSnapshotState, setGitWorkingTreeSnapshotState] =
+    useState<GitSnapshotSelectionState>({ kind: "idle" });
   const [savedMergeResult, setSavedMergeResult] = useState<string | null>(null);
   const [mergeOutputVersion, setMergeOutputVersion] = useState<WritePrecondition | null>(null);
   const [mergeRecoveryDraft, setMergeRecoveryDraft] = useState<MergeRecoveryDraft | null>(null);
@@ -258,6 +283,8 @@ export default function App() {
   const nextGitJobId = useRef(0);
   const nextGitRevisionValidationId = useRef(0);
   const activeGitChangedFilesRequestId = useRef(0);
+  const activeGitWorkingTreeRequestId = useRef(0);
+  const activeGitWorkingTreeJob = useRef<{ repositorySessionId: string; jobId: number } | null>(null);
   const activeGitSnapshotRequestId = useRef(0);
   const activeGitSnapshotJob = useRef<{ repositorySessionId: string; jobId: number } | null>(null);
   const attemptedActiveSessionRestore = useRef(false);
@@ -824,10 +851,20 @@ export default function App() {
     }
   }, []);
 
+  const cancelActiveGitWorkingTreeStatus = useCallback(() => {
+    activeGitWorkingTreeRequestId.current += 1;
+    const activeJob = activeGitWorkingTreeJob.current;
+    activeGitWorkingTreeJob.current = null;
+    if (activeJob) {
+      void cancelGitJob(activeJob.repositorySessionId, activeJob.jobId).catch(() => {});
+    }
+  }, []);
+
   const resetGitRevisionReview = useCallback((
     repository: GitRepositorySummary | null,
   ) => {
     cancelActiveGitSnapshot();
+    cancelActiveGitWorkingTreeStatus();
     activeGitRefRequestId.current += 1;
     activeGitChangedFilesRequestId.current += 1;
     const requestGeneration = nextGitRevisionValidationId.current + 1;
@@ -838,13 +875,18 @@ export default function App() {
     setSelectedGitChangedFileKey(null);
     setViewedGitChangedFileKeys(new Set());
     setGitSnapshotSelectionState({ kind: "idle" });
+    setGitWorkingTreeState({ kind: "idle" });
+    setGitWorkingTreeFilter({ query: "", section: "all" });
+    setGitWorkingTreeComparison("headToWorkingTree");
+    setSelectedGitWorkingTreeKey(null);
+    setGitWorkingTreeSnapshotState({ kind: "idle" });
     setGitRevisionFields({
       left: emptyGitRevisionField(requestGeneration),
       right: repository
         ? gitRevisionFromRepositoryHead(repository, requestGeneration)
         : emptyGitRevisionField(requestGeneration),
     });
-  }, [cancelActiveGitSnapshot]);
+  }, [cancelActiveGitSnapshot, cancelActiveGitWorkingTreeStatus]);
 
   useEffect(() => {
     if (mode === "git" || (mode === "compare" && compareSession?.origin === "git")) return;
@@ -912,17 +954,96 @@ export default function App() {
     };
   }, [gitRepositoryState, languageMode, mode]);
 
+  const refreshGitWorkingTree = useCallback(() => {
+    const currentRepository = gitRepositoryStateRef.current;
+    if (
+      currentRepository?.kind !== "ready"
+      || currentRepository.repository.head.kind === "unborn"
+    ) return;
+    const repositorySessionId = currentRepository.repository.sessionId;
+    cancelActiveGitWorkingTreeStatus();
+    cancelActiveGitSnapshot();
+    activeGitChangedFilesRequestId.current += 1;
+    const requestGeneration = activeGitWorkingTreeRequestId.current + 1;
+    activeGitWorkingTreeRequestId.current = requestGeneration;
+    const jobId = nextGitJobId.current + 1;
+    nextGitJobId.current = jobId;
+    activeGitWorkingTreeJob.current = { repositorySessionId, jobId };
+    setGitWorkingTreeState({ kind: "loading", requestGeneration });
+    setGitWorkingTreeSnapshotState({ kind: "idle" });
+    setGitChangedFileState({ kind: "idle" });
+    setSelectedGitChangedFileKey(null);
+    setGitSnapshotSelectionState({ kind: "idle" });
+
+    void readGitStatus(repositorySessionId, {
+      hardLimit: 10_000,
+      requestGeneration,
+    }, jobId).then((snapshot) => {
+      const repository = gitRepositoryStateRef.current;
+      if (
+        !isCurrentGitRequest(activeGitWorkingTreeRequestId.current, requestGeneration)
+        || repository?.kind !== "ready"
+        || repository.repository.sessionId !== repositorySessionId
+      ) return;
+      const rows = gitWorkingTreeRows(snapshot);
+      setGitWorkingTreeState({ kind: "ready", requestGeneration, snapshot });
+      setSelectedGitWorkingTreeKey((current) =>
+        selectedGitWorkingTreeRowKeyAfterRefresh(current, rows));
+    }).catch((caught) => {
+      const repository = gitRepositoryStateRef.current;
+      if (
+        !isCurrentGitRequest(activeGitWorkingTreeRequestId.current, requestGeneration)
+        || repository?.kind !== "ready"
+        || repository.repository.sessionId !== repositorySessionId
+      ) return;
+      setGitWorkingTreeState({
+        kind: "error",
+        requestGeneration,
+        message: errorMessage(caught, languageMode),
+      });
+    }).finally(() => {
+      if (
+        activeGitWorkingTreeJob.current?.repositorySessionId === repositorySessionId
+        && activeGitWorkingTreeJob.current.jobId === jobId
+      ) {
+        activeGitWorkingTreeJob.current = null;
+      }
+    });
+  }, [
+    cancelActiveGitSnapshot,
+    cancelActiveGitWorkingTreeStatus,
+    languageMode,
+  ]);
+
+  useEffect(() => {
+    if (
+      mode !== "git"
+      || gitRepositoryState?.kind !== "ready"
+      || gitRepositoryState.repository.head.kind === "unborn"
+    ) return;
+    refreshGitWorkingTree();
+    return cancelActiveGitWorkingTreeStatus;
+  }, [
+    cancelActiveGitWorkingTreeStatus,
+    gitRepositoryState,
+    mode,
+    refreshGitWorkingTree,
+  ]);
+
   useEffect(() => {
     const repository = gitRepositoryState?.kind === "ready"
       ? gitRepositoryState.repository
       : null;
     const leftRevision = gitRevisionFields.left.revision;
     const rightRevision = gitRevisionFields.right.revision;
+    const workingTreeStatusSettled =
+      gitWorkingTreeState.kind === "ready" || gitWorkingTreeState.kind === "error";
     if (
       !repository
       || !leftRevision
       || !rightRevision
       || sameResolvedGitRevisions(leftRevision, rightRevision)
+      || !workingTreeStatusSettled
     ) {
       activeGitChangedFilesRequestId.current += 1;
       cancelActiveGitSnapshot();
@@ -986,6 +1107,9 @@ export default function App() {
     gitRepositoryState,
     gitRevisionFields.left.revision,
     gitRevisionFields.right.revision,
+    gitWorkingTreeState.kind,
+    gitWorkingTreeState.kind === "ready" ? gitWorkingTreeState.snapshot.generation : null,
+    gitWorkingTreeState.kind === "error" ? gitWorkingTreeState.requestGeneration : null,
     languageMode,
   ]);
 
@@ -1077,6 +1201,7 @@ export default function App() {
     const fileKey = gitChangedFileKey(changedFile);
     activeGitSnapshotJob.current = { repositorySessionId, jobId };
     setSelectedGitChangedFileKey(fileKey);
+    setGitWorkingTreeSnapshotState({ kind: "idle" });
     setGitSnapshotSelectionState({ kind: "loading", fileKey, requestGeneration });
 
     void openGitRevisionCompare(repositorySessionId, {
@@ -1104,6 +1229,7 @@ export default function App() {
           fileKey,
           requestGeneration,
           contentStates: view.contentStates,
+          unavailableReasons: view.unavailableReasons,
         });
         return;
       }
@@ -1138,6 +1264,83 @@ export default function App() {
     gitChangedFileState,
     gitRevisionFields.left.revision,
     gitRevisionFields.right.revision,
+    languageMode,
+    setCleanCompareSession,
+  ]);
+
+  const selectGitWorkingTreeFile = useCallback((row: GitWorkingTreeRow) => {
+    const repository = gitRepositoryStateRef.current;
+    if (
+      repository?.kind !== "ready"
+      || gitWorkingTreeState.kind !== "ready"
+      || row.section === "unmerged"
+    ) return;
+
+    cancelActiveGitSnapshot();
+    const requestGeneration = activeGitSnapshotRequestId.current + 1;
+    activeGitSnapshotRequestId.current = requestGeneration;
+    const jobId = nextGitJobId.current + 1;
+    nextGitJobId.current = jobId;
+    const repositorySessionId = repository.repository.sessionId;
+    const fileKey = gitWorkingTreeRowKey(row);
+    activeGitSnapshotJob.current = { repositorySessionId, jobId };
+    setSelectedGitWorkingTreeKey(fileKey);
+    setGitSnapshotSelectionState({ kind: "idle" });
+    setGitWorkingTreeSnapshotState({ kind: "loading", fileKey, requestGeneration });
+
+    void openGitIndexCompare(repositorySessionId, {
+      opaquePathId: row.path.opaqueId,
+      comparison: gitWorkingTreeComparison,
+      generation: gitWorkingTreeState.snapshot.generation,
+    }, jobId).then((snapshotSession) => {
+      const currentRepository = gitRepositoryStateRef.current;
+      if (
+        !isCurrentGitRequest(activeGitSnapshotRequestId.current, requestGeneration)
+        || currentRepository?.kind !== "ready"
+        || currentRepository.repository.sessionId !== repositorySessionId
+      ) return;
+
+      const view = adaptGitCompareSession(snapshotSession);
+      if (view.kind === "notice") {
+        setGitWorkingTreeSnapshotState({
+          kind: "notice",
+          fileKey,
+          requestGeneration,
+          contentStates: view.contentStates,
+          unavailableReasons: view.unavailableReasons,
+        });
+        return;
+      }
+
+      setGitWorkingTreeSnapshotState({ kind: "idle" });
+      setCleanCompareSession(view.session);
+      setCompareBackTarget("git");
+      setMode("compare");
+    }).catch((caught) => {
+      const currentRepository = gitRepositoryStateRef.current;
+      if (
+        !isCurrentGitRequest(activeGitSnapshotRequestId.current, requestGeneration)
+        || currentRepository?.kind !== "ready"
+        || currentRepository.repository.sessionId !== repositorySessionId
+      ) return;
+      setGitWorkingTreeSnapshotState({
+        kind: "error",
+        fileKey,
+        requestGeneration,
+        message: errorMessage(caught, languageMode),
+      });
+    }).finally(() => {
+      if (
+        activeGitSnapshotJob.current?.repositorySessionId === repositorySessionId
+        && activeGitSnapshotJob.current.jobId === jobId
+      ) {
+        activeGitSnapshotJob.current = null;
+      }
+    });
+  }, [
+    cancelActiveGitSnapshot,
+    gitWorkingTreeComparison,
+    gitWorkingTreeState,
     languageMode,
     setCleanCompareSession,
   ]);
@@ -2057,6 +2260,13 @@ export default function App() {
               viewedKeys: viewedGitChangedFileKeys,
               snapshotState: gitSnapshotSelectionState,
             }}
+            workingTreeReview={{
+              state: gitWorkingTreeState,
+              filter: gitWorkingTreeFilter,
+              comparison: gitWorkingTreeComparison,
+              selectedKey: selectedGitWorkingTreeKey,
+              snapshotState: gitWorkingTreeSnapshotState,
+            }}
             onBack={leaveGitRepository}
             onOpenRepository={openGitRepository}
             onCancelOpen={leaveGitRepository}
@@ -2069,6 +2279,15 @@ export default function App() {
               setGitChangedFileFilter((current) => ({ ...current, status }))
             }
             onSelectChangedFile={selectGitChangedFile}
+            onRefreshWorkingTree={refreshGitWorkingTree}
+            onWorkingTreeFilterChange={(query) =>
+              setGitWorkingTreeFilter((current) => ({ ...current, query }))
+            }
+            onWorkingTreeSectionFilterChange={(section: GitWorkingTreeSection) =>
+              setGitWorkingTreeFilter((current) => ({ ...current, section }))
+            }
+            onWorkingTreeComparisonChange={setGitWorkingTreeComparison}
+            onSelectWorkingTreeFile={selectGitWorkingTreeFile}
           />
         )}
 

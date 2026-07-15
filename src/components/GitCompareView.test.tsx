@@ -5,6 +5,7 @@ import type { GitRepositorySummary } from "../core/gitModels";
 import type {
   GitChangedFilesReviewState,
   GitRevisionReviewState,
+  GitWorkingTreeReviewState,
 } from "./GitCompareView";
 import {
   GitCompareView,
@@ -33,6 +34,7 @@ function renderGitCompareView(
   languageMode: "en" | "ko" = "en",
   revisionReview?: GitRevisionReviewState,
   changedFilesReview?: GitChangedFilesReviewState,
+  workingTreeReview?: GitWorkingTreeReviewState,
 ): string {
   return renderToStaticMarkup(
     <GitCompareView
@@ -40,6 +42,7 @@ function renderGitCompareView(
       languageMode={languageMode}
       revisionReview={revisionReview}
       changedFilesReview={changedFilesReview}
+      workingTreeReview={workingTreeReview}
       onBack={() => {}}
       onOpenRepository={() => {}}
       onCancelOpen={() => {}}
@@ -48,6 +51,11 @@ function renderGitCompareView(
       onChangedFileFilterChange={() => {}}
       onChangedFileStatusFilterChange={() => {}}
       onSelectChangedFile={() => {}}
+      onRefreshWorkingTree={() => {}}
+      onWorkingTreeFilterChange={() => {}}
+      onWorkingTreeSectionFilterChange={() => {}}
+      onWorkingTreeComparisonChange={() => {}}
+      onSelectWorkingTreeFile={() => {}}
     />,
   );
 }
@@ -253,6 +261,53 @@ describe("GitCompareView repository shell", () => {
     expect(markup).toContain("Changed files");
     expect(markup).toContain("src/feature.ts");
     expect(markup).toContain("role=\"option\"");
+  });
+
+  it("exposes working-tree status and the three-state selector independently of revision-pair input", () => {
+    const markup = renderGitCompareView(
+      { kind: "ready", repository: branchRepository },
+      "en",
+      undefined,
+      undefined,
+      {
+        state: {
+          kind: "ready",
+          requestGeneration: 8,
+          snapshot: {
+            branch: {
+              state: {
+                kind: "branch",
+                displayName: "main",
+                objectId: { algorithm: "sha1", hex: "a".repeat(40) },
+              },
+              upstream: null,
+              ahead: null,
+              behind: null,
+            },
+            staged: [],
+            unstaged: [],
+            untracked: [{
+              opaqueId: "repository-session-1:path:8:1",
+              displayPath: "new.txt",
+              utf8Path: "new.txt",
+            }],
+            unmerged: [],
+            truncated: false,
+            totalEntries: 1,
+            generation: 8,
+          },
+        },
+        filter: { query: "", section: "all" },
+        comparison: "headToWorkingTree",
+        selectedKey: null,
+        snapshotState: { kind: "idle" },
+      },
+    );
+
+    expect(markup).toContain("Working tree changes");
+    expect(markup).toContain("new.txt");
+    expect(markup).toContain("HEAD ↔ working tree");
+    expect(markup).toContain("Refresh status");
   });
 
   it("uses wrapping and scroll containment needed at 200 percent zoom", () => {

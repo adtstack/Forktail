@@ -1,4 +1,4 @@
-import type { GitRepositorySummary } from "../core/gitModels";
+import type { GitIndexComparison, GitRepositorySummary } from "../core/gitModels";
 import type { GitChangedFile } from "../core/gitModels";
 import type {
   GitChangedFileFilter,
@@ -7,10 +7,15 @@ import type {
   GitRefLoadState,
   GitRevisionFieldState,
   GitSnapshotSelectionState,
+  GitWorkingTreeFilter,
+  GitWorkingTreeLoadState,
+  GitWorkingTreeRow,
+  GitWorkingTreeSection,
 } from "../core/gitSession";
 import type { AppLanguage } from "../core/settings";
 import { GitChangedFiles } from "./GitChangedFiles";
 import { GitRevisionSelector } from "./GitRevisionSelector";
+import { GitWorkingTreeFiles } from "./GitWorkingTreeFiles";
 
 export type GitRepositoryScreenState =
   | { kind: "loading"; requestId: number }
@@ -49,6 +54,7 @@ interface GitCompareViewProps {
   languageMode?: AppLanguage;
   revisionReview?: GitRevisionReviewState;
   changedFilesReview?: GitChangedFilesReviewState;
+  workingTreeReview?: GitWorkingTreeReviewState;
   onBack: () => void;
   onOpenRepository: () => void;
   onCancelOpen: () => void;
@@ -57,6 +63,11 @@ interface GitCompareViewProps {
   onChangedFileFilterChange?: (query: string) => void;
   onChangedFileStatusFilterChange?: (status: GitChangedFileStatusFilter) => void;
   onSelectChangedFile?: (entry: GitChangedFile) => void;
+  onRefreshWorkingTree?: () => void;
+  onWorkingTreeFilterChange?: (query: string) => void;
+  onWorkingTreeSectionFilterChange?: (section: GitWorkingTreeSection) => void;
+  onWorkingTreeComparisonChange?: (comparison: GitIndexComparison) => void;
+  onSelectWorkingTreeFile?: (row: GitWorkingTreeRow) => void;
 }
 
 export interface GitRevisionReviewState {
@@ -71,6 +82,14 @@ export interface GitChangedFilesReviewState {
   filter: GitChangedFileFilter;
   selectedKey: string | null;
   viewedKeys: ReadonlySet<string>;
+  snapshotState: GitSnapshotSelectionState;
+}
+
+export interface GitWorkingTreeReviewState {
+  state: GitWorkingTreeLoadState;
+  filter: GitWorkingTreeFilter;
+  comparison: GitIndexComparison;
+  selectedKey: string | null;
   snapshotState: GitSnapshotSelectionState;
 }
 
@@ -128,6 +147,7 @@ export function GitCompareView({
   languageMode = "en",
   revisionReview,
   changedFilesReview,
+  workingTreeReview,
   onBack,
   onOpenRepository,
   onCancelOpen,
@@ -136,6 +156,11 @@ export function GitCompareView({
   onChangedFileFilterChange,
   onChangedFileStatusFilterChange,
   onSelectChangedFile,
+  onRefreshWorkingTree,
+  onWorkingTreeFilterChange,
+  onWorkingTreeSectionFilterChange,
+  onWorkingTreeComparisonChange,
+  onSelectWorkingTreeFile,
 }: GitCompareViewProps) {
   const text = GIT_COMPARE_TEXT[languageMode];
 
@@ -204,6 +229,29 @@ export function GitCompareView({
           {repository.isShallow && <span>{text.shallow}</span>}
         </div>
       </section>
+
+      {repository.head.kind !== "unborn"
+        && workingTreeReview
+        && workingTreeReview.state.kind !== "idle"
+        && onRefreshWorkingTree
+        && onWorkingTreeFilterChange
+        && onWorkingTreeSectionFilterChange
+        && onWorkingTreeComparisonChange
+        && onSelectWorkingTreeFile && (
+        <GitWorkingTreeFiles
+          state={workingTreeReview.state}
+          filter={workingTreeReview.filter}
+          comparison={workingTreeReview.comparison}
+          selectedKey={workingTreeReview.selectedKey}
+          snapshotState={workingTreeReview.snapshotState}
+          languageMode={languageMode}
+          onRefresh={onRefreshWorkingTree}
+          onFilterChange={onWorkingTreeFilterChange}
+          onSectionFilterChange={onWorkingTreeSectionFilterChange}
+          onComparisonChange={onWorkingTreeComparisonChange}
+          onSelect={onSelectWorkingTreeFile}
+        />
+      )}
 
       {repository.head.kind === "unborn" ? (
         <section className="git-review-empty" role="status">
