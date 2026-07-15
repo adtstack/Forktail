@@ -47,7 +47,8 @@ repository-aware Git 작업은 다음 조건을 만족한 뒤 시작한다.
 - `MRG-012`: 기본 Git marker와 base 없는 marker를 안전하게 파싱함
 - `MRG-014`: 세 OS packaged `git mergetool` lifecycle smoke가 끝남
 - `INT-002`: 자동 `.gitconfig` 수정 없이 안전한 설정 안내가 확정됨
-- Git CLI를 child process로 실행하는 보안·배포 결정을 ADR로 승인함
+- `GIT-000`: Git CLI 2.45.0+와 fail-closed capability gate, positive allowlist,
+  no-network/no-mutation runner 결정을 `ADR-010`으로 승인함
 
 현재 코드의 `--mergetool` 인자 parser는 scaffold다. 다음이 확인되기 전에는 완성된 Git integration으로 표시하지 않는다.
 
@@ -395,7 +396,9 @@ mode `120000` symlink와 `160000` submodule는 blob/commit type만 보고 일반
 
 ### 9.1 Positive allowlist
 
-운영 runner는 자유 형식 command를 받지 않는다. 내부 enum 또는 전용 service만 다음 read-only command를 만들 수 있다.
+운영 runner는 자유 형식 command나 subcommand name을 받지 않는다. 내부 enum 또는 전용 service의 typed
+product operation만 아래 Git builtin과 고정 option 조합을 만들 수 있다. 각 operation은 exact argv
+constructor를 소유하고, 같은 builtin이라도 allowlist에 없는 option 조합은 시작 전에 거절한다.
 
 ```text
 version
@@ -425,7 +428,7 @@ denylist는 추가 방어일 뿐 주 경계가 아니다. 테스트 fixture help
 
 ### 9.3 공통 옵션과 환경
 
-가능한 Git 버전에서는 다음 global option을 사용한다.
+지원되는 모든 Git 실행에는 다음 global option을 필수로 사용한다.
 
 ```text
 --no-pager
@@ -458,7 +461,23 @@ Git executable을 absolute path로 먼저 확정한 뒤 child 환경은 `env_cle
 
 Git의 `safe.directory` 오류를 `safe.directory=*`로 우회하지 않는다. 소유권이 의심되는 repository는 사용자가 terminal에서 신뢰 여부를 결정하게 한다.
 
-Git 최소 버전은 `GIT-003`에서 세 OS 호환성 matrix로 정한다. option이 없는 구버전을 조용히 약한 모드로 실행하지 않는다.
+### 9.4 최소 버전과 capability gate (`GIT-000`)
+
+최소 지원 버전은 **Git 2.45.0**이다. 이 버전은 필수 safety option인 `--no-lazy-fetch`를 제공하는
+첫 문서화 버전이며, 더 낮은 버전에서 option을 빼고 실행하는 fallback은 없다. 숫자 비교만으로 vendor
+build를 신뢰하지 않고 다음 capability를 fail-closed로 확인한다.
+
+| 시점 | 필수 probe | 실패 처리 |
+|---|---|---|
+| executable discovery | absolute regular executable, parseable `git version >= 2.45.0` | `GIT_NOT_FOUND` 또는 `GIT_VERSION_UNSUPPORTED` |
+| runner bootstrap | `--no-pager --no-lazy-fetch --no-optional-locks --no-replace-objects --literal-pathspecs`를 적용한 `version` | runner를 생성하지 않음 |
+| repository/revision service | `rev-parse --verify --end-of-options`, object format, porcelain v2와 필요한 NUL output | 해당 service를 활성화하지 않음 |
+| batch blob optimization | `cat-file --batch-check -Z`의 input/output NUL framing | 단건 reader 유지; ambiguous `-z` fallback 금지 |
+
+probe는 exit status와 bounded machine output만 사용하고 localized help/stderr 문구를 파싱하지 않는다.
+필수 service capability가 없으면 `GIT_VERSION_UNSUPPORTED`의 행동 가능한 message를 반환하며, feature를
+부분 성공으로 표시하지 않는다. 세 OS packaged matrix는 `GIT-003`에서 이 결정을 실제 배포 Git으로
+재검증한다.
 
 ## 10. 기준 command recipes
 

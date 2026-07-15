@@ -2,7 +2,13 @@
 
 이 문서는 forktail의 Git 연동을 설계·구현·검토할 때 기준으로 삼을 공식 문서와 안전한 호출 계약을 정리한다. Git 저장소 전체 기능을 앱에 넣기 위한 문서가 아니라, 로컬 비교와 병합에 필요한 정보를 Git executable에서 예측 가능하게 읽기 위한 참고 자료다.
 
-링크는 Git 공식 최신 문서를 가리킨다. 구현 이슈에서는 최소 지원 Git 버전을 별도로 정하고, 그 버전에서도 사용할 옵션을 확인해야 한다.
+링크는 Git 공식 최신 문서를 가리킨다. `ADR-010`/`GIT-000`에서 최소 지원 버전을 **Git 2.45.0**으로
+고정했다. Git 2.45 문서는 `--no-lazy-fetch`를 제공하지만 2.44 문서는 제공하지 않으므로 이 safety
+option을 빼는 하위 버전 fallback은 허용하지 않는다. version 문자열과 실제 capability를 모두 확인한다.
+
+- [Git 2.45.0 `git` manual](https://git-scm.com/docs/git/2.45.0)
+- [Git 2.44.0 `git` manual](https://git-scm.com/docs/git/2.44.0)
+- [Git 2.42.0 `cat-file -Z` manual](https://git-scm.com/docs/git-cat-file/2.42.0)
 
 ## 1. 기본 원칙
 
@@ -23,6 +29,7 @@
 git --no-pager \
     --no-lazy-fetch \
     --no-optional-locks \
+    --no-replace-objects \
     --literal-pathspecs \
     -C <repository-root> \
     <command> <args...>
@@ -36,7 +43,22 @@ git --no-pager \
 - `--literal-pathspecs`: glob과 pathspec magic을 전역으로 끈다. revision 해석을 제한하는 옵션은 아니다.
 - `-C <path>`: shell의 현재 디렉터리를 바꾸지 않고 지정한 저장소에서 실행한다.
 
-필요하면 `--no-replace-objects`로 replacement ref 적용도 끈다. 다만 UI가 사용자가 보는 Git 결과를 그대로 보여줄지, 물리 object를 보여줄지 제품 계약에서 먼저 결정한다.
+`--no-replace-objects`로 replacement ref 적용도 끈다. immutable object identity가 같은 session에서 다른
+내용을 가리키지 않게 하는 `ADR-010`의 필수 profile이며 선택 option으로 생략하지 않는다.
+
+### 2.1 최소 버전과 required capability
+
+| Capability | Gate | 비고 |
+|---|---|---|
+| Git version | `>= 2.45.0` | semantic version과 vendor suffix를 분리해 판정 |
+| global safety profile | `--no-pager`, `--no-lazy-fetch`, `--no-optional-locks`, `--no-replace-objects`, `--literal-pathspecs` | 한 option이라도 거절되면 fail closed |
+| revision boundary | `rev-parse --verify --end-of-options` | raw input을 후속 command에 재사용하지 않음 |
+| machine path output | command별 `-z`/exact `%00` framing | partial/truncated record는 실패 |
+| object format | SHA-1/SHA-256 full identity | 40자 고정 금지 |
+| batch object framing | `cat-file -Z` | batch 최적화 활성화 전 probe; legacy `-z` output 파싱 금지 |
+
+probe는 shell이나 사용자 repository mutation 없이 typed runner가 실행한다. version gate가 통과해도
+vendor build가 capability를 거절하면 `GIT_VERSION_UNSUPPORTED`로 처리하고 약한 호출을 재시도하지 않는다.
 
 ## 3. 입력 경계와 기계 파싱
 
@@ -72,7 +94,10 @@ git rev-parse --verify --end-of-options '<candidate>^{commit}'
 - rename/copy처럼 한 record에 두 path가 있는 형식은 해당 command의 `-z` schema를 그대로 따른다.
 - path를 손실 있는 UTF-8 문자열로 바꾸기 전에 OS path 표현 정책을 적용한다.
 
-[`git cat-file`](https://git-scm.com/docs/git-cat-file)의 batch mode에서는 최신 문서 기준 `-Z`가 입력과 출력을 모두 NUL-delimited로 만든다. 기존 `-z`는 입력만 NUL-delimited라 출력이 모호할 수 있어 deprecated 상태다. 최소 지원 Git 버전이 `-Z`를 제공하지 않으면 version gate와 별도 legacy framing test가 필요하다.
+[`git cat-file`](https://git-scm.com/docs/git-cat-file)의 batch mode에서는 `-Z`가 입력과 출력을 모두
+NUL-delimited로 만든다. 기존 `-z`는 입력만 NUL-delimited라 output이 모호할 수 있어 사용하지 않는다.
+batch `-Z` probe가 실패하면 legacy framing을 추측하지 않고 단건 `cat-file -t`, `-s`, `blob` reader를
+유지한다.
 
 [`git for-each-ref`](https://git-scm.com/docs/git-for-each-ref)는 command-wide `-z`가 없다. `--format`의 `%00`으로 NUL을 넣을 수 있으므로 exact format과 record framing을 별도 계약으로 고정한다.
 
@@ -357,7 +382,7 @@ custom merge driver      : %O    %A     %B      (%A에 결과 기록, %P는 path
 
 ## 5. forktail 구현 체크리스트
 
-- [ ] 최소 지원 Git 버전과 필요한 옵션(`cat-file -Z` 포함)을 명시한다.
+- [x] 최소 지원 Git 2.45.0과 필요한 option/capability(`cat-file -Z` 포함)를 `ADR-010`에 명시한다.
 - [ ] Git executable 경로를 argv 기반으로 실행하고 shell command 문자열을 만들지 않는다.
 - [ ] 사용자 revision은 `rev-parse --verify --end-of-options`와 expected type으로 검증한다.
 - [ ] path 출력은 지원되는 모든 command에서 `-z`로 받고 byte/NUL parser를 테스트한다.

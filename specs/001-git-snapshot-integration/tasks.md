@@ -19,7 +19,7 @@
 
 **Purpose**: repository-aware Git을 시작하기 전에 외부 tool lifecycle과 CLI-first 결정을 고정한다.
 
-- [ ] T001 GIT-000 최소 Git version/capability, CLI-first, allowlist, no-network/no-mutation 결정을 `docs/10_ADR.md`, `docs/17_GIT_INTEGRATION.md`, `docs/21_GIT_REFERENCES.md`에 기록한다
+- [X] T001 GIT-000 최소 Git version/capability, CLI-first, allowlist, no-network/no-mutation 결정을 `docs/10_ADR.md`, `docs/17_GIT_INTEGRATION.md`, `docs/21_GIT_REFERENCES.md`, `research.md`에 기록한다
 - [ ] T002 MRG-014 Windows/macOS/Linux packaged mergetool save/no-save/temp/wait 증거를 `VALIDATION.md`와 `docs/20_GIT_TEST_PLAN.md`에 기록한다
 - [ ] T003 INT-002 difftool/mergetool OS별 config 출력과 `trustExitCode=false` 안내를 `docs/14_PRODUCT_GAP_ROADMAP.md`, `README.md`, `VALIDATION.md`에 확정한다
 

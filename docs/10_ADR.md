@@ -154,3 +154,53 @@ Tauri updater signature와 OS 코드서명은 별개로 모두 사용한다. 앱
 - static manifest는 단계적 rollout과 안전한 automatic downgrade를 제공하지 않는다. 초기 beta는 수동 배포하고, rollback은 higher-version corrective release 또는 수동 installer를 사용한다.
 - versioned artifact는 immutable이며, `stable/latest.json`만 가변 pointer다.
 - 구체적 준비물, artifact layout, CI 순서, incident 대응, 검증은 `docs/16_R2_UPDATER_RUNBOOK.md`가 진실의 원천이다.
+
+## ADR-010: Repository-aware Git은 Git CLI 2.45.0+의 fail-closed read-only runner를 사용
+
+**상태:** Accepted (`GIT-000`)
+
+### Context
+
+Repository-aware 비교는 linked worktree, packed/reftable refs, partial clone, SHA-256 object처럼 Git이
+소유한 저장 형식을 직접 다시 구현하지 않고 읽어야 한다. 동시에 조회가 lazy fetch, credential prompt,
+optional index write, external diff/textconv/filter 실행 또는 repository mutation을 만들지 않아야 한다.
+libgit2/JGit fallback이나 `.git` 직접 파싱은 별도 동작·패키징·보안 경계를 만들며, 자유 형식 argv를
+frontend에 노출하면 allowlist를 우회할 수 있다.
+
+Git 2.45.0은 필수 전역 안전 옵션인 `--no-lazy-fetch`를 문서화한 첫 릴리스다. Git 2.44 문서에는 이
+옵션이 없으므로 forktail의 최소 지원 버전은 **2.45.0**으로 고정한다. `cat-file -Z`는 이 최소 버전에
+포함되지만 초기 단건 blob reader의 필수 최적화는 아니며, batch reader를 활성화하기 전에 별도
+capability probe를 통과해야 한다.
+
+### Decision
+
+- PATH에서 discovery했거나 사용자가 선택한 local Git executable을 absolute regular-file path로 확정하고
+  Git CLI만 사용한다.
+  libgit2/JGit/direct-`.git` fallback은 두지 않는다.
+- 실행 시 semantic version이 2.45.0 이상인지 확인한 뒤, 필요한 전역 옵션을 실제 `git ... version`
+  invocation으로 probe한다. version 또는 capability 중 하나라도 부족하면 `GIT_VERSION_UNSUPPORTED`로
+  fail closed하며 약한 profile로 재시도하지 않는다.
+- revision 검증, NUL framing, porcelain v2, object format, `cat-file -Z`처럼 subcommand별 기능은 해당
+  service가 처음 필요로 할 때 성공/실패 exit status와 exact machine output으로 probe한다. help/stderr
+  문구나 locale 문자열을 capability 판정에 사용하지 않는다.
+- production runner는 typed read operation의 positive allowlist만 받는다. executable, subcommand,
+  option, environment, raw path bytes 또는 argv를 frontend request로 받지 않는다. fixture mutation helper는
+  production module/type에서 분리한다.
+- child는 shell이나 Tauri shell plugin 없이 executable과 argv 배열로 실행한다. 환경을 clear한 뒤 검토된
+  OS boot/temp/locale 값과 `GIT_TERMINAL_PROMPT=0`, `GIT_OPTIONAL_LOCKS=0`,
+  `GIT_NO_LAZY_FETCH=1`, `GIT_LITERAL_PATHSPECS=1`, `GIT_PAGER=cat`만 재구성한다.
+- 모든 조회에 `--no-pager --no-lazy-fetch --no-optional-locks --no-replace-objects
+  --literal-pathspecs`를 적용한다. status는 fsmonitor를 끄고, diff는 external diff와 textconv를 끈다.
+  blob은 raw object만 읽으며 filter/LFS/submodule helper를 실행하지 않는다.
+- production allowlist에는 checkout/switch/restore/reset/clean/add/rm/mv/commit/merge/rebase/
+  cherry-pick/revert/continue/stash/config/worktree/clone/fetch/pull/push/remote/submodule update 또는
+  maintenance operation이 존재하지 않는다. conflict Result와 patch Save As는 Git runner 밖의 기존
+  safe writer를 통한 명시적 사용자 쓰기만 허용한다.
+
+### Consequences
+
+- OS에 설치된 Git이 2.45.0보다 낮거나 vendor build가 required capability를 제공하지 않으면 기능을
+  숨기지 않고 설치/업데이트가 필요한 행동 가능한 오류를 표시한다.
+- Git 자체가 repository format 차이를 처리하고, 앱은 process/DTO/path identity 경계에 집중할 수 있다.
+- 최소 버전을 올리거나 allowlist operation을 추가하려면 공식 문서 근거, 세 OS capability matrix,
+  fake-runner no-network/no-mutation 회귀 테스트와 이 ADR 갱신이 필요하다.

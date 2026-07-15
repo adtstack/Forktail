@@ -17,16 +17,19 @@ and future repository formats. One process boundary also keeps the current depen
 
 ## Decision 2: Capability gate plus recorded minimum version
 
-**Decision**: `GIT-000` records a numeric minimum Git version only after Windows/macOS/Linux option probes. Startup
-checks both that version and the required capabilities. Missing safety options fail closed instead of running a weaker
-profile. Batch `cat-file -Z` remains an optimization, not an MVP requirement.
+**Decision**: `GIT-000` records Git 2.45.0 as the numeric minimum because the official 2.45 manual is the first to
+document the required `--no-lazy-fetch` global safety option. `GIT-003` then probes the Windows/macOS/Linux vendor
+builds and raises, but never lowers, that baseline if a required capability is unavailable. Startup checks both the
+version and required capabilities. Missing safety options fail closed instead of running a weaker profile. Batch
+`cat-file -Z` remains an optimization, not an MVP requirement and falls back to the single-object reader rather than
+legacy ambiguous batch framing.
 
 **Rationale**: A version string alone does not guarantee vendor builds expose the required behavior, while silently
 dropping `--no-lazy-fetch`, `--end-of-options`, or machine-output framing would weaken safety.
 
 **Alternatives considered**:
 
-- Hardcode the developer machine version: rejected as non-portable.
+- Hardcode the developer machine version: rejected as non-portable; the baseline comes from official versioned manuals.
 - Support older Git by omitting unavailable safety options: rejected because behavior would vary and might fetch or misparse.
 - Require newest Git: rejected until the three-OS distribution baseline is measured.
 
