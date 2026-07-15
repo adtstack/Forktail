@@ -14,6 +14,7 @@ import {
   exitExternalGitTool,
   gitToolExecutablePath,
   listGitChangedFiles,
+  listGitConflicts,
   listGitRefs,
   openGitIndexCompare,
   openGitRevisionCompare,
@@ -268,6 +269,36 @@ describe("Git working-tree status bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 92,
+    });
+  });
+});
+
+describe("Git conflict discovery bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("lists bounded unmerged stage metadata without a mutation action", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({
+      entries: [],
+      operation: "unknown",
+      truncated: false,
+      totalEntries: 0,
+      generation: 6,
+    });
+    const request = { hardLimit: 10_000, requestGeneration: 23 };
+
+    await listGitConflicts("repository-session-1", request, 95);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("list_git_conflicts", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 95,
     });
   });
 });

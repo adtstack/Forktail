@@ -171,7 +171,7 @@ pub(crate) fn index_fingerprint_matches(
     capture_index_fingerprint(session).map(|actual| actual == *expected)
 }
 
-fn capture_index_fingerprint(
+pub(crate) fn capture_index_fingerprint(
     session: &GitRepositorySession,
 ) -> Result<IndexFingerprint, GitIndexError> {
     let path = session.identity().git_dir.join("index");

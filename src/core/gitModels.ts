@@ -196,6 +196,33 @@ export interface GitStatusRequest {
   requestGeneration: number;
 }
 
+export interface GitConflictStage {
+  mode: string;
+  objectId: GitObjectId;
+}
+
+export interface GitConflictEntry {
+  path: GitPathIdentity;
+  stage1: GitConflictStage | null;
+  stage2: GitConflictStage | null;
+  stage3: GitConflictStage | null;
+}
+
+export type GitConflictOperation = "merge" | "rebase" | "cherryPick" | "revert" | "unknown";
+
+export interface GitConflictList {
+  entries: GitConflictEntry[];
+  operation: GitConflictOperation;
+  truncated: boolean;
+  totalEntries: number;
+  generation: number;
+}
+
+export interface GitConflictsRequest {
+  hardLimit: number;
+  requestGeneration: number;
+}
+
 export type GitSnapshotOrigin = "committedBlob" | "indexStage" | "workingTree" | "missing";
 export type GitSnapshotUnavailableReason = "objectMissingLocal" | "sparseWorkingTreeMissing";
 

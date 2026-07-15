@@ -436,6 +436,42 @@ pub struct GitIndexEntry {
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct GitConflictStage {
+    pub mode: String,
+    pub object_id: GitObjectId,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictEntry {
+    pub path: GitPathIdentity,
+    pub stage1: Option<GitConflictStage>,
+    pub stage2: Option<GitConflictStage>,
+    pub stage3: Option<GitConflictStage>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GitConflictOperation {
+    Merge,
+    Rebase,
+    CherryPick,
+    Revert,
+    Unknown,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictList {
+    pub entries: Vec<GitConflictEntry>,
+    pub operation: GitConflictOperation,
+    pub truncated: bool,
+    pub total_entries: u64,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct GitRevisionPair {
     pub left: GitRevision,
     pub right: GitRevision,
@@ -729,13 +765,14 @@ mod tests {
     use super::{
         GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
         GitChangedFileStatus, GitCompareCapabilities, GitCompareSession, GitCompareSourceKind,
-        GitHeadState, GitIndexComparison, GitObjectAlgorithm, GitObjectId, GitObjectIdError,
-        GitObjectType, GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef,
-        GitRepositorySummary, GitRevision, GitRevisionKind, GitRevisionPair,
-        GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch,
-        GitStatusBranchState, GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot,
-        GitSubmoduleStatus, GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList,
-        GitUnmergedStatusEntry, GitWorkingTreeVersion,
+        GitConflictEntry, GitConflictList, GitConflictOperation, GitConflictStage, GitHeadState,
+        GitIndexComparison, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
+        GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
+        GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
+        GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState,
+        GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus,
+        GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry,
+        GitWorkingTreeVersion,
     };
     use serde_json::json;
 
@@ -1354,6 +1391,37 @@ mod tests {
         assert_eq!(
             serde_json::to_value(GitSnapshotOrigin::IndexStage).expect("serialize index origin"),
             json!("indexStage")
+        );
+    }
+
+    #[test]
+    fn serializes_conflict_stage_availability_and_operation_context() {
+        let value = serde_json::to_value(GitConflictList {
+            entries: vec![GitConflictEntry {
+                path: GitPathIdentity::new("session:path:1", "conflict.txt", Some("conflict.txt")),
+                stage1: None,
+                stage2: Some(GitConflictStage {
+                    mode: "100644".to_string(),
+                    object_id: sha1('2'),
+                }),
+                stage3: Some(GitConflictStage {
+                    mode: "100755".to_string(),
+                    object_id: sha1('3'),
+                }),
+            }],
+            operation: GitConflictOperation::CherryPick,
+            truncated: false,
+            total_entries: 1,
+            generation: 7,
+        })
+        .expect("serialize conflict list");
+
+        assert_eq!(value["operation"], "cherryPick");
+        assert_eq!(value["entries"][0]["stage1"], json!(null));
+        assert_eq!(value["entries"][0]["stage2"]["mode"], "100644");
+        assert_eq!(
+            value["entries"][0]["stage3"]["objectId"]["hex"],
+            "3".repeat(40)
         );
     }
 

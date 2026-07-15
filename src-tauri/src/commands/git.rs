@@ -1,6 +1,7 @@
 use crate::error::{AppErrorCode, CommandError, CommandResult};
 use crate::git::blob::{GitBlobError, read_blob};
 use crate::git::changed_files::{GitChangedFilesError, list_changed_files};
+use crate::git::conflicts::{GitConflictError, list_conflicts};
 use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
@@ -44,6 +45,13 @@ pub struct GitChangedFilesRequest {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GitStatusRequest {
+    pub hard_limit: usize,
+    pub request_generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitConflictsRequest {
     pub hard_limit: usize,
     pub request_generation: u64,
 }
@@ -215,6 +223,30 @@ pub async fn read_git_status(
         .map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
         read_status(&session, request.hard_limit, lease.cancellation())
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_git_conflicts(
+    repository_session_id: String,
+    request: GitConflictsRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitConflictList> {
+    let _ = request.request_generation;
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        list_conflicts(&session, request.hard_limit, lease.cancellation())
     })
     .await
     .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
@@ -581,6 +613,30 @@ impl From<GitIndexError> for CommandError {
     }
 }
 
+impl From<GitConflictError> for CommandError {
+    fn from(error: GitConflictError) -> Self {
+        match error {
+            GitConflictError::Runner(error) => error.into(),
+            GitConflictError::OutputTooLarge => Self::git(AppErrorCode::GitOutputTooLarge),
+            GitConflictError::IndexChanged | GitConflictError::OperationChanged => {
+                Self::git(AppErrorCode::GitConflictStateChanged)
+            }
+            GitConflictError::InvalidLimit
+            | GitConflictError::CommandFailed
+            | GitConflictError::TruncatedOutput
+            | GitConflictError::InvalidRecord
+            | GitConflictError::InvalidMode
+            | GitConflictError::InvalidObjectId
+            | GitConflictError::InvalidStage
+            | GitConflictError::InvalidPath
+            | GitConflictError::DuplicateStage
+            | GitConflictError::StateUnavailable
+            | GitConflictError::StaleGeneration
+            | GitConflictError::IndexUnavailable => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -882,6 +938,34 @@ mod tests {
             let error = CommandError::from(source);
             assert_eq!(error.code, expected);
             assert!(!error.message.contains("empty.txt"));
+            assert!(!error.message.contains(&"a".repeat(40)));
+        }
+    }
+
+    #[test]
+    fn maps_conflict_discovery_failures_without_stage_or_path_details() {
+        let cases = [
+            (
+                GitConflictError::OutputTooLarge,
+                AppErrorCode::GitOutputTooLarge,
+            ),
+            (
+                GitConflictError::Runner(RunnerError::Cancelled),
+                AppErrorCode::GitCommandCancelled,
+            ),
+            (
+                GitConflictError::IndexChanged,
+                AppErrorCode::GitConflictStateChanged,
+            ),
+            (
+                GitConflictError::DuplicateStage,
+                AppErrorCode::GitCommandFailed,
+            ),
+        ];
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("conflict.txt"));
             assert!(!error.message.contains(&"a".repeat(40)));
         }
     }
