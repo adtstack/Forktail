@@ -60,6 +60,19 @@ export interface GitRefList {
   truncated: boolean;
 }
 
+export interface GitRecentCommitEntry {
+  commitId: GitObjectId;
+  shortDisplayId: string;
+  subject: string;
+  authorTimestamp: number;
+}
+
+export interface GitRecentCommitList {
+  entries: GitRecentCommitEntry[];
+  truncated: boolean;
+  shallow: boolean;
+}
+
 export type GitTreeEntryKind =
   | "regularFile"
   | "executableFile"

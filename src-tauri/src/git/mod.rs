@@ -2,6 +2,7 @@ pub mod blob;
 pub mod changed_files;
 pub mod conflicts;
 pub mod executable;
+pub mod history;
 pub mod index;
 pub mod jobs;
 pub mod merge_base;

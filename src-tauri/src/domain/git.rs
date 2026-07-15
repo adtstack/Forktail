@@ -175,6 +175,23 @@ pub struct GitRefList {
     pub truncated: bool,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRecentCommitEntry {
+    pub commit_id: GitObjectId,
+    pub short_display_id: String,
+    pub subject: String,
+    pub author_timestamp: i64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRecentCommitList {
+    pub entries: Vec<GitRecentCommitEntry>,
+    pub truncated: bool,
+    pub shallow: bool,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GitTreeEntryKind {
@@ -908,12 +925,12 @@ mod tests {
         GitConflictSaveResult, GitConflictStage, GitHeadState, GitIndexComparison, GitMergeBase,
         GitMergePreview, GitMergePreviewCapabilities, GitMergePreviewDisclaimer,
         GitMergePreviewResult, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
-        GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
-        GitRevision, GitRevisionKind, GitRevisionPair, GitSnapshotContentState,
-        GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState,
-        GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus,
-        GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry,
-        GitWorkingTreeVersion,
+        GitPathIdentity, GitRecentCommitEntry, GitRecentCommitList, GitRefKind, GitRefList,
+        GitRepositoryRef, GitRepositorySummary, GitRevision, GitRevisionKind, GitRevisionPair,
+        GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch,
+        GitStatusBranchState, GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot,
+        GitSubmoduleStatus, GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList,
+        GitUnmergedStatusEntry, GitWorkingTreeVersion,
     };
     use crate::domain::models::WriteResult;
     use serde_json::json;
@@ -1161,6 +1178,34 @@ mod tests {
                     },
                 ],
                 "truncated": false,
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_recent_commit_metadata_without_body_or_content_fields() {
+        let commits = GitRecentCommitList {
+            entries: vec![GitRecentCommitEntry {
+                commit_id: sha1('a'),
+                short_display_id: "aaaaaaaaaaaa".to_string(),
+                subject: "bounded subject".to_string(),
+                author_timestamp: 1_700_000_000,
+            }],
+            truncated: true,
+            shallow: true,
+        };
+
+        assert_eq!(
+            serde_json::to_value(commits).expect("serialize recent commits"),
+            json!({
+                "entries": [{
+                    "commitId": { "algorithm": "sha1", "hex": "a".repeat(40) },
+                    "shortDisplayId": "aaaaaaaaaaaa",
+                    "subject": "bounded subject",
+                    "authorTimestamp": 1_700_000_000,
+                }],
+                "truncated": true,
+                "shallow": true,
             })
         );
     }

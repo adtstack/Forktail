@@ -27,6 +27,7 @@ import type {
   GitChangedFilesRequest,
   GitRefKind,
   GitRefList,
+  GitRecentCommitList,
   GitRepositorySummary,
   GitRevision,
   GitRevisionCompareRequest,
@@ -153,6 +154,21 @@ export async function listGitRefs(
   return invoke<GitRefList>("list_git_refs", {
     repositorySessionId,
     kinds,
+    hardLimit,
+    jobId,
+  });
+}
+
+export async function listGitRecentCommits(
+  repositorySessionId: string,
+  startCommit: GitRevision["resolved"],
+  hardLimit: number,
+  jobId: number,
+): Promise<GitRecentCommitList> {
+  requireTauri();
+  return invoke<GitRecentCommitList>("list_git_recent_commits", {
+    repositorySessionId,
+    startCommit,
     hardLimit,
     jobId,
   });

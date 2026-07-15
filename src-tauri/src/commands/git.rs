@@ -7,6 +7,7 @@ use crate::git::conflicts::{
 use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
+use crate::git::history::{GitHistoryError, list_recent_commits};
 use crate::git::index::GitIndexError;
 use crate::git::jobs::{GitJobError, GitJobs};
 use crate::git::merge_base::{GitMergeBaseError, get_merge_base};
@@ -177,6 +178,30 @@ pub async fn list_git_refs(
         .map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
         list_refs(&session, &kinds, hard_limit, lease.cancellation())
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_git_recent_commits(
+    repository_session_id: String,
+    start_commit: crate::GitObjectId,
+    hard_limit: usize,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitRecentCommitList> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        list_recent_commits(&session, &start_commit, hard_limit, lease.cancellation())
     })
     .await
     .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
@@ -625,6 +650,23 @@ impl From<GitRefError> for CommandError {
     }
 }
 
+impl From<GitHistoryError> for CommandError {
+    fn from(error: GitHistoryError) -> Self {
+        match error {
+            GitHistoryError::Runner(error) => error.into(),
+            GitHistoryError::InvalidObjectId => Self::git(AppErrorCode::GitInvalidRevision),
+            GitHistoryError::CommandFailed => Self::git(AppErrorCode::GitObjectMissingLocal),
+            GitHistoryError::InvalidLimit
+            | GitHistoryError::TruncatedOutput
+            | GitHistoryError::InvalidFieldCount
+            | GitHistoryError::InvalidTimestamp
+            | GitHistoryError::InvalidSubject
+            | GitHistoryError::DuplicateCommit
+            | GitHistoryError::TooManyRecords => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
 impl From<GitTreeError> for CommandError {
     fn from(error: GitTreeError) -> Self {
         match error {
@@ -974,6 +1016,20 @@ mod tests {
             CommandError::from(GitJobError::DuplicateJob).code,
             AppErrorCode::GitCommandFailed
         );
+    }
+
+    #[test]
+    fn maps_history_failures_without_subject_or_object_details() {
+        for source in [
+            GitHistoryError::InvalidLimit,
+            GitHistoryError::InvalidFieldCount,
+            GitHistoryError::InvalidSubject,
+            GitHistoryError::TooManyRecords,
+        ] {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, AppErrorCode::GitCommandFailed);
+            assert!(!error.message.contains("subject"));
+        }
     }
 
     #[test]

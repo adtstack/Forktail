@@ -188,12 +188,12 @@
 
 ### Tests for User Story 6
 
-- [ ] T066 [US6] GIT-103 bounded recent commit framing/order/limit/control-character/shallow 테스트를 `src-tauri/src/git/history.rs`에 먼저 추가한다
+- [X] T066 [US6] GIT-103 bounded recent commit framing/order/limit/control-character/shallow 테스트를 `src-tauri/src/git/history.rs`에 먼저 추가한다
 - [ ] T067 [US6] GIT-609 rename boundary/deleted path/non-UTF-8/shallow/limit/cancel/no-network file-history 테스트를 `src-tauri/src/git/history.rs`와 `src/components/GitFileHistory.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 6
 
-- [ ] T068 [US6] GIT-103 selector용 recent commit metadata service를 `src-tauri/src/git/history.rs`, `src-tauri/src/commands/git.rs`에 구현한다
+- [X] T068 [US6] GIT-103 selector용 recent commit metadata service를 `src-tauri/src/git/history.rs`, `src-tauri/src/commands/git.rs`에 구현한다
 - [ ] T069 [US6] GIT-609 bounded file-history service와 snapshot compare handoff UI를 `src-tauri/src/git/history.rs`, `src-tauri/src/commands/git.rs`, `src/components/GitFileHistory.tsx`, `src/core/gitSession.ts`에 구현한다
 
 **Checkpoint**: full history graph 없이 선택 path의 local context만 제공한다.

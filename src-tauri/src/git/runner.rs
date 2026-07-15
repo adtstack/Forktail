@@ -26,8 +26,10 @@ pub const INDEX_ENTRY_STDOUT_CAP: usize = 64 * 1024;
 pub const INDEX_VISIBILITY_STDOUT_CAP: usize = 64 * 1024;
 pub const CONFLICTS_STDOUT_CAP: usize = 32 * 1024 * 1024;
 pub const MERGE_BASE_STDOUT_CAP: usize = 8 * 1024;
+pub const HISTORY_STDOUT_CAP: usize = 8 * 1024 * 1024;
 const REF_LIST_FORMAT: &str =
     "%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00";
+const RECENT_COMMIT_FORMAT: &str = "%H%x00%at%x00%s";
 
 const SAFE_INHERITED_ENVIRONMENT: &[&str] = &[
     "HOME",
@@ -69,6 +71,11 @@ pub enum GitOperation {
     References {
         repository: PathBuf,
         namespaces: Vec<RefNamespace>,
+        max_records: usize,
+    },
+    RecentCommits {
+        repository: PathBuf,
+        start_commit_id: String,
         max_records: usize,
     },
     Tree {
@@ -146,6 +153,25 @@ impl GitOperation {
                         .iter()
                         .map(|namespace| OsString::from(namespace.pattern())),
                 );
+            }
+            Self::RecentCommits {
+                repository,
+                start_commit_id,
+                max_records,
+            } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend([
+                    OsString::from("log"),
+                    OsString::from("--no-decorate"),
+                    OsString::from("--no-color"),
+                    OsString::from("--no-show-signature"),
+                    OsString::from("-z"),
+                    OsString::from(format!("--format={RECENT_COMMIT_FORMAT}")),
+                    OsString::from(format!("--max-count={max_records}")),
+                    OsString::from(start_commit_id),
+                    OsString::from("--"),
+                ]);
             }
             Self::Tree {
                 repository,
@@ -407,6 +433,7 @@ impl RunnerLimits {
             stdout_bytes: match operation {
                 GitOperation::Revision { .. } => 64 * 1024,
                 GitOperation::References { .. } => REF_LIST_STDOUT_CAP,
+                GitOperation::RecentCommits { .. } => HISTORY_STDOUT_CAP,
                 GitOperation::Tree { .. } => TREE_LIST_STDOUT_CAP,
                 GitOperation::Blob {
                     query: BlobQuery::Content,
@@ -545,6 +572,7 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
     if fixed_repository_query
         || validate_revision_query_arguments(query_arguments)
         || validate_ref_query_arguments(query_arguments)
+        || validate_recent_commit_query_arguments(query_arguments)
         || validate_tree_query_arguments(query_arguments)
         || validate_blob_query_arguments(query_arguments)
         || validate_changed_files_query_arguments(query_arguments)
@@ -558,6 +586,27 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
     } else {
         Err(RunnerError::ForbiddenOperation)
     }
+}
+
+fn validate_recent_commit_query_arguments(arguments: &[OsString]) -> bool {
+    let expected_format = format!("--format={RECENT_COMMIT_FORMAT}");
+    if arguments.len() != 9
+        || arguments[0] != "log"
+        || arguments[1] != "--no-decorate"
+        || arguments[2] != "--no-color"
+        || arguments[3] != "--no-show-signature"
+        || arguments[4] != "-z"
+        || arguments[5] != OsStr::new(&expected_format)
+        || !is_full_object_id(&arguments[7])
+        || arguments[8] != "--"
+    {
+        return false;
+    }
+    arguments[6]
+        .to_str()
+        .and_then(|argument| argument.strip_prefix("--max-count="))
+        .and_then(|count| count.parse::<usize>().ok())
+        .is_some_and(|count| (1..=501).contains(&count))
 }
 
 fn validate_merge_base_query_arguments(arguments: &[OsString]) -> bool {
@@ -1241,10 +1290,10 @@ mod tests {
 
     use super::{
         BLOB_CONTENT_STDOUT_CAP, BlobQuery, CHANGED_FILES_STDOUT_CAP, CONFLICTS_STDOUT_CAP,
-        CancellationToken, GitOperation, INDEX_ENTRY_STDOUT_CAP, INDEX_VISIBILITY_STDOUT_CAP,
-        MERGE_BASE_STDOUT_CAP, OutputStream, ProductionGitRunner, REF_LIST_STDOUT_CAP,
-        RefNamespace, RepositoryQuery, RevisionQuery, RunnerError, RunnerLimits,
-        SAFE_GLOBAL_ARGUMENTS, STATUS_STDOUT_CAP, TREE_LIST_STDOUT_CAP,
+        CancellationToken, GitOperation, HISTORY_STDOUT_CAP, INDEX_ENTRY_STDOUT_CAP,
+        INDEX_VISIBILITY_STDOUT_CAP, MERGE_BASE_STDOUT_CAP, OutputStream, ProductionGitRunner,
+        REF_LIST_STDOUT_CAP, RefNamespace, RepositoryQuery, RevisionQuery, RunnerError,
+        RunnerLimits, SAFE_GLOBAL_ARGUMENTS, STATUS_STDOUT_CAP, TREE_LIST_STDOUT_CAP,
         fixture::{FixtureGitRunner, FixtureProcess},
         safe_environment_from, validate_approved_arguments,
     };
@@ -1431,6 +1480,82 @@ mod tests {
                 .iter()
                 .copied()
                 .chain(["-C", repository.to_str().expect("UTF-8 fixture path")])
+                .chain(malformed)
+                .map(OsString::from)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                validate_approved_arguments(&arguments),
+                Err(RunnerError::ForbiddenOperation)
+            );
+        }
+    }
+
+    #[test]
+    fn recent_commit_operation_allows_only_metadata_format_full_id_and_bounded_count() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let repository = std::env::temp_dir().join("history repository 한글");
+        let commit_id = "1".repeat(40);
+        let plan = runner
+            .plan(GitOperation::RecentCommits {
+                repository: repository.clone(),
+                start_commit_id: commit_id.clone(),
+                max_records: 51,
+            })
+            .expect("typed recent commit query should be approved");
+
+        assert!(validate_approved_arguments(&plan.arguments).is_ok());
+        assert_eq!(plan.limits.stdout_bytes, HISTORY_STDOUT_CAP);
+        assert_eq!(
+            plan.arguments,
+            SAFE_GLOBAL_ARGUMENTS
+                .iter()
+                .copied()
+                .map(OsString::from)
+                .chain([
+                    OsString::from("-C"),
+                    repository.into_os_string(),
+                    OsString::from("log"),
+                    OsString::from("--no-decorate"),
+                    OsString::from("--no-color"),
+                    OsString::from("--no-show-signature"),
+                    OsString::from("-z"),
+                    OsString::from("--format=%H%x00%at%x00%s"),
+                    OsString::from("--max-count=51"),
+                    OsString::from(commit_id),
+                    OsString::from("--"),
+                ])
+                .collect::<Vec<_>>()
+        );
+
+        for malformed in [
+            vec![
+                "log",
+                "--no-decorate",
+                "--no-color",
+                "--no-show-signature",
+                "-z",
+                "--format=%H%x00%at%x00%B",
+                "--max-count=51",
+                "1111111111111111111111111111111111111111",
+                "--",
+            ],
+            vec![
+                "log",
+                "--no-decorate",
+                "--no-color",
+                "--no-show-signature",
+                "-z",
+                "--format=%H%x00%at%x00%s",
+                "--max-count=502",
+                "1111111111111111111111111111111111111111",
+                "--",
+            ],
+        ] {
+            let arguments = SAFE_GLOBAL_ARGUMENTS
+                .iter()
+                .copied()
+                .chain(["-C", "/tmp/repository"])
                 .chain(malformed)
                 .map(OsString::from)
                 .collect::<Vec<_>>();

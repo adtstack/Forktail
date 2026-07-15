@@ -17,6 +17,7 @@ import {
   listGitChangedFiles,
   listGitConflicts,
   listGitRefs,
+  listGitRecentCommits,
   listGitTree,
   openGitConflict,
   openGitIndexCompare,
@@ -232,6 +233,24 @@ describe("Git revision selector bridge", () => {
       kinds: ["localBranch", "remoteTrackingBranch", "tag"],
       hardLimit: 10_000,
       jobId: 81,
+    });
+  });
+
+  it("lists bounded recent commit metadata from an immutable start commit", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ entries: [], truncated: false, shallow: false });
+    const startCommit = { algorithm: "sha1" as const, hex: "a".repeat(40) };
+
+    await listGitRecentCommits("repository-session-1", startCommit, 50, 82);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("list_git_recent_commits", {
+      repositorySessionId: "repository-session-1",
+      startCommit,
+      hardLimit: 50,
+      jobId: 82,
     });
   });
 
