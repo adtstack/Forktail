@@ -1,3 +1,4 @@
+use crate::domain::models::LineEnding;
 use serde::{Deserialize, Deserializer, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -167,6 +168,32 @@ pub struct GitTreeList {
     pub entries: Vec<GitTreeEntry>,
     pub truncated: bool,
     pub generation: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum GitBlobContent {
+    Text {
+        text: String,
+        encoding: String,
+        line_ending: LineEnding,
+        had_final_newline: bool,
+        decode_had_errors: bool,
+    },
+    Binary,
+    TooLarge,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitBlobDocument {
+    pub object_id: GitObjectId,
+    pub size: u64,
+    pub content: GitBlobContent,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -423,9 +450,10 @@ pub struct GitRepositoryIdentity {
 #[cfg(test)]
 mod tests {
     use super::{
-        GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
-        GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef, GitRepositorySummary,
-        GitRevision, GitRevisionKind, GitTreeEntry, GitTreeEntryKind, GitTreeList,
+        GitBlobContent, GitBlobDocument, GitHeadState, GitObjectAlgorithm, GitObjectId,
+        GitObjectIdError, GitObjectType, GitPathIdentity, GitRefKind, GitRefList, GitRepositoryRef,
+        GitRepositorySummary, GitRevision, GitRevisionKind, GitTreeEntry, GitTreeEntryKind,
+        GitTreeList,
     };
     use serde_json::json;
 
@@ -614,6 +642,49 @@ mod tests {
                 "generation": 0,
             })
         );
+    }
+
+    #[test]
+    fn serializes_blob_content_as_explicit_discriminated_states() {
+        let text = GitBlobDocument {
+            object_id: sha1('a'),
+            size: 6,
+            content: GitBlobContent::Text {
+                text: "hello\n".to_string(),
+                encoding: "UTF-8".to_string(),
+                line_ending: crate::domain::models::LineEnding::Lf,
+                had_final_newline: true,
+                decode_had_errors: false,
+            },
+        };
+        assert_eq!(
+            serde_json::to_value(text).expect("serialize text blob"),
+            json!({
+                "objectId": { "algorithm": "sha1", "hex": "a".repeat(40) },
+                "size": 6,
+                "content": {
+                    "kind": "text",
+                    "text": "hello\n",
+                    "encoding": "UTF-8",
+                    "lineEnding": "lf",
+                    "hadFinalNewline": true,
+                    "decodeHadErrors": false,
+                },
+            })
+        );
+
+        for (content, kind) in [
+            (GitBlobContent::Binary, "binary"),
+            (GitBlobContent::TooLarge, "tooLarge"),
+        ] {
+            let value = serde_json::to_value(GitBlobDocument {
+                object_id: sha1('b'),
+                size: 12,
+                content,
+            })
+            .expect("serialize non-text blob");
+            assert_eq!(value["content"]["kind"], kind);
+        }
     }
 
     #[test]

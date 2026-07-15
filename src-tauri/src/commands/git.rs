@@ -1,4 +1,5 @@
 use crate::error::{AppErrorCode, CommandError, CommandResult};
+use crate::git::blob::{GitBlobError, read_blob};
 use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
@@ -113,6 +114,29 @@ pub async fn list_git_tree(
             hard_limit,
             lease.cancellation(),
         )
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn read_git_blob(
+    repository_session_id: String,
+    object_id: crate::GitObjectId,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitBlobDocument> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        read_blob(&session, &object_id, lease.cancellation())
     })
     .await
     .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
@@ -236,6 +260,22 @@ impl From<GitTreeError> for CommandError {
             | GitTreeError::DuplicatePath
             | GitTreeError::StalePath
             | GitTreeError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
+        }
+    }
+}
+
+impl From<GitBlobError> for CommandError {
+    fn from(error: GitBlobError) -> Self {
+        match error {
+            GitBlobError::Runner(error) => error.into(),
+            GitBlobError::InvalidObjectId => Self::git(AppErrorCode::GitInvalidRevision),
+            GitBlobError::ObjectMissingLocal => Self::git(AppErrorCode::GitObjectMissingLocal),
+            GitBlobError::ObjectTypeUnsupported => {
+                Self::git(AppErrorCode::GitObjectTypeUnsupported)
+            }
+            GitBlobError::InvalidOutput | GitBlobError::SizeMismatch { .. } => {
+                Self::git(AppErrorCode::GitCommandFailed)
+            }
         }
     }
 }
@@ -394,6 +434,37 @@ mod tests {
             assert_eq!(error.code, expected);
             assert!(!error.message.contains("object ID"));
             assert!(!error.message.contains("path bytes"));
+        }
+    }
+
+    #[test]
+    fn maps_blob_failures_without_backend_output_or_content() {
+        let cases = [
+            (
+                GitBlobError::InvalidObjectId,
+                AppErrorCode::GitInvalidRevision,
+            ),
+            (
+                GitBlobError::ObjectMissingLocal,
+                AppErrorCode::GitObjectMissingLocal,
+            ),
+            (
+                GitBlobError::ObjectTypeUnsupported,
+                AppErrorCode::GitObjectTypeUnsupported,
+            ),
+            (
+                GitBlobError::SizeMismatch {
+                    expected: 4,
+                    actual: 3,
+                },
+                AppErrorCode::GitCommandFailed,
+            ),
+        ];
+        for (source, expected) in cases {
+            let error = CommandError::from(source);
+            assert_eq!(error.code, expected);
+            assert!(!error.message.contains("expected"));
+            assert!(!error.message.contains("actual"));
         }
     }
 }

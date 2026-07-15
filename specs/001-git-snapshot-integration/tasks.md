@@ -65,7 +65,7 @@
 - [X] T020 [US1] GIT-101 HEAD/branch/tag/full·abbrev ID/short-name collision/detached/invalid revision 테스트를 `src-tauri/src/git/revision.rs`에 먼저 추가한다
 - [X] T021 [P] [US1] GIT-102 local/remote-tracking/tag ref framing, cap, control-character 테스트를 `src-tauri/src/git/refs.rs`에 먼저 추가한다
 - [X] T022 [P] [US1] GIT-201 regular/executable/symlink/submodule/SHA-256/non-UTF-8 tree parser 테스트를 `src-tauri/src/git/tree.rs`에 먼저 추가한다
-- [ ] T023 [US1] GIT-202 UTF-8/UTF-16/binary/LFS/64 MiB boundary/type-size mismatch blob 테스트를 `src-tauri/src/git/blob.rs`와 `src-tauri/src/commands/files.rs`에 먼저 추가한다
+- [X] T023 [US1] GIT-202 UTF-8/UTF-16/binary/64 MiB boundary/type-size mismatch blob 테스트를 `src-tauri/src/git/blob.rs`와 `src-tauri/src/commands/files.rs`에 먼저 추가한다
 - [ ] T024 [P] [US1] GIT-203 lazy-fetch/filter/textconv/LFS helper가 0회인 fake/partial-clone 테스트를 `src-tauri/src/git/blob.rs`와 `src/core/networkPolicy.test.ts`에 먼저 추가한다
 - [ ] T025 [P] [US1] GIT-301 A/D/M/T/R/C/U/unknown/truncated byte record와 rename score 테스트를 `src-tauri/src/git/changed_files.rs`에 먼저 추가한다
 - [ ] T026 [US1] GIT-302 status-to-session, missing-vs-empty, origin/read-only capability 계약 테스트를 `src-tauri/src/git/session.rs`와 `src/core/gitSession.test.ts`에 먼저 추가한다
@@ -78,7 +78,7 @@
 - [X] T030 [US1] GIT-101 raw revision 검증·ambiguity 판정·immutable object ID 고정을 `src-tauri/src/git/revision.rs`, `src-tauri/src/commands/git.rs`에 구현한다
 - [X] T031 [US1] GIT-102 bounded local ref selector service를 `src-tauri/src/git/refs.rs`, `src-tauri/src/commands/git.rs`에 구현한다
 - [X] T032 [US1] GIT-201 revision tree/path lookup과 mode/type 분류를 `src-tauri/src/git/tree.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T033 [US1] GIT-202 blob type/size/read와 공유 text decode pipeline을 `src-tauri/src/git/blob.rs`, `src-tauri/src/commands/files.rs`, `src-tauri/src/domain/git.rs`에 구현한다
+- [X] T033 [US1] GIT-202 blob type/size/read와 공유 text decode pipeline을 `src-tauri/src/git/blob.rs`, `src-tauri/src/commands/files.rs`, `src-tauri/src/domain/git.rs`에 구현한다
 - [ ] T034 [US1] GIT-203 raw blob/LFS/no-lazy-fetch 상태와 bounded memory cache를 `src-tauri/src/git/blob.rs`, `src-tauri/src/git/runner.rs`에 구현한다
 - [ ] T035 [US1] GIT-301 name-status changed-file service와 lossless old/new path mapping을 `src-tauri/src/git/changed_files.rs`, `src-tauri/src/commands/git.rs`에 구현한다
 - [ ] T036 [US1] GIT-302 read-only compare session builder와 TypeScript adapter를 `src-tauri/src/git/session.rs`, `src/core/gitSession.ts`, `src/core/gitModels.ts`, `src/core/bridge.ts`에 구현한다

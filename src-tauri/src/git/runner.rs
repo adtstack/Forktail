@@ -19,6 +19,7 @@ pub const SAFE_GLOBAL_ARGUMENTS: [&str; 5] = [
 
 pub const REF_LIST_STDOUT_CAP: usize = 16 * 1024 * 1024;
 pub const TREE_LIST_STDOUT_CAP: usize = 32 * 1024 * 1024;
+pub const BLOB_CONTENT_STDOUT_CAP: usize = 64 * 1024 * 1024;
 const REF_LIST_FORMAT: &str =
     "%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00";
 
@@ -68,6 +69,11 @@ pub enum GitOperation {
         repository: PathBuf,
         commit_id: String,
         path_prefix: Option<OsString>,
+    },
+    Blob {
+        repository: PathBuf,
+        object_id: String,
+        query: BlobQuery,
     },
 }
 
@@ -130,8 +136,39 @@ impl GitOperation {
                     arguments.push(path_prefix.clone());
                 }
             }
+            Self::Blob {
+                repository,
+                object_id,
+                query,
+            } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend(query.arguments(object_id));
+            }
         }
         arguments
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlobQuery {
+    Type,
+    Size,
+    Content,
+}
+
+impl BlobQuery {
+    fn arguments(self, object_id: &str) -> [OsString; 3] {
+        let mode = match self {
+            Self::Type => "-t",
+            Self::Size => "-s",
+            Self::Content => "blob",
+        };
+        [
+            OsString::from("cat-file"),
+            OsString::from(mode),
+            OsString::from(object_id),
+        ]
     }
 }
 
@@ -248,6 +285,11 @@ impl RunnerLimits {
                 GitOperation::Revision { .. } => 64 * 1024,
                 GitOperation::References { .. } => REF_LIST_STDOUT_CAP,
                 GitOperation::Tree { .. } => TREE_LIST_STDOUT_CAP,
+                GitOperation::Blob {
+                    query: BlobQuery::Content,
+                    ..
+                } => BLOB_CONTENT_STDOUT_CAP,
+                GitOperation::Blob { .. } => 4096,
                 GitOperation::Version | GitOperation::Repository { .. } => 8 * 1024 * 1024,
             },
             stderr_bytes: 256 * 1024,
@@ -375,11 +417,24 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
         || validate_revision_query_arguments(query_arguments)
         || validate_ref_query_arguments(query_arguments)
         || validate_tree_query_arguments(query_arguments)
+        || validate_blob_query_arguments(query_arguments)
     {
         Ok(())
     } else {
         Err(RunnerError::ForbiddenOperation)
     }
+}
+
+fn validate_blob_query_arguments(arguments: &[OsString]) -> bool {
+    if arguments.len() != 3 || arguments[0] != "cat-file" {
+        return false;
+    }
+    if !matches!(arguments[1].to_str(), Some("-t" | "-s" | "blob")) {
+        return false;
+    }
+    arguments[2].to_str().is_some_and(|object_id| {
+        matches!(object_id.len(), 40 | 64) && object_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
 }
 
 fn validate_tree_query_arguments(arguments: &[OsString]) -> bool {
@@ -957,9 +1012,9 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::{
-        CancellationToken, GitOperation, OutputStream, ProductionGitRunner, REF_LIST_STDOUT_CAP,
-        RefNamespace, RepositoryQuery, RevisionQuery, RunnerError, RunnerLimits,
-        SAFE_GLOBAL_ARGUMENTS, TREE_LIST_STDOUT_CAP,
+        BLOB_CONTENT_STDOUT_CAP, BlobQuery, CancellationToken, GitOperation, OutputStream,
+        ProductionGitRunner, REF_LIST_STDOUT_CAP, RefNamespace, RepositoryQuery, RevisionQuery,
+        RunnerError, RunnerLimits, SAFE_GLOBAL_ARGUMENTS, TREE_LIST_STDOUT_CAP,
         fixture::{FixtureGitRunner, FixtureProcess},
         safe_environment_from, validate_approved_arguments,
     };
@@ -1209,6 +1264,52 @@ mod tests {
                 commit_id.as_str(),
                 "--",
             ],
+        ] {
+            let arguments = SAFE_GLOBAL_ARGUMENTS
+                .iter()
+                .copied()
+                .chain(["-C", repository.to_str().expect("UTF-8 fixture path")])
+                .chain(malformed)
+                .map(OsString::from)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                validate_approved_arguments(&arguments),
+                Err(RunnerError::ForbiddenOperation)
+            );
+        }
+    }
+
+    #[test]
+    fn blob_operations_allow_only_type_size_and_raw_blob_queries() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let repository = std::env::temp_dir().join("blob repository 한글");
+        let object_id = "b".repeat(40);
+
+        for (query, mode, expected_cap) in [
+            (BlobQuery::Type, "-t", 4096),
+            (BlobQuery::Size, "-s", 4096),
+            (BlobQuery::Content, "blob", BLOB_CONTENT_STDOUT_CAP),
+        ] {
+            let plan = runner
+                .plan(GitOperation::Blob {
+                    repository: repository.clone(),
+                    object_id: object_id.clone(),
+                    query,
+                })
+                .expect("typed blob query should be approved");
+            assert!(validate_approved_arguments(&plan.arguments).is_ok());
+            assert_eq!(plan.limits.stdout_bytes, expected_cap);
+            assert_eq!(
+                &plan.arguments[SAFE_GLOBAL_ARGUMENTS.len() + 2..],
+                &["cat-file", mode, object_id.as_str()].map(OsString::from)
+            );
+        }
+
+        for malformed in [
+            vec!["cat-file", "-p", object_id.as_str()],
+            vec!["cat-file", "--batch", object_id.as_str()],
+            vec!["cat-file", "blob", "abcd"],
         ] {
             let arguments = SAFE_GLOBAL_ARGUMENTS
                 .iter()

@@ -32,7 +32,7 @@ pub struct FileBackup {
     pub modified_ms: Option<u64>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize)]
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LineEnding {
     Lf,

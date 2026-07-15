@@ -4,12 +4,14 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const rustFilesCommand = readFileSync(new URL("../../src-tauri/src/commands/files.rs", import.meta.url), "utf8");
+const rustTextCore = readFileSync(new URL("../../src-tauri/src/text.rs", import.meta.url), "utf8");
 const architecture = readFileSync(new URL("../../docs/02_ARCHITECTURE.md", import.meta.url), "utf8");
 const adr = readFileSync(new URL("../../docs/10_ADR.md", import.meta.url), "utf8");
 
 describe("large text strategy", () => {
   it("keeps Phase 1 on the documented 64 MiB safety cap", () => {
-    expect(rustFilesCommand).toContain("const MAX_TEXT_FILE_BYTES: u64 = 64 * 1024 * 1024;");
+    expect(rustTextCore).toContain("pub const MAX_TEXT_BYTES: u64 = 64 * 1024 * 1024;");
+    expect(rustFilesCommand).toContain("const MAX_TEXT_FILE_BYTES: u64 = MAX_TEXT_BYTES;");
     expect(rustFilesCommand).toContain("metadata.len() > MAX_TEXT_FILE_BYTES");
     expect(rustFilesCommand).toContain("AppErrorCode::TooLarge");
     expect(rustFilesCommand).toContain("대용량 파일 모드는 후속 작업");

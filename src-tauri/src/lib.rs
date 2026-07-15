@@ -3,13 +3,15 @@ mod domain;
 mod error;
 pub mod git;
 mod menu;
+mod text;
 
 pub use domain::git::{
-    GitHeadState, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
-    GitPathIdentity, GitRefKind, GitRefList, GitRepositoryIdentity, GitRepositoryRef,
-    GitRepositorySummary, GitRevision, GitRevisionKind, GitTreeEntry, GitTreeEntryKind,
-    GitTreeList,
+    GitBlobContent, GitBlobDocument, GitHeadState, GitObjectAlgorithm, GitObjectId,
+    GitObjectIdError, GitObjectType, GitPathIdentity, GitRefKind, GitRefList,
+    GitRepositoryIdentity, GitRepositoryRef, GitRepositorySummary, GitRevision, GitRevisionKind,
+    GitTreeEntry, GitTreeEntryKind, GitTreeList,
 };
+pub use domain::models::LineEnding;
 
 use commands::{files, folders, git as git_commands, merge, startup, system};
 
@@ -34,6 +36,7 @@ pub fn run() {
             git_commands::close_git_repository,
             git_commands::list_git_refs,
             git_commands::list_git_tree,
+            git_commands::read_git_blob,
             git_commands::cancel_git_job,
             git_commands::resolve_git_revision,
             merge::merge_texts,

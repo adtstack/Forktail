@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import type {
   GitHeadState,
+  GitBlobDocument,
   GitObjectId,
   GitPathIdentity,
   GitRefList,
@@ -135,6 +136,39 @@ describe("Git DTO contract", () => {
     expect(tree.entries[0]?.path.opaqueId).toContain(":path:");
   });
 
+  it("keeps blob text, binary, and too-large states explicit", () => {
+    const documents: GitBlobDocument[] = [
+      {
+        objectId: { algorithm: "sha1", hex: "a".repeat(40) },
+        size: 6,
+        content: {
+          kind: "text",
+          text: "hello\n",
+          encoding: "UTF-8",
+          lineEnding: "lf",
+          hadFinalNewline: true,
+          decodeHadErrors: false,
+        },
+      },
+      {
+        objectId: { algorithm: "sha1", hex: "b".repeat(40) },
+        size: 12,
+        content: { kind: "binary" },
+      },
+      {
+        objectId: { algorithm: "sha1", hex: "c".repeat(40) },
+        size: 64 * 1024 * 1024 + 1,
+        content: { kind: "tooLarge" },
+      },
+    ];
+
+    expect(documents.map((document) => document.content.kind)).toEqual([
+      "text",
+      "binary",
+      "tooLarge",
+    ]);
+  });
+
   it("keeps every head-state variant explicit", () => {
     const states: GitHeadState[] = [
       { kind: "unborn" },
@@ -157,6 +191,8 @@ describe("Git DTO contract", () => {
     expect(rustDtoSource).toContain("pub struct GitRefList");
     expect(rustDtoSource).toContain("pub struct GitTreeEntry");
     expect(rustDtoSource).toContain("pub struct GitTreeList");
+    expect(rustDtoSource).toContain("pub enum GitBlobContent");
+    expect(rustDtoSource).toContain("pub struct GitBlobDocument");
     expect(rustDtoSource).toContain("pub struct GitRepositorySummary");
   });
 });

@@ -1,3 +1,5 @@
+import type { LineEnding } from "./models";
+
 export type GitObjectAlgorithm = "sha1" | "sha256" | "unknown";
 
 export interface GitObjectId {
@@ -57,6 +59,24 @@ export interface GitTreeList {
   entries: GitTreeEntry[];
   truncated: boolean;
   generation: number;
+}
+
+export type GitBlobContent =
+  | {
+      kind: "text";
+      text: string;
+      encoding: string;
+      lineEnding: LineEnding;
+      hadFinalNewline: boolean;
+      decodeHadErrors: boolean;
+    }
+  | { kind: "binary" }
+  | { kind: "tooLarge" };
+
+export interface GitBlobDocument {
+  objectId: GitObjectId;
+  size: number;
+  content: GitBlobContent;
 }
 
 export interface GitPathIdentity {

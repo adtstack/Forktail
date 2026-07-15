@@ -1,15 +1,13 @@
-use crate::domain::models::{FileBackup, FileDocument, FileVersion, LineEnding, WriteResult};
+use crate::domain::models::{FileBackup, FileDocument, FileVersion, WriteResult};
 use crate::error::{AppErrorCode, CommandError, CommandResult};
-use chardetng::EncodingDetector;
-use encoding_rs::Encoding;
+use crate::text::{DecodedTextContent, MAX_TEXT_BYTES, decode_text_bytes};
 use std::fs;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 use tempfile::NamedTempFile;
 
-const MAX_TEXT_FILE_BYTES: u64 = 64 * 1024 * 1024;
-const BINARY_PROBE_BYTES: usize = 16 * 1024;
+const MAX_TEXT_FILE_BYTES: u64 = MAX_TEXT_BYTES;
 const BACKUP_RETENTION_LIMIT: usize = 10;
 
 #[tauri::command]
@@ -49,17 +47,12 @@ pub fn read_text_file(path: String) -> CommandResult<FileDocument> {
             CommandError::io(AppErrorCode::PathConflict, "파일을 읽지 못했습니다", error)
         })?;
 
-    let bom = Encoding::for_bom(&bytes);
-    let is_binary = bom.is_none() && bytes.iter().take(BINARY_PROBE_BYTES).any(|byte| *byte == 0);
-
-    if is_binary {
+    let DecodedTextContent::Text(decoded) = decode_text_bytes(&bytes) else {
         return Err(CommandError::new(
             AppErrorCode::BinaryFile,
             "선택한 파일은 텍스트로 안전하게 판별되지 않아 열지 않았습니다.",
         ));
-    }
-
-    let (text, encoding, decode_had_errors) = decode_text(&bytes, bom);
+    };
 
     Ok(FileDocument {
         path: path_buf.to_string_lossy().into_owned(),
@@ -67,14 +60,14 @@ pub fn read_text_file(path: String) -> CommandResult<FileDocument> {
             .file_name()
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_else(|| path.clone()),
-        line_ending: detect_line_ending(&text),
-        had_final_newline: text.ends_with('\n') || text.ends_with('\r'),
-        text,
-        encoding,
+        line_ending: decoded.line_ending,
+        had_final_newline: decoded.had_final_newline,
+        text: decoded.text,
+        encoding: decoded.encoding,
         size: metadata.len(),
         modified_ms: modified_ms(&metadata),
-        is_binary,
-        decode_had_errors,
+        is_binary: false,
+        decode_had_errors: decoded.decode_had_errors,
     })
 }
 
@@ -647,27 +640,6 @@ fn current_timestamp_ms() -> u128 {
         .unwrap_or(0)
 }
 
-fn decode_text(bytes: &[u8], bom: Option<(&'static Encoding, usize)>) -> (String, String, bool) {
-    if let Some((encoding, bom_length)) = bom {
-        let (decoded, _, had_errors) = encoding.decode(&bytes[bom_length..]);
-        return (
-            decoded.into_owned(),
-            format!("{} BOM", encoding.name()),
-            had_errors,
-        );
-    }
-
-    let mut detector = EncodingDetector::new();
-    detector.feed(bytes, true);
-    let encoding = detector.guess(None, true);
-    let (decoded, _, had_errors) = encoding.decode(bytes);
-    (
-        decoded.into_owned(),
-        encoding.name().to_string(),
-        had_errors,
-    )
-}
-
 fn modified_ms(metadata: &fs::Metadata) -> Option<u64> {
     metadata
         .modified()
@@ -677,48 +649,11 @@ fn modified_ms(metadata: &fs::Metadata) -> Option<u64> {
         .map(|duration| duration.as_millis() as u64)
 }
 
-fn detect_line_ending(text: &str) -> LineEnding {
-    if text.is_empty() {
-        return LineEnding::None;
-    }
-
-    let bytes = text.as_bytes();
-    let mut crlf = 0usize;
-    let mut bare_lf = 0usize;
-    let mut bare_cr = 0usize;
-    let mut index = 0usize;
-
-    while index < bytes.len() {
-        match bytes[index] {
-            b'\r' if bytes.get(index + 1) == Some(&b'\n') => {
-                crlf += 1;
-                index += 2;
-            }
-            b'\r' => {
-                bare_cr += 1;
-                index += 1;
-            }
-            b'\n' => {
-                bare_lf += 1;
-                index += 1;
-            }
-            _ => index += 1,
-        }
-    }
-
-    let kinds = usize::from(crlf > 0) + usize::from(bare_lf > 0) + usize::from(bare_cr > 0);
-    match (kinds, crlf > 0, bare_lf > 0, bare_cr > 0) {
-        (0, _, _, _) => LineEnding::None,
-        (1, true, _, _) => LineEnding::Crlf,
-        (1, _, true, _) => LineEnding::Lf,
-        (1, _, _, true) => LineEnding::Cr,
-        _ => LineEnding::Mixed,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::models::LineEnding;
+    use crate::text::detect_line_ending;
     use std::io::Write;
 
     #[test]
@@ -728,6 +663,25 @@ mod tests {
         assert!(matches!(detect_line_ending("a\rb\r"), LineEnding::Cr));
         assert!(matches!(detect_line_ending("a\r\nb\n"), LineEnding::Mixed));
         assert!(matches!(detect_line_ending("abc"), LineEnding::None));
+    }
+
+    #[test]
+    fn shared_decoder_preserves_file_binary_bom_and_newline_semantics() {
+        use crate::text::{DecodedTextContent, decode_text_bytes};
+
+        assert_eq!(
+            decode_text_bytes(b"text\0binary"),
+            DecodedTextContent::Binary
+        );
+        let DecodedTextContent::Text(decoded) = decode_text_bytes(&[0xFF, 0xFE, b'a', 0, b'\n', 0])
+        else {
+            panic!("UTF-16 BOM must be text");
+        };
+        assert_eq!(decoded.text, "a\n");
+        assert_eq!(decoded.encoding, "UTF-16LE BOM");
+        assert_eq!(decoded.line_ending, LineEnding::Lf);
+        assert!(decoded.had_final_newline);
+        assert!(!decoded.decode_had_errors);
     }
 
     #[test]

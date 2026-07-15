@@ -424,6 +424,14 @@ cargo test
 - 테스트 선행 증거: 구현 전 `cargo test tree`는 tree DTO/error/parser/service가 정의되지 않아 compile error로 실패했다. 구현 후 pure byte parser의 regular/executable/symlink/submodule, SHA-256, tab/newline/non-UTF-8 path, size/mode/type/truncation/duplicate/limit tests와 실제 temp repository의 Git-index 기반 executable/symlink/gitlink fixture, literal prefix, raw path round-trip, cancellation, repository fingerprint 불변 테스트 6건이 통과했다.
 - 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/361 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 119 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux 실행은 사용자 확인 항목으로 남긴다.
 
+### GIT-202 bounded blob read and shared decoder — 2026-07-15
+
+- 변경 파일: `src-tauri/src/git/blob.rs`, `src-tauri/src/text.rs`, `src-tauri/src/git/runner.rs`, `src-tauri/src/git/mod.rs`, `src-tauri/src/commands/git.rs`, `src-tauri/src/commands/files.rs`, `src-tauri/src/domain/git.rs`, `src-tauri/src/domain/models.rs`, `src-tauri/src/lib.rs`, `src/core/gitModels.ts`, `src/core/gitModels.test.ts`, `src/core/largeTextStrategy.test.ts`, `specs/001-git-snapshot-integration/tasks.md`, `VALIDATION.md`.
+- 수용 기준: full object ID에 대해 exact `cat-file -t`, `cat-file -s`, raw `cat-file <id>` 순서만 실행한다. type과 size metadata를 먼저 검증하고 64 MiB 초과 blob은 content process를 시작하지 않은 채 explicit `tooLarge` 상태로 반환한다. 64 MiB 이하 raw bytes는 기존 file loader와 같은 BOM, encoding, binary probe, EOL, final-newline decoder를 사용하며 frontend DTO는 text/binary/too-large 상태를 분리한다.
+- 실패/경계 조건: session object format과 다른 ID, missing local object, non-blob object, missing newline·multi-line·non-decimal·overflow metadata, unsuccessful content query, declared/actual size mismatch, cancel/timeout/output cap을 stable Git command error로 변환한다. runner stdout cap은 type/size 4 KiB, content 64 MiB로 고정하고 stderr·blob content를 message나 log에 포함하지 않는다. LFS pointer 감지, helper 0회 증거와 bounded memory cache는 중복 task 문구를 정리해 다음 GIT-203(T024/T034) 범위로 유지했다.
+- 테스트 선행 증거: 구현 전 `cargo test blob`은 shared decoder, blob DTO/service와 typed `BlobQuery`가 정의되지 않아 compile error로 실패했다. 구현 후 fake query가 type→size→content 순서, 64 MiB+1 content 미호출, UTF-8/UTF-16/binary 분류, missing/non-blob/truncated/type-size mismatch를 검증했고 실제 temp repository가 세 blob을 mutation 없이 읽는지 확인했다. file loader 공유 decoder 계약과 runner/command/serde/TypeScript DTO 테스트도 통과했다.
+- 검증: `npm run check` 통과 — typecheck, frontend Vitest 55 files/362 tests, Git-tool harness 1 file/16 tests, production build. `cd src-tauri && cargo fmt --all --check` 통과, `cargo clippy --all-targets -- -D warnings` 통과, `cargo test` 128 tests 통과/0 ignored. 실제 temp repository 통합 테스트는 macOS Git 2.50.1에서 수행했으며 Windows/Linux 실행은 사용자 확인 항목으로 남긴다.
+
 ## 관찰된 경고
 
 - Monaco editor 본체와 language service worker asset은 여전히 크지만 lazy chunk와 on-demand worker asset으로 분리되어 초기 앱 shell JS chunk에서는 빠졌다.
