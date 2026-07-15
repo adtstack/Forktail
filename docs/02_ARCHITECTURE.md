@@ -205,14 +205,24 @@ base/ours/theirs read
 
 ### Git mergetool 계약
 
-`forktail --mergetool %O %A %B %P`는 Git의 base/current/other/merged 순서를 앱의 Base/Ours/Theirs/Output으로 매핑한다.
+custom `git mergetool`은 `$BASE`, `$LOCAL`, `$REMOTE`, `$MERGED` 환경 변수를 command에 넘긴다. 목표 호출은 다음 네 경로를 순서대로 전달한다.
 
-- `%O` → BASE
-- `%A` → OURS
-- `%B` → THEIRS
-- `%P` → output path
+```text
+forktail --mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"
+```
 
-Phase 1 GUI는 프로세스 종료 시점과 사용자의 저장 여부를 안정적인 exit code로 전달하지 않는다. Git 설정은 `trustExitCode = false`를 사용하며, Git이 output path의 내용 변경 여부를 기준으로 후속 확인을 수행하게 한다. 저장 자체는 일반 safe save 경로와 같은 precondition/backup/atomic replace 정책을 따른다.
+- `$BASE` → Base source. 공통 조상이 없으면 빈 인자이거나 사용할 수 없는 path일 수 있으므로 CLI parser가 이를 버리지 않고 missing Base로 보존한다.
+- `$LOCAL` → Ours/current source
+- `$REMOTE` → Theirs/other source
+- `$MERGED` → Git이 이미 만든 working tree result이자 유일한 저장 대상
+
+`%O`, `%A`, `%B`, `%P`는 custom merge driver placeholder이며 mergetool 변수가 아니다. merge driver는 `%A`를 비대화식으로 직접 덮어써야 하므로 Phase 1에서 지원하지 않는다. 특히 `%P`는 pathname label이지 output path가 아니다.
+
+mergetool session은 `$MERGED`의 기존 내용을 초기 Result로 읽고 open fingerprint를 보관한다. Base/Ours/Theirs에서 새 결과를 재생성해 `$MERGED`를 덮어쓰지 않는다. Git 임시 source path는 recent session, active-session restore, recovery draft에 저장하지 않는다. 기본 Git marker label과 base 없는 marker를 parser가 인식해야 하며, 미해결 conflict를 강제 저장하는 동작은 mergetool mode에서 허용하지 않는다.
+
+Phase 1 GUI는 Save & Close/Abort를 안정적인 exit code로 전달하지 않는다. Git 설정은 `trustExitCode = false`와 tool-specific `hideResolved = false`를 사용한다. Git은 target timestamp와 사용자 확인 흐름으로 성공 여부를 판단하므로 packaged app이 닫힐 때까지 Git 호출이 기다리는지 세 OS에서 검증해야 한다. Forktail 프로세스가 실행 중일 때는 index를 바꾸지 않지만, 프로세스 종료 뒤 사용자가 성공을 확인하면 `git mergetool` wrapper가 해당 path를 stage할 수 있다. 저장은 일반 safe save의 precondition/backup/atomic replace를 재사용하며, Git이 만드는 `.orig`와 Forktail의 `.bak.*`가 함께 남을 수 있음을 안내한다.
+
+repository-aware branch/commit/index 비교는 이 adapter와 별개인 Phase 1 이후 후보이며 `docs/17_GIT_INTEGRATION.md`를 따른다.
 
 ## 8. 저장 내구성
 

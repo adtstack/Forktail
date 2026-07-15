@@ -29,6 +29,12 @@
 
 Tauri capability는 window/webview별 권한 경계다. 릴리스 전에 `csp: null`을 제거하고 Monaco local worker에 필요한 최소 CSP를 작성한다.
 
+### Phase 1 이후 Git adapter 경계
+
+repository-aware Git 기능을 승격하더라도 core의 네트워크 0과 no-surprise-write 원칙은 유지한다. `docs/17_GIT_INTEGRATION.md`에 따라 Git executable은 Rust의 positive allowlist에서 argv로만 실행하고 shell/Tauri shell plugin을 추가하지 않는다. `--no-lazy-fetch`, `--no-optional-locks`, `GIT_TERMINAL_PROMPT=0`, literal path 정책으로 partial clone fetch, credential prompt, optional index write를 차단한다. `diff`의 external driver/textconv, Git LFS download, submodule update도 실행하지 않는다.
+
+Git executable을 absolute path로 확정한 뒤 child 환경은 clear하고 검토된 OS 변수와 안전한 `GIT_*`만 다시 설정한다. 이렇게 repository/object/config/askpass/SSH/trace override를 상속하지 않는다. `safe.directory` 오류를 앱이 전역 우회하지 않으며, conflict Result 저장은 repository root containment, symlink, 외부 변경을 재검증한 뒤 기존 safe writer만 사용한다. 상세 threat/test matrix는 `docs/20_GIT_TEST_PLAN.md`를 따른다.
+
 ## 3. 저장 안전성
 
 ### 필수 precondition
@@ -141,6 +147,8 @@ Phase 1 beta 초기에는 updater를 넣지 않는다. 다음을 모두 만족�
 - old version migration 테스트
 
 updater가 core 기능의 네트워크 0 원칙을 깨므로 opt-in 또는 명확한 설정을 제공한다.
+
+직접 설치본의 구현 결정과 실행 체크리스트는 `docs/16_R2_UPDATER_RUNBOOK.md`를 따른다. updater가 활성화된 뒤에도 고정된 HTTPS endpoint에 대한 opt-in update check만 허용하며, 일반 네트워크 API, telemetry, 사용자 파일·경로 전송은 계속 금지한다.
 
 ## 9. 릴리스 파이프라인
 

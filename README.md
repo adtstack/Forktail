@@ -156,6 +156,13 @@ npm run doctor
 14. `docs/12_DEFINITION_OF_DONE.md` — 완료 기준
 15. `docs/13_FIRST_SPRINT.md` — 첫 sprint 실행 순서
 16. `docs/14_PRODUCT_GAP_ROADMAP.md` — 실사용 제품 갭과 추가 기능 후보
+17. `docs/15_COMMERCIAL_COMPETITIVE_ROADMAP.md` — 상용 도구 대비 우선순위와 장기 제품 전략
+18. `docs/16_R2_UPDATER_RUNBOOK.md` — Phase 1 이후 opt-in updater 실행 계약
+19. `docs/17_GIT_INTEGRATION.md` — Phase 1 이후 read-only Git integration 제안
+20. `docs/18_GIT_BACKLOG.md` — Git 후보 이슈와 의존 순서
+21. `docs/19_GIT_PROMPT_PACK.md` — Git 이슈별 AI 구현 프롬프트
+22. `docs/20_GIT_TEST_PLAN.md` — Git parser·service·실제 repository 검증 계획
+23. `docs/21_GIT_REFERENCES.md` — Git 공식 문서와 안전 계약 근거
 
 ## 디렉터리 구조
 

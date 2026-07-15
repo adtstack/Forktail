@@ -9,7 +9,7 @@ if (!tag) {
   fail("Set RELEASE_TAG or run this script from a GitHub tag workflow.");
 }
 
-if (!/^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(tag)) {
+if (!/^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(tag)) {
   fail(`Release tag must look like vX.Y.Z or vX.Y.Z-prerelease, got ${tag}.`);
 }
 

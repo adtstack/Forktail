@@ -463,6 +463,8 @@ cargo test
 
 ## 7. 3-way merge와 Git 후보
 
+branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `docs/17_GIT_INTEGRATION.md`와 `docs/18_GIT_BACKLOG.md`를 따른다. 아래 `MRG-014`와 `INT-002`는 그보다 앞선 외부 tool adapter 안정화 작업이며, repository-aware Git 기능이 완료됐다는 뜻이 아니다.
+
 ### MRG-012. Conflict marker file resolver
 
 사용자 가치:
@@ -523,20 +525,29 @@ cargo test
 
 범위:
 
+- `MRG-012`의 기본·base 없는 Git conflict marker parser를 먼저 완료하거나 같은 수용 기준을 선행 이슈로 승격한다.
 - Git test repository를 만들고 conflict를 발생시킨다.
-- `git mergetool`에서 `forktail --mergetool %O %A %B %P` 흐름을 검증한다.
-- `trustExitCode = false` 정책과 저장 결과를 문서화한다.
+- custom `git mergetool`의 `$BASE`, `$LOCAL`, `$REMOTE`, `$MERGED`를 `forktail --mergetool`에 전달한다.
+- `$BASE`가 빈 인자이거나 사용할 수 없을 때 missing Base snapshot으로 보존한다.
+- `$MERGED`의 기존 내용을 초기 Result로 읽고 open fingerprint를 저장한다.
+- Git 임시 source가 recent session, active-session restore, recovery draft에 남지 않게 한다.
+- `trustExitCode = false`, tool-specific `hideResolved = false`, Save & Close/Abort, Git `.orig`와 Forktail `.bak.*` 정책을 문서화한다.
+- `%O/%A/%B/%P` custom merge driver는 범위에서 제외한다.
 
 수용 기준:
 
 - conflict repo에서 앱이 base/ours/theirs/output path를 올바르게 연다.
+- 앱 프로세스가 닫힐 때까지 Git이 임시 source를 보존한다.
+- 미해결 marker는 mergetool 성공 저장으로 처리하지 않는다.
 - 저장 후 Git working tree 파일이 기대 결과와 같다.
-- 사용자가 저장하지 않고 닫은 경우 Git 후속 확인 흐름이 문서와 일치한다.
+- 저장하거나 저장하지 않고 닫은 경우 모두 Git의 timestamp/사용자 확인 흐름과 문서가 일치한다.
+- Forktail 프로세스가 실행되는 동안 HEAD, refs, index가 바뀌지 않는다. 프로세스 종료 뒤 사용자가 성공을 확인해 `git mergetool` wrapper가 해당 path를 stage하는 단계는 별도 checkpoint로 기록한다.
 
 필요 테스트:
 
 - packaged binary 또는 release app path 기반 smoke.
 - macOS/Windows/Linux 각각 최소 1회.
+- path 공백/Unicode, add/add, delete/modify, 여러 파일 순차 실행, 외부 `$MERGED` 변경 fixture.
 
 ### MRG-015. Conflict summary sidebar
 
@@ -790,12 +801,16 @@ cargo test
 
 - 앱 안에서 명령어를 복사할 수 있게 하거나, CLI로 `forktail --print-git-config`를 제공한다.
 - 실제 `.gitconfig` 자동 수정은 첫 버전에서 제외한다.
+- difftool은 `$LOCAL`/`$REMOTE`, mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 사용한다.
+- generated mergetool config에는 tool-specific `mergetool.forktail.hideResolved=false`를 포함한다.
+- `%O/%A/%B/%P` custom merge driver 설정은 생성하지 않는다.
 
 수용 기준:
 
 - OS별 executable path 예시가 정확하다.
 - difftool과 mergetool 설정을 구분한다.
-- `trustExitCode = false` 이유를 짧게 설명한다.
+- 현재 GUI lifecycle에서는 `trustExitCode = false`가 필요한 이유를 짧게 설명한다.
+- generated config text가 shell로 평가된다는 점을 반영해 OS별 path 공백/quote snapshot을 검증한다.
 
 필요 테스트:
 

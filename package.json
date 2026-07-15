@@ -16,6 +16,9 @@
     "smoke:runtime:verify": "node scripts/prepare-runtime-smoke.mjs --verify",
     "sbom:generate": "node scripts/generate-sbom.mjs",
     "release:validate": "node scripts/validate-release.mjs",
+    "updater:config": "node scripts/write-updater-config.mjs",
+    "updater:manifest": "node scripts/generate-updater-manifest.mjs",
+    "updater:promotion": "node scripts/validate-updater-promotion.mjs",
     "tauri": "tauri",
     "check": "npm run typecheck && npm run test && npm run build"
   },

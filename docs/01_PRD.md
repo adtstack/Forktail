@@ -149,6 +149,8 @@ Phase 1에서 구현하지 않는다.
 - 플러그인 마켓
 - 협업·계정·동기화
 
+`MRG-009`의 외부 `git mergetool` 경로 adapter는 기존 3-way 화면을 여는 제한된 CLI 통합이다. branch/commit/index를 탐색하는 repository-aware Git 기능은 Phase 1에 포함하지 않으며, 안정화 이후 후보인 `docs/17_GIT_INTEGRATION.md`에서 별도로 다룬다.
+
 ## 6. 출시 기준
 
 `docs/12_DEFINITION_OF_DONE.md`의 모든 Release DoD를 만족해야 한다. 특히 저장 내구성, 인코딩 회귀, 세 운영체제 smoke test가 끝나기 전에는 stable 태그를 만들지 않는다.

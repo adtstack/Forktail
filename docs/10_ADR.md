@@ -132,3 +132,25 @@ Phase 1은 텍스트 파일을 최대 64 MiB까지만 메모리에 올린다. `r
 - 대용량 입력이 WebView와 Rust heap을 예측 불가능하게 압박하지 않는다.
 - 64 MiB 초과 파일은 diff가 아니라 명확한 오류 UX로 처리한다.
 - 한도를 높이거나 streaming diff를 추가하려면 fixture, benchmark, cancellation, partial rendering, 저장/병합 경계를 함께 설계해야 한다.
+
+## ADR-009: 직접 설치본의 updater feed는 Cloudflare R2 static manifest를 사용
+
+**상태:** Accepted, implementation pending (`REL-008`)
+
+### Context
+
+forktail 저장소는 비공개다. 설치 앱은 사용자 GitHub token 없이 업데이트 artifact를 받아야 하므로 private GitHub Release asset을 updater endpoint로 사용할 수 없다. 동시에 Phase 1의 local-first/privacy 원칙 때문에 동적 update server, 계정, telemetry를 추가하지 않는 것이 바람직하다.
+
+### Decision
+
+직접 설치한 Windows/macOS/Linux 앱의 updater artifact와 static manifest는 Cloudflare R2의 전용 공개 버킷 및 `updates.<OWNED_DOMAIN>` custom HTTPS domain으로 게시한다. GitHub Actions는 protected production environment에서만 버전 고정 artifact를 먼저 업로드하고, 모든 검증 뒤 `stable/latest.json`을 마지막에 게시한다.
+
+Tauri updater signature와 OS 코드서명은 별개로 모두 사용한다. 앱은 명시적 opt-in에서만 고정 static manifest를 조회하며, GitHub repository나 R2에 사용자 파일을 보내지 않는다.
+
+### Consequences
+
+- GitHub source와 write credential은 비공개로 유지하면서 installer/updater download만 공개할 수 있다.
+- 별도 server/Worker 없이 시작할 수 있지만, R2 버킷·custom domain·cache policy·token rotation을 운영해야 한다.
+- static manifest는 단계적 rollout과 안전한 automatic downgrade를 제공하지 않는다. 초기 beta는 수동 배포하고, rollback은 higher-version corrective release 또는 수동 installer를 사용한다.
+- versioned artifact는 immutable이며, `stable/latest.json`만 가변 pointer다.
+- 구체적 준비물, artifact layout, CI 순서, incident 대응, 검증은 `docs/16_R2_UPDATER_RUNBOOK.md`가 진실의 원천이다.

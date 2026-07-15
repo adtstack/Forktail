@@ -264,6 +264,7 @@ Release:
 - clean VM smoke
 - checksum/SBOM
 - manual save failure test
+- `REL-008` updater: R2 static manifest의 전체 platform 계약, 유효하지 않은 signature 거절, vN→vN+1 세 OS update, dirty session install guard, endpoint 장애, old-version migration (`docs/16_R2_UPDATER_RUNBOOK.md`)
 
 ## 10. 수동 smoke checklist
 
@@ -278,3 +279,9 @@ Release:
 - [ ] dark/light/system theme
 - [ ] app close 중 dirty prompt
 - [ ] installer upgrade/uninstall
+
+## 11. 후속 Git integration 검증
+
+repository-aware branch/commit/index 비교는 현재 Phase 1 release gate가 아니다. `docs/17_GIT_INTEGRATION.md`의 시작 게이트를 통과해 기능을 승격하면 이 문서의 공통 gate와 `docs/20_GIT_TEST_PLAN.md`를 모두 적용한다.
+
+외부 `git mergetool` packaged smoke(`MRG-014`)는 `$BASE`, `$LOCAL`, `$REMOTE`, `$MERGED` 네 경로와 missing Base, 기존 `$MERGED` result/fingerprint, 기본·base 없는 Git marker, 임시 파일 lifecycle, `trustExitCode=false`/`hideResolved=false` 흐름을 검증한다. Forktail 실행 중 index 불변과 wrapper 종료 후 Git의 예상 staging은 서로 다른 checkpoint에서 확인한다. `%O/%A/%B/%P` custom merge driver는 별도 계약이며 현재 범위에 포함하지 않는다.

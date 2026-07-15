@@ -15,6 +15,11 @@ on:
         required: true
         default: true
         type: boolean
+      publish_updater:
+        description: "Publish signed updater artifacts to R2 (stable releases only)"
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: write
@@ -31,6 +36,8 @@ jobs:
     outputs:
       tag: ${{ steps.release.outputs.tag }}
       prerelease: ${{ steps.release.outputs.prerelease }}
+      publish_updater: ${{ steps.release.outputs.publish_updater }}
+      commit: ${{ steps.source.outputs.commit }}
     steps:
       - name: Resolve release inputs
         id: release
@@ -39,22 +46,70 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           INPUT_TAG: ${{ inputs.tag }}
           INPUT_PRERELEASE: ${{ inputs.prerelease }}
+          INPUT_PUBLISH_UPDATER: ${{ inputs.publish_updater }}
           REF_NAME: ${{ github.ref_name }}
+          ENABLE_R2_UPDATER: ${{ vars.ENABLE_R2_UPDATER }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             tag="$INPUT_TAG"
             prerelease="$INPUT_PRERELEASE"
+            publish_updater="$INPUT_PUBLISH_UPDATER"
           else
             tag="$REF_NAME"
+            # Keep the current GitHub draft-release policy: tag pushes are
+            # prereleases until an operator explicitly promotes the draft.
             prerelease="true"
+          fi
+          if [[ ! "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like vX.Y.Z or vX.Y.Z-prerelease." >&2
+            exit 1
+          fi
+          tag_without_build_metadata="${tag%%+*}"
+          if [ "$EVENT_NAME" != "workflow_dispatch" ]; then
+            if [[ "$tag_without_build_metadata" != *-* ]] && [ "$ENABLE_R2_UPDATER" = "true" ]; then
+              publish_updater="true"
+            else
+              publish_updater="false"
+            fi
+          fi
+          case "$prerelease" in true|false) ;; *)
+            echo "prerelease must be true or false." >&2
+            exit 1
+            ;;
+          esac
+          case "$publish_updater" in true|false) ;; *)
+            echo "publish_updater must be true or false." >&2
+            exit 1
+            ;;
+          esac
+          if [ "$publish_updater" = "true" ] && [[ "$tag_without_build_metadata" == *-* ]]; then
+            echo "R2 updater publishing is only allowed for stable vX.Y.Z tags." >&2
+            exit 1
           fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
+          echo "publish_updater=$publish_updater" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4.2.2
         with:
           ref: ${{ steps.release.outputs.tag }}
+          fetch-depth: 0
+
+      - name: Pin the validated tag to its commit
+        id: source
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.release.outputs.tag }}
+        run: |
+          set -euo pipefail
+          tag_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          head_commit="$(git rev-parse HEAD)"
+          if [ "$tag_commit" != "$head_commit" ]; then
+            echo "Checked out commit does not match immutable release tag." >&2
+            exit 1
+          fi
+          echo "commit=$head_commit" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4.4.0
         with:
@@ -112,10 +167,15 @@ jobs:
         run: npm run sbom:generate
 
       - name: Verify SBOM and NOTICE were produced
+        env:
+          PUBLISH_UPDATER: ${{ steps.release.outputs.publish_updater }}
         run: |
           set -euo pipefail
           test -f dist/sbom/forktail-npm.cdx.json
           test -f dist/sbom/NOTICE.txt
+          if [ "$PUBLISH_UPDATER" = "true" ]; then
+            test -f dist/sbom/forktail-rust.cdx.json
+          fi
           echo "SBOM artifacts present"
 
       - name: Upload SBOM artifacts
@@ -162,7 +222,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4.2.2
         with:
-          ref: ${{ needs.validate.outputs.tag }}
+          ref: ${{ needs.validate.outputs.commit }}
 
       - uses: actions/setup-node@v4.4.0
         with:
@@ -281,17 +341,617 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-  draft-release:
+  build_updater:
+    name: Build signed updater ${{ matrix.platform }}
+    if: needs.validate.outputs.publish_updater == 'true'
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    environment: production-updates
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: macOS
+            os: macos-14
+            bundles: app,dmg
+            artifact: macos
+            target: universal-apple-darwin
+          - platform: Windows
+            os: windows-2022
+            bundles: nsis
+            artifact: windows
+            target: ""
+          - platform: Linux
+            os: ubuntu-22.04
+            bundles: appimage
+            artifact: linux
+            target: ""
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+
+      - uses: actions/setup-node@v4.4.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install Linux updater bundle dependencies
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            build-essential \
+            pkg-config \
+            curl \
+            wget \
+            file \
+            libgtk-3-dev \
+            libxdo-dev \
+            libssl-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libfuse2
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Validate release tag and versions
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: npm run release:validate
+
+      - name: Verify protected updater release configuration
+        shell: bash
+        env:
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          UPDATER_BASE_URL: ${{ vars.UPDATER_BASE_URL }}
+          TAURI_UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_WINDOWS_CERTIFICATE_THUMBPRINT: ${{ vars.TAURI_WINDOWS_CERTIFICATE_THUMBPRINT }}
+          TAURI_WINDOWS_TIMESTAMP_URL: ${{ vars.TAURI_WINDOWS_TIMESTAMP_URL }}
+          RELEASE_SIGNING_READY: ${{ vars.RELEASE_SIGNING_READY }}
+        run: |
+          set -euo pipefail
+          for name in R2_BUCKET UPDATER_BASE_URL TAURI_UPDATER_ENDPOINT TAURI_UPDATER_PUBLIC_KEY TAURI_WINDOWS_CERTIFICATE_THUMBPRINT TAURI_WINDOWS_TIMESTAMP_URL; do
+            if [ -z "${!name}" ]; then
+              echo "Set repository variable $name before enabling R2 updater publishing." >&2
+              exit 1
+            fi
+          done
+          if [ "$RELEASE_SIGNING_READY" != "true" ]; then
+            echo "Set RELEASE_SIGNING_READY=true only after macOS and Windows public signing are configured." >&2
+            exit 1
+          fi
+          expected_endpoint="${UPDATER_BASE_URL%/}/stable/latest.json"
+          if [ "$TAURI_UPDATER_ENDPOINT" != "$expected_endpoint" ]; then
+            echo "TAURI_UPDATER_ENDPOINT must equal UPDATER_BASE_URL/stable/latest.json." >&2
+            exit 1
+          fi
+          bundle_identifier="$(node -p "JSON.parse(require('node:fs').readFileSync('src-tauri/tauri.conf.json', 'utf8')).identifier")"
+          if [[ -z "$bundle_identifier" || "$bundle_identifier" == dev.local.* ]]; then
+            echo "Set a non-development reverse-domain bundle identifier before public updater publishing." >&2
+            exit 1
+          fi
+
+      - name: Generate updater config overlay
+        env:
+          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
+          TAURI_UPDATER_ENDPOINT: ${{ vars.TAURI_UPDATER_ENDPOINT }}
+          TAURI_WINDOWS_CERTIFICATE_THUMBPRINT: ${{ vars.TAURI_WINDOWS_CERTIFICATE_THUMBPRINT }}
+          TAURI_WINDOWS_TIMESTAMP_URL: ${{ vars.TAURI_WINDOWS_TIMESTAMP_URL }}
+        run: npm run updater:config -- "$RUNNER_TEMP/tauri.updater.json"
+
+      - name: Import macOS Developer ID certificate
+        if: matrix.platform == 'macOS'
+        shell: bash
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY KEYCHAIN_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "Missing production macOS signing secret: $name" >&2
+              exit 1
+            fi
+          done
+          certificate="$RUNNER_TEMP/apple-developer-id.p12"
+          keychain="$RUNNER_TEMP/forktail-build.keychain"
+          printf '%s' "$APPLE_CERTIFICATE" | base64 -D > "$certificate"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security default-keychain -s "$keychain"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security import "$certificate" -k "$keychain" -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$keychain"
+          security find-identity -v -p codesigning "$keychain" | grep -F "\"$APPLE_SIGNING_IDENTITY\""
+          rm -f "$certificate"
+
+      - name: Import Windows Authenticode certificate
+        if: matrix.platform == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          TAURI_WINDOWS_CERTIFICATE_THUMBPRINT: ${{ vars.TAURI_WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          $required = @("WINDOWS_CERTIFICATE", "WINDOWS_CERTIFICATE_PASSWORD", "TAURI_WINDOWS_CERTIFICATE_THUMBPRINT")
+          foreach ($name in $required) {
+            if ([string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($name))) {
+              throw "Missing production Windows signing configuration: $name"
+            }
+          }
+          $certificatePath = Join-Path $env:RUNNER_TEMP "forktail-windows-signing.pfx"
+          try {
+            [System.IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+            $certificate = Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password
+            if ($certificate.Thumbprint -ne $env:TAURI_WINDOWS_CERTIFICATE_THUMBPRINT.ToUpperInvariant()) {
+              throw "Imported Windows certificate does not match TAURI_WINDOWS_CERTIFICATE_THUMBPRINT."
+            }
+          } finally {
+            Remove-Item -Force -ErrorAction SilentlyContinue $certificatePath
+          }
+
+      - name: Install macOS universal Rust targets
+        if: matrix.os == 'macos-14'
+        run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+
+      - name: Build signed Tauri updater bundle
+        if: matrix.platform != 'macOS'
+        shell: bash
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+          BUILD_TARGET: ${{ matrix.target }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required for updater artifact signatures." >&2
+            exit 1
+          fi
+          args=(--bundles "$BUNDLES" --config "$RUNNER_TEMP/tauri.updater.json")
+          if [ -n "$BUILD_TARGET" ]; then
+            args+=(--target "$BUILD_TARGET")
+          fi
+          npm run tauri build -- "${args[@]}"
+
+      - name: Build signed and notarized macOS updater bundle
+        if: matrix.platform == 'macOS'
+        shell: bash
+        env:
+          BUNDLES: ${{ matrix.bundles }}
+          BUILD_TARGET: ${{ matrix.target }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            echo "TAURI_SIGNING_PRIVATE_KEY is required for updater artifact signatures." >&2
+            exit 1
+          fi
+          for name in APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID APPLE_SIGNING_IDENTITY; do
+            if [ -z "${!name}" ]; then
+              echo "Missing production macOS notarization configuration: $name" >&2
+              exit 1
+            fi
+          done
+          args=(--bundles "$BUNDLES" --config "$RUNNER_TEMP/tauri.updater.json")
+          if [ -n "$BUILD_TARGET" ]; then
+            args+=(--target "$BUILD_TARGET")
+          fi
+          npm run tauri build -- "${args[@]}"
+
+      - name: Verify macOS updater payload signing and notarization
+        if: matrix.platform == 'macOS'
+        shell: bash
+        env:
+          BUILD_TARGET: ${{ matrix.target }}
+        run: |
+          set -euo pipefail
+          bundle_root="src-tauri/target/${BUILD_TARGET}/release/bundle"
+          archive="$(find "$bundle_root/macos" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"
+          test -n "$archive"
+          extraction="$(mktemp -d)"
+          tar -xzf "$archive" -C "$extraction"
+          app="$(find "$extraction" -maxdepth 3 -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          codesign --verify --deep --strict --verbose=4 "$app"
+          codesign -dv --verbose=4 "$app" 2>&1 | grep -F "Authority=Developer ID Application:"
+          xcrun stapler validate "$app"
+
+      - name: Verify Windows updater payload Authenticode signature
+        if: matrix.platform == 'Windows'
+        shell: pwsh
+        env:
+          TAURI_WINDOWS_CERTIFICATE_THUMBPRINT: ${{ vars.TAURI_WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          $installer = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Filter *.exe -File | Select-Object -First 1
+          if ($null -eq $installer) {
+            throw "Windows updater installer was not produced."
+          }
+          $signature = Get-AuthenticodeSignature -FilePath $installer.FullName
+          if ($signature.Status -ne "Valid") {
+            throw "Windows updater installer signature status is $($signature.Status)."
+          }
+          if ($signature.SignerCertificate.Thumbprint -ne $env:TAURI_WINDOWS_CERTIFICATE_THUMBPRINT.ToUpperInvariant()) {
+            throw "Windows updater installer was not signed by the imported production certificate."
+          }
+
+      - name: Stage updater artifacts
+        shell: bash
+        env:
+          PLATFORM: ${{ matrix.platform }}
+          BUILD_TARGET: ${{ matrix.target }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          bundle_root="src-tauri/target/release/bundle"
+          if [ -n "$BUILD_TARGET" ]; then
+            bundle_root="src-tauri/target/${BUILD_TARGET}/release/bundle"
+          fi
+          mkdir -p updater-artifact
+          case "$PLATFORM" in
+            macOS)
+              update_path="$(find "$bundle_root/macos" -maxdepth 1 -type f -name '*.app.tar.gz' -print -quit)"
+              dmg_path="$(find "$bundle_root/dmg" -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+              test -n "$update_path"
+              test -n "$dmg_path"
+              test -f "${update_path}.sig"
+              cp "$dmg_path" "updater-artifact/forktail-${RELEASE_TAG}-macos-universal.dmg"
+              cp "$update_path" "updater-artifact/forktail-${RELEASE_TAG}-macos-universal.app.tar.gz"
+              cp "${update_path}.sig" "updater-artifact/forktail-${RELEASE_TAG}-macos-universal.app.tar.gz.sig"
+              ;;
+            Windows)
+              update_path="$(find "$bundle_root/nsis" -maxdepth 1 -type f -name '*.exe' -print -quit)"
+              test -n "$update_path"
+              test -f "${update_path}.sig"
+              cp "$update_path" "updater-artifact/forktail-${RELEASE_TAG}-windows-x64-setup.exe"
+              cp "${update_path}.sig" "updater-artifact/forktail-${RELEASE_TAG}-windows-x64-setup.exe.sig"
+              ;;
+            Linux)
+              update_path="$(find "$bundle_root/appimage" -maxdepth 1 -type f -name '*.AppImage' -print -quit)"
+              test -n "$update_path"
+              test -f "${update_path}.sig"
+              cp "$update_path" "updater-artifact/forktail-${RELEASE_TAG}-linux-x86_64.AppImage"
+              cp "${update_path}.sig" "updater-artifact/forktail-${RELEASE_TAG}-linux-x86_64.AppImage.sig"
+              ;;
+            *)
+              echo "Unsupported updater platform: $PLATFORM" >&2
+              exit 1
+              ;;
+          esac
+
+      - uses: actions/upload-artifact@v4.6.2
+        with:
+          name: forktail-updater-${{ matrix.artifact }}
+          path: updater-artifact/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish_updater:
+    name: Publish signed updater artifacts to R2
+    needs:
+      - validate
+      - build_updater
+      - draft_release
+    if: >-
+      needs.validate.outputs.publish_updater == 'true' &&
+      needs.build_updater.result == 'success' &&
+      needs.draft_release.result == 'success'
+    runs-on: ubuntu-22.04
+    environment: production-updates
+    timeout-minutes: 20
+    concurrency:
+      group: r2-updater-stable-manifest
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+
+      - uses: actions/download-artifact@v4.3.0
+        with:
+          path: release-inputs
+
+      - name: Verify release tag remains pinned to the validated commit
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          tag_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [ "$tag_commit" != "$RELEASE_COMMIT" ]; then
+            echo "Release tag moved after validation; refuse R2 publication." >&2
+            exit 1
+          fi
+
+      - name: Stage immutable R2 release tree
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          UPDATER_BASE_URL: ${{ vars.UPDATER_BASE_URL }}
+        run: |
+          set -euo pipefail
+          release_root="$RUNNER_TEMP/r2-release/releases/$RELEASE_TAG"
+          artifact_root="$release_root/artifacts"
+          mkdir -p "$artifact_root" "$release_root/sbom"
+          copy_one() {
+            local filename destination source
+            filename="$1"
+            destination="$2"
+            source="$(find release-inputs -type f -name "$filename" -print -quit)"
+            test -n "$source"
+            cp "$source" "$destination"
+          }
+          copy_one "forktail-${RELEASE_TAG}-macos-universal.dmg" "$artifact_root/forktail-${RELEASE_TAG}-macos-universal.dmg"
+          copy_one "forktail-${RELEASE_TAG}-macos-universal.app.tar.gz" "$artifact_root/forktail-${RELEASE_TAG}-macos-universal.app.tar.gz"
+          copy_one "forktail-${RELEASE_TAG}-macos-universal.app.tar.gz.sig" "$artifact_root/forktail-${RELEASE_TAG}-macos-universal.app.tar.gz.sig"
+          copy_one "forktail-${RELEASE_TAG}-windows-x64-setup.exe" "$artifact_root/forktail-${RELEASE_TAG}-windows-x64-setup.exe"
+          copy_one "forktail-${RELEASE_TAG}-windows-x64-setup.exe.sig" "$artifact_root/forktail-${RELEASE_TAG}-windows-x64-setup.exe.sig"
+          copy_one "forktail-${RELEASE_TAG}-linux-x86_64.AppImage" "$artifact_root/forktail-${RELEASE_TAG}-linux-x86_64.AppImage"
+          copy_one "forktail-${RELEASE_TAG}-linux-x86_64.AppImage.sig" "$artifact_root/forktail-${RELEASE_TAG}-linux-x86_64.AppImage.sig"
+          for file in forktail-npm.cdx.json forktail-rust.cdx.json NOTICE.txt; do
+            copy_one "$file" "$release_root/sbom/$file"
+          done
+          (
+            cd "$release_root"
+            find . -type f ! -name checksums.txt -print0 \
+              | sort -z \
+              | xargs -0 shasum -a 256 > checksums.txt
+          )
+          mkdir -p "$RUNNER_TEMP/r2-release/stable"
+          node scripts/generate-updater-manifest.mjs \
+            --tag "$RELEASE_TAG" \
+            --base-url "$UPDATER_BASE_URL" \
+            --artifacts-dir "$artifact_root" \
+            --out "$RUNNER_TEMP/r2-release/stable/latest.json"
+
+      - name: Upload immutable artifacts and verify public copies
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          AWS_EC2_METADATA_DISABLED: true
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          UPDATER_BASE_URL: ${{ vars.UPDATER_BASE_URL }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ACCOUNT_ID R2_BUCKET UPDATER_BASE_URL; do
+            if [ -z "${!name}" ]; then
+              echo "Missing protected R2 configuration: $name" >&2
+              exit 1
+            fi
+          done
+          command -v aws >/dev/null
+          aws --version
+          aws s3api put-object help 2>&1 | grep -F -- "--if-none-match" >/dev/null
+          aws s3api put-object help 2>&1 | grep -F -- "--if-match" >/dev/null
+          r2_endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          release_root="$RUNNER_TEMP/r2-release/releases/$RELEASE_TAG"
+          aws_r2() {
+            aws --no-cli-pager --region auto --endpoint-url "$r2_endpoint" "$@"
+          }
+          content_type() {
+            case "$1" in
+              *.json) echo "application/json" ;;
+              *.txt|*.sig) echo "text/plain; charset=utf-8" ;;
+              *.dmg) echo "application/x-apple-diskimage" ;;
+              *.tar.gz) echo "application/gzip" ;;
+              *) echo "application/octet-stream" ;;
+            esac
+          }
+          sha256_file() {
+            shasum -a 256 "$1" | awk '{print $1}'
+          }
+          verify_existing_object() {
+            local file key downloaded
+            file="$1"
+            key="$2"
+            downloaded="$(mktemp "$RUNNER_TEMP/r2-existing.XXXXXX")"
+            aws_r2 s3api get-object --bucket "$R2_BUCKET" --key "$key" "$downloaded" >/dev/null
+            if [ "$(sha256_file "$file")" != "$(sha256_file "$downloaded")" ]; then
+              echo "Existing immutable R2 object differs: $key" >&2
+              exit 1
+            fi
+            rm -f "$downloaded"
+          }
+          upload_immutable() {
+            local file relative key
+            file="$1"
+            relative="$2"
+            key="releases/${RELEASE_TAG}/${relative}"
+            if aws_r2 s3api head-object --bucket "$R2_BUCKET" --key "$key" >/dev/null 2>&1; then
+              verify_existing_object "$file" "$key"
+              return
+            fi
+            if ! aws_r2 s3api put-object \
+              --bucket "$R2_BUCKET" \
+              --key "$key" \
+              --body "$file" \
+              --if-none-match "*" \
+              --cache-control "public, max-age=31536000, immutable" \
+              --content-type "$(content_type "$file")" >/dev/null; then
+              if aws_r2 s3api head-object --bucket "$R2_BUCKET" --key "$key" >/dev/null 2>&1; then
+                verify_existing_object "$file" "$key"
+                return
+              fi
+              echo "Could not upload immutable R2 object: $key" >&2
+              exit 1
+            fi
+          }
+          while IFS= read -r -d '' file; do
+            relative="${file#${release_root}/}"
+            upload_immutable "$file" "$relative"
+          done < <(find "$release_root" -type f -print0 | sort -z)
+          while read -r expected relative; do
+            test -n "$expected"
+            remote="${UPDATER_BASE_URL%/}/releases/${RELEASE_TAG}/${relative#./}"
+            downloaded="$RUNNER_TEMP/$(basename "$relative")"
+            curl --fail --silent --show-error --retry 3 "$remote" --output "$downloaded"
+            actual="$(shasum -a 256 "$downloaded" | awk '{print $1}')"
+            test "$actual" = "$expected"
+          done < "$release_root/checksums.txt"
+          curl --fail --silent --show-error --retry 3 \
+            "${UPDATER_BASE_URL%/}/releases/${RELEASE_TAG}/checksums.txt" \
+            --output "$RUNNER_TEMP/published-checksums.txt"
+          cmp "$release_root/checksums.txt" "$RUNNER_TEMP/published-checksums.txt"
+
+      - name: Publish stable manifest last
+        shell: bash
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REGION: auto
+          AWS_EC2_METADATA_DISABLED: true
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          UPDATER_BASE_URL: ${{ vars.UPDATER_BASE_URL }}
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          set -euo pipefail
+          for name in AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_ACCOUNT_ID R2_BUCKET UPDATER_BASE_URL; do
+            if [ -z "${!name}" ]; then
+              echo "Missing protected R2 configuration: $name" >&2
+              exit 1
+            fi
+          done
+          command -v aws >/dev/null
+          r2_endpoint="https://${R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          manifest="$RUNNER_TEMP/r2-release/stable/latest.json"
+          test -f "$manifest"
+          aws_r2() {
+            aws --no-cli-pager --region auto --endpoint-url "$r2_endpoint" "$@"
+          }
+          if manifest_etag="$(aws_r2 s3api head-object \
+            --bucket "$R2_BUCKET" \
+            --key "stable/latest.json" \
+            --query ETag \
+            --output text 2>/dev/null)"; then
+            current_manifest="$(mktemp "$RUNNER_TEMP/r2-current-manifest.XXXXXX")"
+            aws_r2 s3api get-object \
+              --bucket "$R2_BUCKET" \
+              --key "stable/latest.json" \
+              "$current_manifest" >/dev/null
+            npm run updater:promotion -- \
+              --candidate "$manifest" \
+              --current "$current_manifest"
+            put_condition=(--if-match "$manifest_etag")
+          else
+            put_condition=(--if-none-match "*")
+          fi
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          tag_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [ "$tag_commit" != "$RELEASE_COMMIT" ]; then
+            echo "Release tag moved before stable manifest promotion; refuse publication." >&2
+            exit 1
+          fi
+          aws_r2 s3api put-object \
+            --bucket "$R2_BUCKET" \
+            --key "stable/latest.json" \
+            --body "$manifest" \
+            "${put_condition[@]}" \
+            --cache-control "no-store, max-age=0, must-revalidate" \
+            --content-type "application/json" >/dev/null
+          curl --fail --silent --show-error --retry 3 --header "Cache-Control: no-cache" \
+            "${UPDATER_BASE_URL%/}/stable/latest.json" \
+            --output "$RUNNER_TEMP/published-latest.json"
+          cmp "$manifest" "$RUNNER_TEMP/published-latest.json"
+
+  draft_release:
     name: Create draft release
     needs:
       - validate
       - build
+      - build_updater
+    if: >-
+      always() &&
+      needs.validate.result == 'success' &&
+      needs.build.result == 'success' &&
+      (needs.validate.outputs.publish_updater != 'true' || needs.build_updater.result == 'success')
     runs-on: ubuntu-22.04
     timeout-minutes: 15
     steps:
+      - uses: actions/checkout@v4.2.2
+        with:
+          ref: ${{ needs.validate.outputs.commit }}
+
+      - name: Verify release tag remains pinned to the validated commit
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
+        run: |
+          set -euo pipefail
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          tag_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [ "$tag_commit" != "$RELEASE_COMMIT" ]; then
+            echo "Release tag moved after validation; refuse draft release creation." >&2
+            exit 1
+          fi
+
       - uses: actions/download-artifact@v4.3.0
         with:
-          path: release-artifacts
+          path: downloaded-artifacts
+
+      - name: Stage GitHub audit release assets
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          PUBLISH_UPDATER: ${{ needs.validate.outputs.publish_updater }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          copy_named() {
+            local filename source
+            filename="$1"
+            source="$(find downloaded-artifacts -type f -name "$filename" -print -quit)"
+            test -n "$source"
+            cp "$source" "release-artifacts/$filename"
+          }
+          copy_optional() {
+            local filename source
+            filename="$1"
+            source="$(find downloaded-artifacts -type f -name "$filename" -print -quit || true)"
+            if [ -n "$source" ]; then
+              cp "$source" "release-artifacts/$filename"
+            fi
+          }
+          if [ "$PUBLISH_UPDATER" = "true" ]; then
+            copy_named "forktail-${RELEASE_TAG}-macos-universal.dmg"
+            copy_named "forktail-${RELEASE_TAG}-macos-universal.app.tar.gz"
+            copy_named "forktail-${RELEASE_TAG}-macos-universal.app.tar.gz.sig"
+            copy_named "forktail-${RELEASE_TAG}-windows-x64-setup.exe"
+            copy_named "forktail-${RELEASE_TAG}-windows-x64-setup.exe.sig"
+            copy_named "forktail-${RELEASE_TAG}-linux-x86_64.AppImage"
+            copy_named "forktail-${RELEASE_TAG}-linux-x86_64.AppImage.sig"
+            copy_named "forktail-npm.cdx.json"
+            copy_named "forktail-rust.cdx.json"
+            copy_named "NOTICE.txt"
+          else
+            copy_named "forktail-macos-universal-${RELEASE_TAG}.dmg"
+            copy_named "forktail-windows-x64-${RELEASE_TAG}.exe"
+            copy_named "forktail-linux-x86_64-${RELEASE_TAG}.AppImage"
+            copy_named "forktail-npm.cdx.json"
+            copy_named "NOTICE.txt"
+            copy_optional "forktail-rust.cdx.json"
+          fi
 
       - name: Generate checksums
         shell: bash
@@ -302,15 +962,37 @@ jobs:
             | xargs -0 shasum -a 256 \
             > release-artifacts/checksums.txt
 
-      - name: Create unsigned draft GitHub release
+      - name: Create draft GitHub release
         shell: bash
         env:
           GH_REPO: ${{ github.repository }}
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ needs.validate.outputs.tag }}
+          RELEASE_COMMIT: ${{ needs.validate.outputs.commit }}
           PRERELEASE: ${{ needs.validate.outputs.prerelease }}
+          PUBLISH_UPDATER: ${{ needs.validate.outputs.publish_updater }}
         run: |
           set -euo pipefail
+          git fetch --force origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          tag_commit="$(git rev-parse --verify "refs/tags/${RELEASE_TAG}^{commit}")"
+          if [ "$tag_commit" != "$RELEASE_COMMIT" ]; then
+            echo "Release tag moved before draft release creation; refuse publication." >&2
+            exit 1
+          fi
+          if [ "$PUBLISH_UPDATER" = "true" ]; then
+          cat > release-notes.md <<'NOTES'
+          Draft release audit artifacts for forktail.
+
+          Security status:
+          - This draft contains the signed payloads that the protected R2 publisher will promote only after this audit record succeeds.
+          - These GitHub assets are audit copies of the signed R2 artifacts; installed apps use the R2 feed, not GitHub Release assets.
+          - In-app update checks and installs remain unavailable until REL-008B is integrated into the shipped app.
+
+          SBOM and NOTICE (REL-007):
+          - forktail-npm.cdx.json / forktail-rust.cdx.json: CycloneDX SBOMs covering transitive dependencies.
+          - NOTICE.txt: direct dependency license notices.
+          NOTES
+          else
           cat > release-notes.md <<'NOTES'
           Draft release artifacts for forktail.
 
@@ -323,6 +1005,7 @@ jobs:
           - forktail-npm.cdx.json / forktail-rust.cdx.json: CycloneDX SBOMs covering transitive dependencies.
           - NOTICE.txt: direct dependency license notices.
           NOTES
+          fi
 
           mapfile -d '' assets < <(find release-artifacts -type f -print0 | sort -z)
           create_flags=(--draft --title "forktail ${RELEASE_TAG}" --notes-file release-notes.md)

@@ -26,20 +26,19 @@
 
 1. Apple Developer Program 가입 (연간 비용).
 2. Developer ID Application 인증서 발급.
-3. `release.yml`의 macOS 빌드 잡에 환경 변수 주입:
-   - `APPLE_DEVELOPER_ID` (인증서 이름)
-   - `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID` (notarization용)
-4. `tauri.conf.json`의 `bundle.macOS.signingIdentity` / `providerShortName` 설정.
-5. 빌드 후 `xcrun notarytool submit` + `xcrun stapler staple` 수행.
-6. `codesign --verify --deep --strict` 통과 확인 (이미 release.yml에 있음).
+3. protected `production-updates` environment에 `APPLE_CERTIFICATE`(base64 `.p12`), `APPLE_CERTIFICATE_PASSWORD`, `KEYCHAIN_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`(app-specific password), `APPLE_TEAM_ID`를 저장.
+4. `ENABLE_R2_UPDATER=true` production workflow는 `.p12`를 ephemeral keychain에 import하고 `APPLE_SIGNING_IDENTITY`로 Tauri build를 수행한다.
+5. Tauri가 build 중 notarization/stapling을 수행하도록 Apple ID credentials를 전달하고, workflow가 생성된 `.app.tar.gz`를 다시 풀어 `codesign` Developer ID authority와 `xcrun stapler validate`를 확인하게 한다.
+6. 위 검증이 실제 release run에서 통과하기 전에는 `RELEASE_SIGNING_READY=true`로 바꾸지 않는다.
 
 ### Windows
 
 1. Authenticode 코드 서명 인증서 구매 (OV 또는 EV).
 2. 인증서를 GitHub Actions secret으로 등록 (base64 인코딩).
-3. `release.yml`의 Windows 빌드 잡에 `TAURI_SIGNING_PRIVATE_KEY` 환경 변수 주입.
-4. `signtool sign` 또는 `tauri-sign` 적용.
-5. 서명 후 `signtool verify` 통과 확인.
+3. PFX standard path에서는 protected `production-updates` environment에 `WINDOWS_CERTIFICATE`(base64 `.pfx`)와 `WINDOWS_CERTIFICATE_PASSWORD`를 저장하고, repository variable에 해당 40자리 SHA-1 `TAURI_WINDOWS_CERTIFICATE_THUMBPRINT`와 HTTPS `TAURI_WINDOWS_TIMESTAMP_URL`을 넣는다.
+4. workflow가 PFX를 Windows certificate store에 import하고 Tauri overlay에 thumbprint/digest/timestamp를 전달한다. `TAURI_SIGNING_PRIVATE_KEY`는 **Windows Authenticode 키가 아니라 Tauri updater signature 키**다.
+5. workflow가 final NSIS `.exe`의 `Get-AuthenticodeSignature` status와 signer thumbprint를 확인한다.
+6. EV/HSM/Azure signing을 쓸 경우에는 `bundle.windows.signCommand` 기반의 별도 adapter와 같은 post-build 검증을 추가한다.
 
 ### Linux
 
@@ -48,7 +47,7 @@
 
 ## 사용자 안내 텍스트 (릴리스 노트 표준 문구)
 
-모든 prerelease 릴리스 노트에 포함되는 표준 안내:
+R2 updater를 publish하지 않는 baseline prerelease 릴리스 노트에 포함되는 표준 안내:
 
 ```
 Security status:
@@ -64,7 +63,7 @@ SBOM and NOTICE (REL-007):
 - NOTICE.txt: direct dependency license notices.
 ```
 
-이 문구는 `.github/workflows/release.yml`의 `release-notes.md` 템플릿에 하드코딩돼 있으며, 서명 상태가 변경되면 함께 갱신해야 한다.
+이 문구는 `.github/workflows/release.yml`의 `release-notes.md` 템플릿에 하드코딩돼 있다. protected R2 updater path가 성공하면 workflow는 같은 signed artifact를 GitHub audit copy로 붙이는 별도 문구를 사용한다. endpoint, signing, R2 credential의 정확한 설정은 `docs/16_R2_UPDATER_RUNBOOK.md`를 따른다.
 
 ## 관련 이슈
 

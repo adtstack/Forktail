@@ -1,6 +1,6 @@
 # 04. Issue-sized Backlog
 
-이 문서의 각 행은 원칙적으로 하나의 PR이다. AI 에이전트에게 여러 행을 한 번에 주지 않는다. Phase 1 backlog는 텍스트 2-way, 폴더 상태 비교, 3-way merge, 안전 저장과 배포 기반으로만 구성한다. 콘텐츠 유형별 전용 비교기는 이 표에 추가하지 않는다.
+이 문서의 각 행은 원칙적으로 하나의 PR이다. AI 에이전트에게 여러 행을 한 번에 주지 않는다. Phase 1 backlog는 텍스트 2-way, 폴더 상태 비교, 3-way merge, 안전 저장과 배포 기반으로만 구성한다. 콘텐츠 유형별 전용 비교기는 이 표에 추가하지 않는다. `MRG-009`는 외부 Git이 넘긴 네 파일을 여는 adapter까지이며, repository-aware Git 후보는 `docs/18_GIT_BACKLOG.md`에서 분리한다.
 
 ## Foundation
 
@@ -56,7 +56,7 @@
 | MRG-006 | undo/redo | resolution·수동 편집을 하나의 history에서 Ctrl/Cmd+Z | MRG-004 |
 | MRG-007 | unresolved save guard | 마커가 남으면 경고, 강제 저장은 별도 확인 | MRG-003 |
 | MRG-008 | labels/options | marker labels와 favor 옵션은 UI가 아니라 명시적 advanced 설정 | MRG-001 |
-| MRG-009 | Git mergetool CLI | `%O %A %B %P` 인자와 exit code 계약, 문서/테스트 | MRG-007 |
+| MRG-009 | Git mergetool CLI | `$BASE $LOCAL $REMOTE $MERGED` 순서와 missing Base, 기존 `$MERGED` result/fingerprint, Git marker parser, 임시 source 비영속화, `trustExitCode=false`/`hideResolved=false` 계약 | MRG-007 |
 | MRG-010 | session recovery | crash 후 result draft 복구, 원본 내용은 opt-in cache | FND-004, MRG-006 |
 | MRG-011 | merge benchmark | fixture 정확도와 파일 크기별 latency baseline 저장 | MRG-001 |
 
@@ -95,7 +95,7 @@
 | REL-005 | release workflow | tag 기반 3 OS artifact, checksum, draft release | REL-002~004 |
 | REL-006 | signing policy | 개인용 unsigned와 public signed 경로 분리 | REL-005 |
 | REL-007 | SBOM/NOTICE | JS/Rust 전체 dependency license와 SBOM 첨부 | SEC-003 |
-| REL-008 | updater | 서명된 artifact가 안정된 뒤 opt-in updater | REL-006 |
+| REL-008 | updater | 서명된 artifact가 안정된 뒤 R2 static feed 기반 opt-in updater; 실행 기준은 `docs/16_R2_UPDATER_RUNBOOK.md` | REL-006 |
 | REL-009 | beta checklist | clean VM, sample files, rollback, known issues | REL-005 |
 
 ## 추천 첫 10개 이슈 순서

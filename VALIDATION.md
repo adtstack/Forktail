@@ -223,7 +223,7 @@ cargo test
 - 2-way 미저장 변경 단위 테스트: 저장 스냅샷 기준 dirty 판단과 compare 전용 이탈 경고 메시지 확인
 - 미저장 beforeunload guard 단위 테스트: clean 상태에서는 browser close 이벤트를 건드리지 않고, dirty compare/merge 메시지는 `preventDefault`와 빈 `returnValue`로 닫기 방지 처리하는지 확인
 - 2-way diff report 단위 테스트: unified-style plain text report, 현재 비교 옵션 반영, CRLF metadata, no-final-newline marker, 기본 `.diff.txt` 저장 경로 생성 확인
-- CLI 시작 인자 단위 테스트: `forktail left right`, `--compare`, `--folders`, `--merge base ours theirs [output]`, Git mergetool `%O %A %B %P` 순서의 `--mergetool`, `--` separator, 경로 인자 공백 보존, 잘못된 인자 안내 확인
+- CLI 시작 인자 단위 테스트: `forktail left right`, `--compare`, `--folders`, `--merge base ours theirs [output]`, custom Git mergetool의 `$BASE $LOCAL $REMOTE $MERGED` 순서를 뜻하는 `--mergetool` 네 경로 parser, `--` separator, 경로 인자 공백 보존, 잘못된 인자 안내 확인. `%O/%A/%B/%P`는 merge driver용이므로 이 계약에 포함하지 않음
 - Tauri startup command 계약 테스트: frontend bridge `startup_args` invoke, Rust command module, invoke handler wiring이 같은 command 이름을 쓰는지 확인
 - native reveal command 계약 테스트: frontend bridge `reveal_path` invoke, Rust command module, invoke handler wiring, `symlink_metadata` 기반 존재 확인, shell string 미사용, broad opener/shell plugin 미사용 확인
 - 2-way hunk copy 단위 테스트: 변경 line 교체, modified-only insertion 제거, original-only deletion 복원, trailing newline 없는 target 보존, reverse 방향 core 적용 확인
@@ -313,7 +313,7 @@ cargo test
 - `TXT-010` diff report 실제 파일 저장은 Tauri file dialog와 `write_text_file_atomic` runtime이 필요해 브라우저에서 버튼/오류 경로와 순수 report 생성까지만 확인했다.
 - `TXT-007` 양방향 hunk copy는 브라우저에서 좌/우 편집 대상 전환, `왼쪽→오른쪽`/`오른쪽→왼쪽` 적용, 마지막 적용 undo, dirty/save 상태까지 확인했다. 실제 Tauri file dialog를 통한 좌/우 Save/Save As 파일 쓰기는 Rust/Tauri runtime에서 추가 smoke가 필요하다.
 - `TXT-008` Drag & Drop은 브라우저 자동화가 OS 파일 경로를 담은 실제 file-drop 이벤트를 만들 수 없어 순수 경로 추출/개수 검증과 화면 회귀까지만 확인했다. 실제 Tauri WebView에서 파일 2개 drop 및 한쪽 pane 1파일 drop으로 `read_text_file` command가 호출되는지는 `npm run tauri dev`에서 수동/자동 smoke가 필요하다.
-- `TXT-009`/`MRG-009` CLI open은 parser와 Tauri command wiring만 확인했다. 실제 `forktail left right`, `forktail --merge ...`, Git mergetool `%O %A %B %P` 인자 전달과 exit code 계약은 packaged binary와 Tauri runtime에서 smoke가 필요하다.
+- `TXT-009`/`MRG-009` CLI open은 parser와 Tauri command wiring만 확인했다. 실제 `forktail left right`, `forktail --merge ...`, custom Git mergetool의 `$BASE $LOCAL $REMOTE $MERGED` 인자 전달, 기존 `$MERGED` result/fingerprint, 임시 파일 lifecycle과 `trustExitCode=false` 계약은 packaged binary와 Tauri runtime에서 smoke가 필요하다. `%O/%A/%B/%P` custom merge driver는 현재 범위가 아니다.
 - `UX-006` native reveal은 source/contract test로만 확인했다. 실제 Finder/Explorer/file manager가 선택 항목 또는 폴더를 여는지는 `npm run tauri dev` 가능한 OS별 환경에서 smoke가 필요하다.
 - `MRG-010` opt-in draft recovery는 브라우저 localStorage와 새 탭 재진입으로 확인했다. 실제 데스크톱 앱 crash 후 WebView storage 유지, 큰 draft 한도 안내, OS별 storage persistence는 `npm run tauri dev` 환경에서 추가 smoke가 필요하다.
 - 마지막 화면 자동 복원은 브라우저 데모 세션 reload와 active session 저장소 단위 테스트로 확인했다. 실제 사용자 파일 경로의 자동 재열기와 폴더 rescan은 Tauri runtime에서 `read_text_file`/`scan_directories`를 통한 추가 smoke가 필요하다.
