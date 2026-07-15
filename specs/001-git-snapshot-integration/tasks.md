@@ -99,14 +99,14 @@
 ### Tests for User Story 2
 
 - [X] T040 [US2] GIT-401 porcelain v2 clean/dirty/rename/untracked/unmerged/unborn/detached byte parser와 index-mutation guard 테스트를 `src-tauri/src/git/status.rs`에 먼저 추가한다
-- [ ] T041 [US2] GIT-402 revision↔working-tree root escape/symlink/TOCTOU/missing/binary/external-change 테스트를 `src-tauri/src/git/session.rs`에 먼저 추가한다
+- [X] T041 [US2] GIT-402 revision↔working-tree root escape/symlink/TOCTOU/missing/binary/external-change 테스트를 `src-tauri/src/git/session.rs`에 먼저 추가한다
 - [ ] T042 [US2] GIT-403 stage-0/staged+unstaged/intent-to-add/sparse/index-race three-state 테스트를 `src-tauri/src/git/index.rs`에 먼저 추가한다
 - [ ] T043 [P] [US2] GIT-605 staged/unstaged/untracked/unmerged filter/refresh/keyboard UI 테스트를 `src/components/GitWorkingTreeFiles.test.tsx`에 먼저 추가한다
 
 ### Implementation for User Story 2
 
 - [X] T044 [US2] GIT-401 bounded porcelain-v2 status service와 branch state를 `src-tauri/src/git/status.rs`, `src-tauri/src/commands/git.rs`에 구현한다
-- [ ] T045 [US2] GIT-402 revision↔working-tree session과 containment/fingerprint guard를 `src-tauri/src/git/session.rs`, `src-tauri/src/commands/git.rs`, `src/core/gitSession.ts`에 구현한다
+- [X] T045 [US2] GIT-402 revision↔working-tree session과 containment/fingerprint guard를 `src-tauri/src/git/session.rs`, `src-tauri/src/commands/git.rs`, `src/core/gitSession.ts`에 구현한다
 - [ ] T046 [US2] GIT-403 stage-0 index reader와 HEAD/index/working-tree pair session을 `src-tauri/src/git/index.rs`, `src-tauri/src/git/session.rs`, `src-tauri/src/commands/git.rs`, `src/core/gitSession.ts`에 구현한다
 - [ ] T047 [US2] GIT-605 working-tree changed-file UI와 three-state selector를 `src/components/GitWorkingTreeFiles.tsx`, `src/components/GitCompareView.tsx`에 구현한다
 

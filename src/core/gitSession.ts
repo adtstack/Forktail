@@ -273,7 +273,11 @@ export function adaptGitCompareSession(session: GitCompareSession): GitCompareVi
 
 function gitSnapshotFileDocument(snapshot: GitSnapshotDocument): FileDocument | null {
   if (snapshot.contentState.kind === "missing") {
-    if (snapshot.origin !== "missing" || snapshot.objectId !== null) return null;
+    if (
+      snapshot.origin !== "missing"
+      || snapshot.objectId !== null
+      || snapshot.workingTreeVersion !== null
+    ) return null;
     return {
       path: snapshot.label,
       name: snapshotName(snapshot),
@@ -289,11 +293,16 @@ function gitSnapshotFileDocument(snapshot: GitSnapshotDocument): FileDocument | 
     };
   }
 
+  const committedSnapshot = snapshot.origin === "committedBlob"
+    && snapshot.objectId !== null
+    && snapshot.workingTreeVersion === null;
+  const workingTreeSnapshot = snapshot.origin === "workingTree"
+    && snapshot.objectId === null
+    && snapshot.workingTreeVersion !== null;
   if (
     snapshot.contentState.kind !== "text"
-    || snapshot.origin !== "committedBlob"
-    || snapshot.objectId === null
     || snapshot.textMetadata === null
+    || (!committedSnapshot && !workingTreeSnapshot)
   ) {
     return null;
   }
@@ -306,7 +315,7 @@ function gitSnapshotFileDocument(snapshot: GitSnapshotDocument): FileDocument | 
     lineEnding: snapshot.textMetadata.lineEnding,
     hadFinalNewline: snapshot.textMetadata.hadFinalNewline,
     size: snapshot.textMetadata.size,
-    modifiedMs: null,
+    modifiedMs: snapshot.workingTreeVersion?.modifiedMs ?? null,
     isBinary: false,
     decodeHadErrors: snapshot.textMetadata.decodeHadErrors,
     virtual: { kind: "gitSnapshot", contentState: "text" },

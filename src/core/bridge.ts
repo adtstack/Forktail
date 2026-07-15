@@ -21,6 +21,7 @@ import type {
   GitRevisionCompareRequest,
   GitStatusRequest,
   GitStatusSnapshot,
+  GitWorkingTreeCompareRequest,
 } from "./gitModels";
 
 declare global {
@@ -87,6 +88,19 @@ export async function openGitRevisionCompare(
 ): Promise<GitCompareSession> {
   requireTauri();
   return invoke<GitCompareSession>("open_git_revision_compare", {
+    repositorySessionId,
+    request,
+    jobId,
+  });
+}
+
+export async function openGitWorkingTreeCompare(
+  repositorySessionId: string,
+  request: GitWorkingTreeCompareRequest,
+  jobId: number,
+): Promise<GitCompareSession> {
+  requireTauri();
+  return invoke<GitCompareSession>("open_git_working_tree_compare", {
     repositorySessionId,
     request,
     jobId,

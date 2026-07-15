@@ -340,6 +340,7 @@ pub struct GitStatusSnapshot {
 #[serde(rename_all = "camelCase")]
 pub enum GitSnapshotOrigin {
     CommittedBlob,
+    WorkingTree,
     Missing,
 }
 
@@ -357,6 +358,13 @@ pub struct GitTextMetadata {
     pub had_final_newline: bool,
     pub decode_had_errors: bool,
     pub size: u64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorkingTreeVersion {
+    pub size: u64,
+    pub modified_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -393,6 +401,7 @@ pub struct GitSnapshotDocument {
     pub path: Option<GitPathIdentity>,
     pub mode: Option<String>,
     pub text_metadata: Option<GitTextMetadata>,
+    pub working_tree_version: Option<GitWorkingTreeVersion>,
     pub content_state: GitSnapshotContentState,
 }
 
@@ -400,6 +409,7 @@ pub struct GitSnapshotDocument {
 #[serde(rename_all = "camelCase")]
 pub enum GitCompareSourceKind {
     RevisionPair,
+    RevisionWorkingTree,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
@@ -425,7 +435,8 @@ pub struct GitCompareSession {
     pub left: GitSnapshotDocument,
     pub right: GitSnapshotDocument,
     pub source_kind: GitCompareSourceKind,
-    pub revision_pair: GitRevisionPair,
+    pub revision_pair: Option<GitRevisionPair>,
+    pub revision: Option<GitRevision>,
     pub capabilities: GitCompareCapabilities,
     pub generation: u64,
 }
@@ -702,6 +713,7 @@ mod tests {
         GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch, GitStatusBranchState,
         GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot, GitSubmoduleStatus,
         GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList, GitUnmergedStatusEntry,
+        GitWorkingTreeVersion,
     };
     use serde_json::json;
 
@@ -1163,6 +1175,7 @@ mod tests {
                 path: Some(path.clone()),
                 mode: None,
                 text_metadata: None,
+                working_tree_version: None,
                 content_state: GitSnapshotContentState::Missing,
             },
             right: GitSnapshotDocument {
@@ -1179,15 +1192,17 @@ mod tests {
                     decode_had_errors: false,
                     size: 0,
                 }),
+                working_tree_version: None,
                 content_state: GitSnapshotContentState::Text {
                     text: String::new(),
                 },
             },
             source_kind: GitCompareSourceKind::RevisionPair,
-            revision_pair: GitRevisionPair {
+            revision_pair: Some(GitRevisionPair {
                 left: left_revision,
                 right: right_revision,
-            },
+            }),
+            revision: None,
             capabilities: GitCompareCapabilities {
                 edit: false,
                 save: false,
@@ -1199,6 +1214,8 @@ mod tests {
         let value = serde_json::to_value(session).expect("serialize Git compare session");
 
         assert_eq!(value["sourceKind"], "revisionPair");
+        assert!(value["revisionPair"].is_object());
+        assert_eq!(value["revision"], json!(null));
         assert_eq!(value["left"]["contentState"], json!({ "kind": "missing" }));
         assert_eq!(value["left"]["objectId"], json!(null));
         assert_eq!(value["right"]["origin"], "committedBlob");
@@ -1225,6 +1242,80 @@ mod tests {
                 "exportPatch": true,
             })
         );
+    }
+
+    #[test]
+    fn serializes_disk_working_tree_origin_version_and_single_revision_contract() {
+        let revision = GitRevision {
+            raw_label: "HEAD".to_string(),
+            resolved: sha1('a'),
+            kind: GitRevisionKind::Head,
+            display_name: "HEAD".to_string(),
+        };
+        let path = GitPathIdentity::new(
+            "repository-session-1:path:5:1",
+            "src/file.txt",
+            Some("src/file.txt"),
+        );
+        let missing = GitSnapshotDocument {
+            origin: GitSnapshotOrigin::Missing,
+            label: "HEAD (aaaaaaaaaaaa) · src/file.txt".to_string(),
+            read_only: true,
+            object_id: None,
+            path: Some(path.clone()),
+            mode: None,
+            text_metadata: None,
+            working_tree_version: None,
+            content_state: GitSnapshotContentState::Missing,
+        };
+        let working = GitSnapshotDocument {
+            origin: GitSnapshotOrigin::WorkingTree,
+            label: "Working tree (disk) · src/file.txt".to_string(),
+            read_only: true,
+            object_id: None,
+            path: Some(path),
+            mode: Some("100644".to_string()),
+            text_metadata: Some(GitTextMetadata {
+                encoding: "UTF-8".to_string(),
+                line_ending: crate::LineEnding::Lf,
+                had_final_newline: true,
+                decode_had_errors: false,
+                size: 5,
+            }),
+            working_tree_version: Some(GitWorkingTreeVersion {
+                size: 5,
+                modified_ms: Some(1_700_000_000_000),
+            }),
+            content_state: GitSnapshotContentState::Text {
+                text: "disk\n".to_string(),
+            },
+        };
+        let value = serde_json::to_value(GitCompareSession {
+            repository_id: "repository-session-1".to_string(),
+            left: missing,
+            right: working,
+            source_kind: GitCompareSourceKind::RevisionWorkingTree,
+            revision_pair: None,
+            revision: Some(revision),
+            capabilities: GitCompareCapabilities {
+                edit: false,
+                save: false,
+                hunk_copy: false,
+                export_patch: true,
+            },
+            generation: 5,
+        })
+        .expect("serialize working-tree compare");
+
+        assert_eq!(value["sourceKind"], "revisionWorkingTree");
+        assert_eq!(value["revisionPair"], json!(null));
+        assert_eq!(value["revision"]["rawLabel"], "HEAD");
+        assert_eq!(value["right"]["origin"], "workingTree");
+        assert_eq!(
+            value["right"]["workingTreeVersion"],
+            json!({ "size": 5, "modifiedMs": 1_700_000_000_000_u64 })
+        );
+        assert_eq!(value["right"]["objectId"], json!(null));
     }
 
     #[test]

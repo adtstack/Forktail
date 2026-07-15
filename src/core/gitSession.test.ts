@@ -34,6 +34,7 @@ function snapshot(
           size: 0,
         }
       : null,
+    workingTreeVersion: null,
     contentState,
   };
 }
@@ -61,6 +62,7 @@ function gitSession(
         displayName: "main",
       },
     },
+    revision: null,
     capabilities: {
       edit: false,
       save: false,
@@ -71,7 +73,43 @@ function gitSession(
   };
 }
 
+function workingTreeSession(right: GitSnapshotDocument): GitCompareSession {
+  const revision = {
+    rawLabel: "HEAD",
+    resolved: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+    kind: "head" as const,
+    displayName: "HEAD",
+  };
+  return {
+    ...gitSession(snapshot({ kind: "text", text: "committed\n" }, "HEAD · src/file.txt"), right),
+    sourceKind: "revisionWorkingTree",
+    revisionPair: null,
+    revision,
+  };
+}
+
 describe("Git compare session adapter", () => {
+  it("keeps working-tree disk content virtual and preserves its external-change version", () => {
+    const right: GitSnapshotDocument = {
+      ...snapshot({ kind: "text", text: "disk\n" }, "Working tree (disk) · src/file.txt"),
+      origin: "workingTree",
+      objectId: null,
+      workingTreeVersion: { size: 5, modifiedMs: 1_700_000_000_000 },
+    };
+
+    const adapted = adaptGitCompareSession(workingTreeSession(right));
+
+    expect(adapted.kind).toBe("compare");
+    if (adapted.kind !== "compare") throw new Error("expected compare state");
+    expect(adapted.session.right.text).toBe("disk\n");
+    expect(adapted.session.right.modifiedMs).toBe(1_700_000_000_000);
+    expect(adapted.session.right.path).toContain("Working tree (disk)");
+    expect(adapted.session.right.virtual).toEqual({
+      kind: "gitSnapshot",
+      contentState: "text",
+    });
+  });
+
   it("adapts text and explicit missing states without conflating an empty blob", () => {
     const empty = snapshot({ kind: "text", text: "" }, "main~1 (aaaaaaaaaaaa) · src/file.txt");
     const missing = snapshot({ kind: "missing" }, "main (cccccccccccc) · src/file.txt");

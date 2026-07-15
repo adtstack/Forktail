@@ -303,6 +303,7 @@ describe("FileCompareView TXT controls", () => {
             decodeHadErrors: false,
             size: 5,
           },
+          workingTreeVersion: null,
           contentState: { kind: "text" as const, text: "left\n" },
         },
         right: {
@@ -319,6 +320,7 @@ describe("FileCompareView TXT controls", () => {
             decodeHadErrors: false,
             size: 6,
           },
+          workingTreeVersion: null,
           contentState: { kind: "text" as const, text: "right\n" },
         },
         sourceKind: "revisionPair" as const,
@@ -336,6 +338,7 @@ describe("FileCompareView TXT controls", () => {
             displayName: "main",
           },
         },
+        revision: null,
         capabilities: {
           edit: false,
           save: false,

@@ -196,7 +196,7 @@ export interface GitStatusRequest {
   requestGeneration: number;
 }
 
-export type GitSnapshotOrigin = "committedBlob" | "missing";
+export type GitSnapshotOrigin = "committedBlob" | "workingTree" | "missing";
 export type GitSnapshotUnavailableReason = "objectMissingLocal";
 
 export interface GitTextMetadata {
@@ -205,6 +205,11 @@ export interface GitTextMetadata {
   hadFinalNewline: boolean;
   decodeHadErrors: boolean;
   size: number;
+}
+
+export interface GitWorkingTreeVersion {
+  size: number;
+  modifiedMs: number | null;
 }
 
 export type GitSnapshotContentState =
@@ -232,6 +237,7 @@ export interface GitSnapshotDocument {
   path: GitPathIdentity | null;
   mode: string | null;
   textMetadata: GitTextMetadata | null;
+  workingTreeVersion: GitWorkingTreeVersion | null;
   contentState: GitSnapshotContentState;
 }
 
@@ -251,9 +257,16 @@ export interface GitCompareSession {
   repositoryId: string;
   left: GitSnapshotDocument;
   right: GitSnapshotDocument;
-  sourceKind: "revisionPair";
-  revisionPair: GitRevisionPair;
+  sourceKind: "revisionPair" | "revisionWorkingTree";
+  revisionPair: GitRevisionPair | null;
+  revision: GitRevision | null;
   capabilities: GitCompareCapabilities;
+  generation: number;
+}
+
+export interface GitWorkingTreeCompareRequest {
+  revision: GitRevision;
+  path: GitPathIdentity;
   generation: number;
 }
 

@@ -16,6 +16,7 @@ import {
   listGitChangedFiles,
   listGitRefs,
   openGitRevisionCompare,
+  openGitWorkingTreeCompare,
   readGitStatus,
   resolveGitRevision,
 } from "./bridge";
@@ -266,6 +267,43 @@ describe("Git working-tree status bridge", () => {
       repositorySessionId: "repository-session-1",
       request,
       jobId: 92,
+    });
+  });
+});
+
+describe("Git working-tree compare bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("opens a resolved revision against one opaque disk path", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+    const request = {
+      revision: {
+        rawLabel: "HEAD",
+        resolved: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+        kind: "head" as const,
+        displayName: "HEAD",
+      },
+      path: {
+        opaqueId: "repository-session-1:path:5:2",
+        displayPath: "src/file.txt",
+        utf8Path: "src/file.txt",
+      },
+      generation: 5,
+    };
+
+    await openGitWorkingTreeCompare("repository-session-1", request, 93);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("open_git_working_tree_compare", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 93,
     });
   });
 });

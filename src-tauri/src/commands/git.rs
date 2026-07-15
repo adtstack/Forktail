@@ -8,7 +8,7 @@ use crate::git::jobs::{GitJobError, GitJobs};
 use crate::git::refs::{GitRefError, list_refs};
 use crate::git::repository::{GitRepositoryError, GitRepositorySessions};
 use crate::git::revision::{GitRevisionError, resolve_revision};
-use crate::git::session::{GitSessionError, open_revision_compare};
+use crate::git::session::{GitSessionError, open_revision_compare, open_working_tree_compare};
 use crate::git::status::{GitStatusError, read_status};
 use crate::git::tree::{GitTreeError, list_tree};
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,14 @@ pub struct GitRevisionCompareRequest {
     pub left_revision: crate::GitRevision,
     pub right_revision: crate::GitRevision,
     pub changed_file: crate::GitChangedFile,
+    pub generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitWorkingTreeCompareRequest {
+    pub revision: crate::GitRevision,
+    pub path: crate::GitPathIdentity,
     pub generation: u64,
 }
 
@@ -256,6 +264,35 @@ pub async fn open_git_revision_compare(
 }
 
 #[tauri::command]
+pub async fn open_git_working_tree_compare(
+    repository_session_id: String,
+    request: GitWorkingTreeCompareRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitCompareSession> {
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        open_working_tree_compare(
+            &session,
+            &request.revision,
+            &request.path,
+            request.generation,
+            lease.cancellation(),
+        )
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
 pub fn cancel_git_job(
     repository_session_id: String,
     job_id: u64,
@@ -448,11 +485,21 @@ impl From<GitSessionError> for CommandError {
             GitSessionError::UnknownPath | GitSessionError::PathUnsupported => {
                 Self::git(AppErrorCode::GitPathUnsupported)
             }
+            GitSessionError::PathOutsideRoot => Self::git(AppErrorCode::GitPathOutsideRoot),
+            GitSessionError::SymlinkUnsupported => Self::git(AppErrorCode::GitSymlinkUnsupported),
+            GitSessionError::WorkingTreeNotRegular => {
+                Self::git(AppErrorCode::GitObjectTypeUnsupported)
+            }
+            GitSessionError::WorkingTreePermissionDenied => {
+                Self::git(AppErrorCode::PermissionDenied)
+            }
+            GitSessionError::WorkingTreeChanged => Self::git(AppErrorCode::FileChanged),
             GitSessionError::PathNotAtRevision => Self::git(AppErrorCode::GitPathNotAtRevision),
             GitSessionError::Cancelled => Self::git(AppErrorCode::GitCommandCancelled),
             GitSessionError::Tree(error) => error.into(),
             GitSessionError::Blob(error) => error.into(),
             GitSessionError::InvalidChangedFile
+            | GitSessionError::WorkingTreeReadFailed
             | GitSessionError::StaleGeneration
             | GitSessionError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
         }
@@ -726,6 +773,22 @@ mod tests {
             (
                 GitSessionError::Cancelled,
                 AppErrorCode::GitCommandCancelled,
+            ),
+            (
+                GitSessionError::PathOutsideRoot,
+                AppErrorCode::GitPathOutsideRoot,
+            ),
+            (
+                GitSessionError::SymlinkUnsupported,
+                AppErrorCode::GitSymlinkUnsupported,
+            ),
+            (
+                GitSessionError::WorkingTreePermissionDenied,
+                AppErrorCode::PermissionDenied,
+            ),
+            (
+                GitSessionError::WorkingTreeChanged,
+                AppErrorCode::FileChanged,
             ),
         ];
         for (source, expected) in cases {

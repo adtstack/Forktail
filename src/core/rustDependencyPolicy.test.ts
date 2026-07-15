@@ -12,6 +12,10 @@ const rustDependencyPolicy = {
   "diffy": "MIT OR Apache-2.0",
   "encoding_rs": "(Apache-2.0 OR MIT) AND BSD-3-Clause",
   "ignore": "Unlicense OR MIT",
+  // Narrow Unix O_NOFOLLOW flag used by the GIT-402 read-only working-tree loader.
+  "libc": "MIT OR Apache-2.0",
+  // Cross-platform opened-handle identity comparison for GIT-402 TOCTOU checks.
+  "same-file": "Unlicense OR MIT",
   "serde": "MIT OR Apache-2.0",
   "serde_json": "MIT OR Apache-2.0",
   "tauri": "Apache-2.0 OR MIT",

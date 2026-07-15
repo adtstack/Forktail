@@ -14,7 +14,7 @@ pub use domain::git::{
     GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason, GitStatusBranch,
     GitStatusBranchState, GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot,
     GitSubmoduleStatus, GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList,
-    GitUnmergedStatusEntry,
+    GitUnmergedStatusEntry, GitWorkingTreeVersion,
 };
 pub use domain::models::LineEnding;
 
@@ -45,6 +45,7 @@ pub fn run() {
             git_commands::read_git_status,
             git_commands::read_git_blob,
             git_commands::open_git_revision_compare,
+            git_commands::open_git_working_tree_compare,
             git_commands::cancel_git_job,
             git_commands::resolve_git_revision,
             merge::merge_texts,

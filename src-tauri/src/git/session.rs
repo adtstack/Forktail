@@ -3,12 +3,18 @@ use crate::domain::git::{
     GitCompareSession, GitCompareSourceKind, GitPathIdentity, GitPathPlatform,
     GitPathRegistryError, GitRevision, GitRevisionPair, GitSnapshotContentState,
     GitSnapshotDocument, GitSnapshotOrigin, GitSnapshotUnavailableReason, GitTextMetadata,
-    GitTreeEntry, GitTreeEntryKind,
+    GitTreeEntry, GitTreeEntryKind, GitWorkingTreeVersion,
 };
 use crate::git::blob::{GitBlobError, read_blob};
 use crate::git::repository::GitRepositorySession;
 use crate::git::runner::CancellationToken;
 use crate::git::tree::{GitTreeError, list_tree};
+use crate::text::{DecodedTextContent, MAX_TEXT_BYTES, decode_text_bytes};
+use same_file::Handle;
+use std::fs::{self, File, Metadata, OpenOptions};
+use std::io::Read;
+use std::path::{Component, Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 const MAX_REVISION_LABEL_BYTES: usize = 1024;
 const SNAPSHOT_PATH_LOOKUP_LIMIT: usize = 2;
@@ -23,6 +29,12 @@ pub enum GitSessionError {
     StaleGeneration,
     PathUnsupported,
     PathNotAtRevision,
+    PathOutsideRoot,
+    SymlinkUnsupported,
+    WorkingTreeNotRegular,
+    WorkingTreePermissionDenied,
+    WorkingTreeReadFailed,
+    WorkingTreeChanged,
     StateUnavailable,
     Cancelled,
     Tree(GitTreeError),
@@ -33,6 +45,19 @@ pub enum GitSessionError {
 enum SnapshotSidePlan {
     Missing(GitPathIdentity),
     Committed(GitPathIdentity),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WorkingTreeReadStep {
+    AfterPreflight,
+    AfterRead,
+}
+
+struct WorkingTreePathPlan {
+    identity: GitPathIdentity,
+    raw_path: Vec<u8>,
+    relative_path: PathBuf,
+    candidate: PathBuf,
 }
 
 pub fn open_revision_compare(
@@ -69,10 +94,11 @@ pub fn open_revision_compare(
         left,
         right,
         source_kind: GitCompareSourceKind::RevisionPair,
-        revision_pair: GitRevisionPair {
+        revision_pair: Some(GitRevisionPair {
             left: left_revision.clone(),
             right: right_revision.clone(),
-        },
+        }),
+        revision: None,
         capabilities: GitCompareCapabilities {
             edit: false,
             save: false,
@@ -81,6 +107,416 @@ pub fn open_revision_compare(
         },
         generation,
     })
+}
+
+pub fn open_working_tree_compare(
+    session: &GitRepositorySession,
+    revision: &GitRevision,
+    path: &GitPathIdentity,
+    generation: u64,
+    cancellation: &CancellationToken,
+) -> Result<GitCompareSession, GitSessionError> {
+    open_working_tree_compare_inner(session, revision, path, generation, cancellation, |_| {})
+}
+
+fn open_working_tree_compare_inner<Hook>(
+    session: &GitRepositorySession,
+    revision: &GitRevision,
+    path: &GitPathIdentity,
+    generation: u64,
+    cancellation: &CancellationToken,
+    mut hook: Hook,
+) -> Result<GitCompareSession, GitSessionError>
+where
+    Hook: FnMut(WorkingTreeReadStep),
+{
+    if cancellation.is_cancelled() {
+        return Err(GitSessionError::Cancelled);
+    }
+    validate_revision(session, revision)?;
+    validate_generation(session, generation)?;
+    let path_plan = prepare_working_tree_path(session, path, generation)?;
+    let left = read_optional_committed_snapshot(
+        session,
+        revision,
+        path_plan.identity.clone(),
+        generation,
+        cancellation,
+    )?;
+    let right = read_working_tree_snapshot(session, &path_plan, cancellation, &mut hook)?;
+    validate_generation(session, generation)?;
+
+    let export_patch = is_patch_source(&left) && is_patch_source(&right);
+    Ok(GitCompareSession {
+        repository_id: session.summary().session_id.clone(),
+        left,
+        right,
+        source_kind: GitCompareSourceKind::RevisionWorkingTree,
+        revision_pair: None,
+        revision: Some(revision.clone()),
+        capabilities: GitCompareCapabilities {
+            edit: false,
+            save: false,
+            hunk_copy: false,
+            export_patch,
+        },
+        generation,
+    })
+}
+
+fn prepare_working_tree_path(
+    session: &GitRepositorySession,
+    path: &GitPathIdentity,
+    generation: u64,
+) -> Result<WorkingTreePathPlan, GitSessionError> {
+    let paths = session
+        .paths()
+        .lock()
+        .map_err(|_| GitSessionError::StateUnavailable)?;
+    let raw_path = paths
+        .resolve(&path.opaque_id, generation, current_path_platform())
+        .map_err(map_path_error)?
+        .to_vec();
+    let identity = paths
+        .resolve_identity(&path.opaque_id, generation, current_path_platform())
+        .map_err(map_path_error)?;
+    drop(paths);
+
+    let relative_path = raw_path_to_path_buf(raw_path.clone())?;
+    if relative_path.as_os_str().is_empty()
+        || relative_path.is_absolute()
+        || relative_path
+            .components()
+            .any(|component| !matches!(component, Component::Normal(_)))
+    {
+        return Err(GitSessionError::PathOutsideRoot);
+    }
+    let candidate = session.identity().root.join(&relative_path);
+    ensure_no_symlinks(&session.identity().root, &relative_path)?;
+    Ok(WorkingTreePathPlan {
+        identity,
+        raw_path,
+        relative_path,
+        candidate,
+    })
+}
+
+fn read_optional_committed_snapshot(
+    session: &GitRepositorySession,
+    revision: &GitRevision,
+    path: GitPathIdentity,
+    generation: u64,
+    cancellation: &CancellationToken,
+) -> Result<GitSnapshotDocument, GitSessionError> {
+    let tree = list_tree(
+        session,
+        &revision.resolved,
+        Some((&path.opaque_id, generation)),
+        SNAPSHOT_PATH_LOOKUP_LIMIT,
+        cancellation,
+    )
+    .map_err(map_tree_error)?;
+    match tree
+        .entries
+        .into_iter()
+        .find(|entry| entry.path.opaque_id == path.opaque_id)
+    {
+        Some(entry) => snapshot_document_from_entry(session, revision, entry, cancellation),
+        None => Ok(missing_snapshot_document(revision, path)),
+    }
+}
+
+fn read_working_tree_snapshot<Hook>(
+    session: &GitRepositorySession,
+    plan: &WorkingTreePathPlan,
+    cancellation: &CancellationToken,
+    hook: &mut Hook,
+) -> Result<GitSnapshotDocument, GitSessionError>
+where
+    Hook: FnMut(WorkingTreeReadStep),
+{
+    if cancellation.is_cancelled() {
+        return Err(GitSessionError::Cancelled);
+    }
+    let Some(preflight) = working_tree_metadata(&plan.candidate)? else {
+        return Ok(missing_working_tree_document(plan.identity.clone()));
+    };
+    validate_regular_metadata(&preflight)?;
+    ensure_no_symlinks(&session.identity().root, &plan.relative_path)?;
+    hook(WorkingTreeReadStep::AfterPreflight);
+
+    let Some(rechecked) = working_tree_metadata(&plan.candidate)? else {
+        return Err(GitSessionError::WorkingTreeChanged);
+    };
+    validate_regular_metadata(&rechecked)?;
+    if metadata_version(&preflight) != metadata_version(&rechecked) {
+        return Err(GitSessionError::WorkingTreeChanged);
+    }
+    ensure_no_symlinks(&session.identity().root, &plan.relative_path)?;
+    let mut file = open_working_tree_file(&plan.candidate)?;
+    let before = file.metadata().map_err(map_working_tree_io)?;
+    validate_regular_metadata(&before)?;
+    if metadata_version(&rechecked) != metadata_version(&before) {
+        return Err(GitSessionError::WorkingTreeChanged);
+    }
+    verify_opened_working_tree_file(session, plan, &file)?;
+
+    if before.len() > MAX_TEXT_BYTES {
+        return Ok(working_tree_document(
+            plan.identity.clone(),
+            &before,
+            None,
+            GitSnapshotContentState::TooLarge,
+        ));
+    }
+
+    let capacity =
+        usize::try_from(before.len()).map_err(|_| GitSessionError::WorkingTreeReadFailed)?;
+    let mut bytes = Vec::with_capacity(capacity.min(MAX_TEXT_BYTES as usize));
+    file.by_ref()
+        .take(MAX_TEXT_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(map_working_tree_io)?;
+    if bytes.len() as u64 > MAX_TEXT_BYTES {
+        return Err(GitSessionError::WorkingTreeChanged);
+    }
+    hook(WorkingTreeReadStep::AfterRead);
+
+    let after = file.metadata().map_err(map_working_tree_io)?;
+    if metadata_version(&before) != metadata_version(&after) {
+        return Err(GitSessionError::WorkingTreeChanged);
+    }
+    verify_opened_working_tree_file(session, plan, &file)?;
+    if cancellation.is_cancelled() {
+        return Err(GitSessionError::Cancelled);
+    }
+
+    match decode_text_bytes(&bytes) {
+        DecodedTextContent::Text(decoded) => Ok(working_tree_document(
+            plan.identity.clone(),
+            &after,
+            Some(GitTextMetadata {
+                encoding: decoded.encoding,
+                line_ending: decoded.line_ending,
+                had_final_newline: decoded.had_final_newline,
+                decode_had_errors: decoded.decode_had_errors,
+                size: after.len(),
+            }),
+            GitSnapshotContentState::Text { text: decoded.text },
+        )),
+        DecodedTextContent::Binary => Ok(working_tree_document(
+            plan.identity.clone(),
+            &after,
+            None,
+            GitSnapshotContentState::Binary,
+        )),
+    }
+}
+
+fn working_tree_metadata(candidate: &Path) -> Result<Option<Metadata>, GitSessionError> {
+    match fs::symlink_metadata(candidate) {
+        Ok(metadata) => Ok(Some(metadata)),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(map_working_tree_io(error)),
+    }
+}
+
+fn validate_regular_metadata(metadata: &Metadata) -> Result<(), GitSessionError> {
+    if metadata.file_type().is_symlink() {
+        Err(GitSessionError::SymlinkUnsupported)
+    } else if !metadata.is_file() {
+        Err(GitSessionError::WorkingTreeNotRegular)
+    } else {
+        Ok(())
+    }
+}
+
+fn ensure_no_symlinks(root: &Path, relative_path: &Path) -> Result<(), GitSessionError> {
+    let mut current = root.to_path_buf();
+    for component in relative_path.components() {
+        let Component::Normal(component) = component else {
+            return Err(GitSessionError::PathOutsideRoot);
+        };
+        current.push(component);
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Err(GitSessionError::SymlinkUnsupported);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(map_working_tree_io(error)),
+        }
+    }
+    Ok(())
+}
+
+fn open_working_tree_file(candidate: &Path) -> Result<File, GitSessionError> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    match options.open(candidate) {
+        Ok(file) => Ok(file),
+        Err(error) => match fs::symlink_metadata(candidate) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                Err(GitSessionError::SymlinkUnsupported)
+            }
+            _ => Err(map_working_tree_io(error)),
+        },
+    }
+}
+
+fn verify_opened_working_tree_file(
+    session: &GitRepositorySession,
+    plan: &WorkingTreePathPlan,
+    file: &File,
+) -> Result<(), GitSessionError> {
+    ensure_no_symlinks(&session.identity().root, &plan.relative_path)?;
+    let canonical = fs::canonicalize(&plan.candidate).map_err(map_working_tree_io)?;
+    let relative = canonical
+        .strip_prefix(&session.identity().root)
+        .map_err(|_| GitSessionError::PathOutsideRoot)?;
+    if !relative_path_matches_raw(relative, &plan.raw_path) {
+        return Err(GitSessionError::PathUnsupported);
+    }
+    let open_handle = Handle::from_file(file.try_clone().map_err(map_working_tree_io)?)
+        .map_err(map_working_tree_io)?;
+    let path_handle = Handle::from_path(&plan.candidate).map_err(map_working_tree_io)?;
+    if open_handle != path_handle {
+        return Err(GitSessionError::WorkingTreeChanged);
+    }
+    Ok(())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn raw_path_to_path_buf(raw_path: Vec<u8>) -> Result<PathBuf, GitSessionError> {
+    use std::os::unix::ffi::OsStringExt;
+    Ok(PathBuf::from(std::ffi::OsString::from_vec(raw_path)))
+}
+
+#[cfg(target_os = "macos")]
+fn raw_path_to_path_buf(raw_path: Vec<u8>) -> Result<PathBuf, GitSessionError> {
+    String::from_utf8(raw_path)
+        .map(PathBuf::from)
+        .map_err(|_| GitSessionError::PathUnsupported)
+}
+
+#[cfg(windows)]
+fn raw_path_to_path_buf(raw_path: Vec<u8>) -> Result<PathBuf, GitSessionError> {
+    String::from_utf8(raw_path)
+        .map(PathBuf::from)
+        .map_err(|_| GitSessionError::PathUnsupported)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn raw_path_to_path_buf(raw_path: Vec<u8>) -> Result<PathBuf, GitSessionError> {
+    String::from_utf8(raw_path)
+        .map(PathBuf::from)
+        .map_err(|_| GitSessionError::PathUnsupported)
+}
+
+#[cfg(unix)]
+fn relative_path_matches_raw(relative: &Path, raw_path: &[u8]) -> bool {
+    use std::os::unix::ffi::OsStrExt;
+    relative.as_os_str().as_bytes() == raw_path
+}
+
+#[cfg(windows)]
+fn relative_path_matches_raw(relative: &Path, raw_path: &[u8]) -> bool {
+    relative
+        .components()
+        .map(|component| match component {
+            Component::Normal(component) => component.to_str(),
+            _ => None,
+        })
+        .collect::<Option<Vec<_>>>()
+        .map(|components| components.join("/").as_bytes() == raw_path)
+        .unwrap_or(false)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn relative_path_matches_raw(relative: &Path, raw_path: &[u8]) -> bool {
+    relative
+        .to_str()
+        .is_some_and(|path| path.as_bytes() == raw_path)
+}
+
+fn missing_working_tree_document(path: GitPathIdentity) -> GitSnapshotDocument {
+    GitSnapshotDocument {
+        origin: GitSnapshotOrigin::Missing,
+        label: working_tree_label(&path),
+        read_only: true,
+        object_id: None,
+        path: Some(path),
+        mode: None,
+        text_metadata: None,
+        working_tree_version: None,
+        content_state: GitSnapshotContentState::Missing,
+    }
+}
+
+fn working_tree_document(
+    path: GitPathIdentity,
+    metadata: &Metadata,
+    text_metadata: Option<GitTextMetadata>,
+    content_state: GitSnapshotContentState,
+) -> GitSnapshotDocument {
+    GitSnapshotDocument {
+        origin: GitSnapshotOrigin::WorkingTree,
+        label: working_tree_label(&path),
+        read_only: true,
+        object_id: None,
+        path: Some(path),
+        mode: Some(working_tree_mode(metadata)),
+        text_metadata,
+        working_tree_version: Some(GitWorkingTreeVersion {
+            size: metadata.len(),
+            modified_ms: modified_ms(metadata),
+        }),
+        content_state,
+    }
+}
+
+fn working_tree_label(path: &GitPathIdentity) -> String {
+    format!("Working tree (disk) · {}", path.display_path)
+}
+
+#[cfg(unix)]
+fn working_tree_mode(metadata: &Metadata) -> String {
+    use std::os::unix::fs::PermissionsExt;
+    if metadata.permissions().mode() & 0o111 == 0 {
+        "100644".to_string()
+    } else {
+        "100755".to_string()
+    }
+}
+
+#[cfg(not(unix))]
+fn working_tree_mode(_metadata: &Metadata) -> String {
+    "100644".to_string()
+}
+
+fn metadata_version(metadata: &Metadata) -> (u64, Option<SystemTime>) {
+    (metadata.len(), metadata.modified().ok())
+}
+
+fn modified_ms(metadata: &Metadata) -> Option<u64> {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis() as u64)
+}
+
+fn map_working_tree_io(error: std::io::Error) -> GitSessionError {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => GitSessionError::WorkingTreePermissionDenied,
+        std::io::ErrorKind::NotFound => GitSessionError::WorkingTreeChanged,
+        _ => GitSessionError::WorkingTreeReadFailed,
+    }
 }
 
 fn plan_changed_file(
@@ -224,6 +660,7 @@ fn missing_snapshot_document(revision: &GitRevision, path: GitPathIdentity) -> G
         path: Some(path),
         mode: None,
         text_metadata: None,
+        working_tree_version: None,
         content_state: GitSnapshotContentState::Missing,
     }
 }
@@ -274,6 +711,7 @@ fn snapshot_document_from_blob(
         path: Some(path),
         mode: Some(mode),
         text_metadata,
+        working_tree_version: None,
         content_state,
     }
 }
@@ -291,6 +729,7 @@ fn non_text_snapshot_document(
         path: Some(entry.path),
         mode: Some(entry.mode),
         text_metadata: None,
+        working_tree_version: None,
         content_state,
     }
 }
@@ -309,6 +748,7 @@ fn unavailable_snapshot_document(
         path: Some(path),
         mode: Some(mode),
         text_metadata: None,
+        working_tree_version: None,
         content_state: GitSnapshotContentState::Unavailable {
             reason: GitSnapshotUnavailableReason::ObjectMissingLocal,
         },
@@ -405,9 +845,9 @@ mod tests {
         snapshot_document_from_blob,
     };
     use crate::domain::git::{
-        GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileStatus, GitObjectAlgorithm,
-        GitObjectId, GitPathIdentity, GitRevision, GitRevisionKind, GitSnapshotContentState,
-        GitSnapshotOrigin,
+        GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileStatus,
+        GitCompareSourceKind, GitObjectAlgorithm, GitObjectId, GitPathIdentity, GitRevision,
+        GitRevisionKind, GitSnapshotContentState, GitSnapshotOrigin,
     };
     use crate::git::GIT_FIXTURE_LOCK;
     use crate::git::changed_files::list_changed_files;
@@ -741,6 +1181,502 @@ mod tests {
             Err(GitSessionError::StaleGeneration),
         );
         assert_eq!(repository_fingerprint(&fixture.root), before);
+    }
+
+    #[test]
+    fn opens_revision_and_disk_working_tree_states_without_conflating_missing_or_binary() {
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = working_tree_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-402".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let paths = register_paths(
+            &session,
+            &[
+                b"modified.txt",
+                b"deleted.txt",
+                b"untracked.txt",
+                b"binary.bin",
+                b"utf16.txt",
+                b"large.txt",
+            ],
+        );
+        let before = working_tree_fingerprint(&fixture.root);
+        let cancellation = CancellationToken::new();
+
+        let modified = super::open_working_tree_compare(
+            &session,
+            &fixture.revision,
+            &paths[0],
+            fixture_generation(&paths[0]),
+            &cancellation,
+        )
+        .expect("modified working-tree compare");
+        assert_eq!(
+            modified.source_kind,
+            GitCompareSourceKind::RevisionWorkingTree
+        );
+        assert_eq!(modified.revision.as_ref(), Some(&fixture.revision));
+        assert!(modified.revision_pair.is_none());
+        assert!(matches!(
+            modified.left.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "committed\n"
+        ));
+        assert_eq!(modified.right.origin, GitSnapshotOrigin::WorkingTree);
+        assert!(modified.right.label.contains("Working tree (disk)"));
+        assert!(matches!(
+            modified.right.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "disk change\n"
+        ));
+        assert!(modified.right.working_tree_version.is_some());
+        assert!(modified.left.read_only && modified.right.read_only);
+        assert!(!modified.capabilities.edit);
+        assert!(!modified.capabilities.save);
+
+        let deleted = super::open_working_tree_compare(
+            &session,
+            &fixture.revision,
+            &paths[1],
+            fixture_generation(&paths[1]),
+            &cancellation,
+        )
+        .expect("deleted working-tree compare");
+        assert!(matches!(
+            deleted.left.content_state,
+            GitSnapshotContentState::Text { .. }
+        ));
+        assert_eq!(
+            deleted.right.content_state,
+            GitSnapshotContentState::Missing
+        );
+
+        let untracked = super::open_working_tree_compare(
+            &session,
+            &fixture.revision,
+            &paths[2],
+            fixture_generation(&paths[2]),
+            &cancellation,
+        )
+        .expect("untracked working-tree compare");
+        assert_eq!(
+            untracked.left.content_state,
+            GitSnapshotContentState::Missing
+        );
+        assert_eq!(untracked.right.origin, GitSnapshotOrigin::WorkingTree);
+        assert!(matches!(
+            untracked.right.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "untracked\n"
+        ));
+
+        let binary = super::open_working_tree_compare(
+            &session,
+            &fixture.revision,
+            &paths[3],
+            fixture_generation(&paths[3]),
+            &cancellation,
+        )
+        .expect("binary working-tree compare");
+        assert_eq!(binary.left.content_state, GitSnapshotContentState::Missing);
+        assert_eq!(binary.right.content_state, GitSnapshotContentState::Binary);
+        assert!(!binary.capabilities.export_patch);
+
+        let utf16 = super::open_working_tree_compare(
+            &session,
+            &fixture.revision,
+            &paths[4],
+            fixture_generation(&paths[4]),
+            &cancellation,
+        )
+        .expect("UTF-16 working-tree compare");
+        assert!(matches!(
+            utf16.right.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "hi\n"
+        ));
+        assert_eq!(
+            utf16
+                .right
+                .text_metadata
+                .as_ref()
+                .map(|metadata| metadata.encoding.as_str()),
+            Some("UTF-16LE BOM")
+        );
+
+        let large = super::open_working_tree_compare(
+            &session,
+            &fixture.revision,
+            &paths[5],
+            fixture_generation(&paths[5]),
+            &cancellation,
+        )
+        .expect("large working-tree compare");
+        assert_eq!(large.right.content_state, GitSnapshotContentState::TooLarge);
+        assert_eq!(working_tree_fingerprint(&fixture.root), before);
+    }
+
+    #[test]
+    fn path_identity_matching_is_exact_instead_of_case_or_normalization_folded() {
+        assert!(super::relative_path_matches_raw(
+            Path::new("src/Exact.txt"),
+            b"src/Exact.txt",
+        ));
+        assert!(!super::relative_path_matches_raw(
+            Path::new("src/Exact.txt"),
+            b"src/exact.txt",
+        ));
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn opens_lossless_non_utf8_untracked_path_on_unix() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = working_tree_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-402-non-utf8".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let raw_path = b"non-utf8-\xff.txt".to_vec();
+        fs::write(
+            fixture
+                .root
+                .join(std::ffi::OsString::from_vec(raw_path.clone())),
+            b"lossless\n",
+        )
+        .expect("non-UTF-8 working file");
+        let paths = register_paths(&session, &[raw_path.as_slice()]);
+        let result = super::open_working_tree_compare(
+            &session,
+            &fixture.revision,
+            &paths[0],
+            fixture_generation(&paths[0]),
+            &CancellationToken::new(),
+        )
+        .expect("non-UTF-8 working-tree compare");
+
+        assert!(
+            result
+                .right
+                .path
+                .as_ref()
+                .is_some_and(|path| path.utf8_path.is_none())
+        );
+        assert!(matches!(
+            result.right.content_state,
+            GitSnapshotContentState::Text { ref text } if text == "lossless\n"
+        ));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn rejects_non_utf8_working_tree_path_when_the_platform_cannot_represent_it() {
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = working_tree_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-402-non-utf8".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let paths = register_paths(&session, &[b"non-utf8-\xff.txt"]);
+
+        assert_eq!(
+            super::open_working_tree_compare(
+                &session,
+                &fixture.revision,
+                &paths[0],
+                fixture_generation(&paths[0]),
+                &CancellationToken::new(),
+            ),
+            Err(GitSessionError::PathUnsupported),
+        );
+    }
+
+    #[test]
+    fn rejects_root_escape_directory_and_stale_working_tree_paths() {
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = working_tree_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-402-boundary".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let paths = register_paths(&session, &[b"../outside.txt", b"directory"]);
+        let generation = fixture_generation(&paths[0]);
+
+        assert_eq!(
+            super::open_working_tree_compare(
+                &session,
+                &fixture.revision,
+                &paths[0],
+                generation,
+                &CancellationToken::new(),
+            ),
+            Err(GitSessionError::PathOutsideRoot),
+        );
+        assert_eq!(
+            super::open_working_tree_compare(
+                &session,
+                &fixture.revision,
+                &paths[1],
+                generation,
+                &CancellationToken::new(),
+            ),
+            Err(GitSessionError::WorkingTreeNotRegular),
+        );
+
+        session
+            .paths()
+            .lock()
+            .expect("path registry")
+            .refresh()
+            .expect("refresh generation");
+        assert_eq!(
+            super::open_working_tree_compare(
+                &session,
+                &fixture.revision,
+                &paths[0],
+                generation,
+                &CancellationToken::new(),
+            ),
+            Err(GitSessionError::StaleGeneration),
+        );
+    }
+
+    #[test]
+    fn rejects_external_change_after_disk_read_before_returning_snapshot() {
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = working_tree_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-402-change-race".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let race_path = fixture.root.join("external-change.txt");
+        fs::write(&race_path, b"before\n").expect("external-change source");
+        let paths = register_paths(&session, &[b"external-change.txt"]);
+        let generation = fixture_generation(&paths[0]);
+
+        let result = super::open_working_tree_compare_inner(
+            &session,
+            &fixture.revision,
+            &paths[0],
+            generation,
+            &CancellationToken::new(),
+            |step| {
+                if step == super::WorkingTreeReadStep::AfterRead {
+                    fs::write(&race_path, b"changed while reading\n")
+                        .expect("inject external change");
+                }
+            },
+        );
+
+        assert_eq!(result, Err(GitSessionError::WorkingTreeChanged));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn reports_permission_denial_without_returning_file_content() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = working_tree_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-402-permission".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        let protected_path = fixture.root.join("permission.txt");
+        fs::write(&protected_path, b"private\n").expect("permission fixture");
+        fs::set_permissions(&protected_path, fs::Permissions::from_mode(0o000))
+            .expect("remove read permission");
+        let paths = register_paths(&session, &[b"permission.txt"]);
+
+        let result = super::open_working_tree_compare(
+            &session,
+            &fixture.revision,
+            &paths[0],
+            fixture_generation(&paths[0]),
+            &CancellationToken::new(),
+        );
+        fs::set_permissions(&protected_path, fs::Permissions::from_mode(0o600))
+            .expect("restore cleanup permission");
+
+        assert_eq!(result, Err(GitSessionError::WorkingTreePermissionDenied));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_symlink_and_file_to_symlink_race_before_returning_disk_content() {
+        use std::os::unix::fs::symlink;
+
+        let _fixture_guard = GIT_FIXTURE_LOCK.lock().expect("Git fixture lock");
+        let fixture = working_tree_compare_fixture();
+        let executable = ValidatedGitExecutable::discover(None).expect("validated Git");
+        let session = GitRepositorySession::open(
+            "repository-session-git-402-symlink".to_string(),
+            fixture.root.clone(),
+            executable,
+        )
+        .expect("open repository session");
+        symlink(
+            fixture
+                .root
+                .parent()
+                .expect("fixture parent")
+                .join("outside.txt"),
+            fixture.root.join("link.txt"),
+        )
+        .expect("fixture symlink");
+        fs::write(fixture.root.join("race.txt"), b"safe\n").expect("race source");
+        let paths = register_paths(&session, &[b"link.txt", b"race.txt"]);
+        let generation = fixture_generation(&paths[0]);
+
+        assert_eq!(
+            super::open_working_tree_compare(
+                &session,
+                &fixture.revision,
+                &paths[0],
+                generation,
+                &CancellationToken::new(),
+            ),
+            Err(GitSessionError::SymlinkUnsupported),
+        );
+
+        let race_path = fixture.root.join("race.txt");
+        let outside_path = fixture
+            .root
+            .parent()
+            .expect("fixture parent")
+            .join("outside.txt");
+        let result = super::open_working_tree_compare_inner(
+            &session,
+            &fixture.revision,
+            &paths[1],
+            generation,
+            &CancellationToken::new(),
+            |step| {
+                if step == super::WorkingTreeReadStep::AfterPreflight {
+                    fs::remove_file(&race_path).expect("remove race source");
+                    symlink(&outside_path, &race_path).expect("replace with symlink");
+                }
+            },
+        );
+        assert_eq!(result, Err(GitSessionError::SymlinkUnsupported));
+    }
+
+    struct WorkingTreeCompareFixture {
+        _temp: TempDir,
+        root: PathBuf,
+        revision: GitRevision,
+    }
+
+    fn working_tree_compare_fixture() -> WorkingTreeCompareFixture {
+        let temp = tempdir().expect("temporary working-tree repository");
+        let root = temp.path().join("repository");
+        fs::create_dir(&root).expect("repository root");
+        git(&root, &["init"]);
+        git(&root, &["config", "user.name", "Forktail Test"]);
+        git(&root, &["config", "user.email", "forktail@example.invalid"]);
+        fs::write(root.join("modified.txt"), b"committed\n").expect("tracked fixture");
+        fs::write(root.join("deleted.txt"), b"deleted\n").expect("deleted fixture");
+        git(&root, &["add", "--all"]);
+        git(&root, &["commit", "-m", "working tree base"]);
+        let revision = revision_from_head(&root, "HEAD");
+
+        fs::write(root.join("modified.txt"), b"disk change\n").expect("working change");
+        fs::remove_file(root.join("deleted.txt")).expect("working deletion");
+        fs::write(root.join("untracked.txt"), b"untracked\n").expect("untracked fixture");
+        fs::write(root.join("binary.bin"), [0, 1, 2, 3]).expect("binary fixture");
+        fs::write(
+            root.join("utf16.txt"),
+            [0xff, 0xfe, b'h', 0, b'i', 0, b'\n', 0],
+        )
+        .expect("UTF-16 fixture");
+        let large = fs::File::create(root.join("large.txt")).expect("large fixture");
+        large
+            .set_len(crate::text::MAX_TEXT_BYTES + 1)
+            .expect("large sparse file");
+        fs::create_dir(root.join("directory")).expect("directory fixture");
+        fs::write(temp.path().join("outside.txt"), b"outside secret\n").expect("outside fixture");
+
+        WorkingTreeCompareFixture {
+            _temp: temp,
+            root,
+            revision,
+        }
+    }
+
+    fn register_paths(session: &GitRepositorySession, paths: &[&[u8]]) -> Vec<GitPathIdentity> {
+        let mut registry = session.paths().lock().expect("path registry");
+        registry.refresh().expect("refresh paths");
+        paths
+            .iter()
+            .map(|path| registry.register((*path).to_vec()).expect("register path"))
+            .collect()
+    }
+
+    fn fixture_generation(path: &GitPathIdentity) -> u64 {
+        path.opaque_id
+            .split(':')
+            .nth_back(1)
+            .expect("opaque generation")
+            .parse()
+            .expect("numeric generation")
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    struct WorkingTreeFingerprint {
+        head: Vec<u8>,
+        index: Vec<u8>,
+        status: Vec<u8>,
+        files: Vec<(String, Option<Vec<u8>>)>,
+    }
+
+    fn working_tree_fingerprint(root: &Path) -> WorkingTreeFingerprint {
+        let files = ["modified.txt", "deleted.txt", "untracked.txt", "binary.bin"]
+            .into_iter()
+            .map(|path| {
+                let bytes = match fs::read(root.join(path)) {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => panic!("read working-tree fixture {path}: {error}"),
+                };
+                (path.to_string(), bytes)
+            })
+            .collect();
+        WorkingTreeFingerprint {
+            head: fs::read(root.join(".git/HEAD")).expect("HEAD fingerprint"),
+            index: fs::read(root.join(".git/index")).expect("index fingerprint"),
+            status: git_output(
+                root,
+                &[
+                    "--no-optional-locks",
+                    "-c",
+                    "core.fsmonitor=false",
+                    "status",
+                    "--porcelain=v2",
+                    "-z",
+                    "--branch",
+                    "--untracked-files=all",
+                ],
+            ),
+            files,
+        }
     }
 
     struct RevisionCompareFixture {
