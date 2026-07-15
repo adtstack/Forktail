@@ -7,7 +7,7 @@ use crate::git::conflicts::{
 use crate::git::executable::{
     GitExecutableError, GitVersion, MINIMUM_GIT_VERSION, ValidatedGitExecutable,
 };
-use crate::git::history::{GitHistoryError, list_recent_commits};
+use crate::git::history::{GitHistoryError, list_file_history, list_recent_commits};
 use crate::git::index::GitIndexError;
 use crate::git::jobs::{GitJobError, GitJobs};
 use crate::git::merge_base::{GitMergeBaseError, get_merge_base};
@@ -43,6 +43,16 @@ pub struct GitTreePathRequest {
 pub struct GitChangedFilesRequest {
     pub left_commit: crate::GitObjectId,
     pub right_commit: crate::GitObjectId,
+    pub hard_limit: usize,
+    pub request_generation: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileHistoryRequest {
+    pub start_commit: crate::GitObjectId,
+    pub opaque_path_id: String,
+    pub generation: u64,
     pub hard_limit: usize,
     pub request_generation: u64,
 }
@@ -202,6 +212,37 @@ pub async fn list_git_recent_commits(
         .map_err(CommandError::from)?;
     tauri::async_runtime::spawn_blocking(move || {
         list_recent_commits(&session, &start_commit, hard_limit, lease.cancellation())
+    })
+    .await
+    .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
+    .map_err(CommandError::from)
+}
+
+#[tauri::command]
+pub async fn list_git_file_history(
+    repository_session_id: String,
+    request: GitFileHistoryRequest,
+    job_id: u64,
+    sessions: State<'_, GitRepositorySessions>,
+    jobs: State<'_, GitJobs>,
+) -> CommandResult<crate::GitFileHistoryList> {
+    let _ = request.request_generation;
+    let session = sessions
+        .get(&repository_session_id)
+        .map_err(CommandError::from)?
+        .ok_or_else(|| CommandError::git(AppErrorCode::GitNotRepository))?;
+    let lease = jobs
+        .start(&repository_session_id, job_id)
+        .map_err(CommandError::from)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        list_file_history(
+            &session,
+            &request.start_commit,
+            &request.opaque_path_id,
+            request.generation,
+            request.hard_limit,
+            lease.cancellation(),
+        )
     })
     .await
     .map_err(|_| CommandError::git(AppErrorCode::GitCommandFailed))?
@@ -656,13 +697,20 @@ impl From<GitHistoryError> for CommandError {
             GitHistoryError::Runner(error) => error.into(),
             GitHistoryError::InvalidObjectId => Self::git(AppErrorCode::GitInvalidRevision),
             GitHistoryError::CommandFailed => Self::git(AppErrorCode::GitObjectMissingLocal),
+            GitHistoryError::UnknownPath | GitHistoryError::PathUnsupported => {
+                Self::git(AppErrorCode::GitPathUnsupported)
+            }
+            GitHistoryError::StalePath => Self::git(AppErrorCode::GitCommandFailed),
             GitHistoryError::InvalidLimit
             | GitHistoryError::TruncatedOutput
             | GitHistoryError::InvalidFieldCount
             | GitHistoryError::InvalidTimestamp
             | GitHistoryError::InvalidSubject
             | GitHistoryError::DuplicateCommit
-            | GitHistoryError::TooManyRecords => Self::git(AppErrorCode::GitCommandFailed),
+            | GitHistoryError::TooManyRecords
+            | GitHistoryError::InvalidStatus
+            | GitHistoryError::InvalidPath
+            | GitHistoryError::StateUnavailable => Self::git(AppErrorCode::GitCommandFailed),
         }
     }
 }

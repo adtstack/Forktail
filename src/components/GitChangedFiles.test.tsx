@@ -90,6 +90,7 @@ function renderChangedFiles(
       onStatusFilterChange={() => {}}
       onOpenModeChange={() => {}}
       onSelect={() => {}}
+      onShowHistory={() => {}}
     />,
   );
 }
@@ -109,6 +110,7 @@ describe("GitChangedFiles", () => {
     expect(markup).not.toContain("copy-target");
     expect(markup).not.toContain("Bare repository");
     expect(markup).not.toContain("Cross-repository");
+    expect(markup).toContain("File history");
   });
 
   it("filters by path or status while retaining lossless opaque selection identity", () => {
@@ -136,11 +138,11 @@ describe("GitChangedFiles", () => {
       new Set([key]),
     );
 
-    expect(markup).toContain("role=\"listbox\"");
+    expect(markup).toContain("role=\"list\"");
     expect(markup).toContain(
       "aria-keyshortcuts=\"ArrowUp ArrowDown Home End Alt+ArrowUp Alt+ArrowDown Alt+N\"",
     );
-    expect(markup).toContain("aria-selected=\"true\"");
+    expect(markup).toContain("aria-pressed=\"true\"");
     expect(markup).toContain("aria-posinset=\"2\"");
     expect(markup).toContain("aria-setsize=\"4\"");
     expect(markup).toContain("Viewed");
@@ -190,7 +192,7 @@ describe("GitChangedFiles", () => {
     const elapsedMs = performance.now() - started;
 
     expect(window.entries.length).toBeLessThanOrEqual(80);
-    expect(markup.match(/role=\"option\"/g)?.length).toBeLessThanOrEqual(80);
+    expect(markup.match(/role=\"listitem\"/g)?.length).toBeLessThanOrEqual(80);
     expect(markup).toContain("10000 reviewable files");
     expect(elapsedMs).toBeLessThan(100);
   });

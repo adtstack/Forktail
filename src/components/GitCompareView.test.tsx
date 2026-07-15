@@ -5,6 +5,7 @@ import type { GitRepositorySummary } from "../core/gitModels";
 import type {
   GitChangedFilesReviewState,
   GitConflictReviewState,
+  GitFileHistoryReviewState,
   GitRevisionReviewState,
   GitTreePickerReviewState,
   GitWorkingTreeReviewState,
@@ -39,6 +40,7 @@ function renderGitCompareView(
   workingTreeReview?: GitWorkingTreeReviewState,
   conflictReview?: GitConflictReviewState,
   treePickerReview?: GitTreePickerReviewState,
+  fileHistoryReview?: GitFileHistoryReviewState,
 ): string {
   return renderToStaticMarkup(
     <GitCompareView
@@ -49,6 +51,7 @@ function renderGitCompareView(
       workingTreeReview={workingTreeReview}
       conflictReview={conflictReview}
       treePickerReview={treePickerReview}
+      fileHistoryReview={fileHistoryReview}
       onBack={() => {}}
       onOpenRepository={() => {}}
       onCancelOpen={() => {}}
@@ -57,6 +60,7 @@ function renderGitCompareView(
       onChangedFileFilterChange={() => {}}
       onChangedFileStatusFilterChange={() => {}}
       onSelectChangedFile={() => {}}
+      onShowFileHistory={() => {}}
       onLoadTrackedTrees={() => {}}
       onCancelTrackedTrees={() => {}}
       onCloseTrackedTrees={() => {}}
@@ -70,6 +74,10 @@ function renderGitCompareView(
       onSelectWorkingTreeFile={() => {}}
       onRefreshConflicts={() => {}}
       onSelectConflict={() => {}}
+      onLoadFileHistory={() => {}}
+      onCancelFileHistory={() => {}}
+      onFileHistorySelectionChange={() => {}}
+      onCompareFileHistory={() => {}}
     />,
   );
 }
@@ -274,7 +282,7 @@ describe("GitCompareView repository shell", () => {
     expect(markup).toContain("main~1");
     expect(markup).toContain("Changed files");
     expect(markup).toContain("src/feature.ts");
-    expect(markup).toContain("role=\"option\"");
+    expect(markup).toContain("role=\"listitem\"");
   });
 
   it("exposes working-tree status and the three-state selector independently of revision-pair input", () => {
@@ -354,6 +362,33 @@ describe("GitCompareView repository shell", () => {
 
     expect(markup).toContain("Browse all tracked files");
     expect(markup).toContain("Changed files remain the default review list");
+  });
+
+  it("exposes local file history only for the explicitly selected changed path", () => {
+    const selectedPath = {
+      opaqueId: "repository-session-1:path:4:8",
+      displayPath: "src/history.ts",
+      utf8Path: "src/history.ts",
+    };
+    const markup = renderGitCompareView(
+      { kind: "ready", repository: branchRepository },
+      "en",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        path: selectedPath,
+        state: { kind: "idle" },
+        selectedCommitIds: [],
+        openState: { kind: "idle" },
+      },
+    );
+
+    expect(markup).toContain("File history");
+    expect(markup).toContain("src/history.ts");
+    expect(markup).toContain("Load local history");
   });
 });
 

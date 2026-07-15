@@ -73,6 +73,36 @@ export interface GitRecentCommitList {
   shallow: boolean;
 }
 
+export type GitFileHistoryBoundary =
+  | "normal"
+  | "shallowBoundary"
+  | "renameBoundary"
+  | "objectUnavailable";
+
+export interface GitFileHistoryEntry {
+  commitId: GitObjectId;
+  shortDisplayId: string;
+  subject: string;
+  authorTimestamp: number;
+  pathAtCommit: GitPathIdentity;
+  boundary: GitFileHistoryBoundary;
+}
+
+export interface GitFileHistoryList {
+  entries: GitFileHistoryEntry[];
+  truncated: boolean;
+  shallow: boolean;
+  generation: number;
+}
+
+export interface GitFileHistoryRequest {
+  startCommit: GitObjectId;
+  opaquePathId: string;
+  generation: number;
+  hardLimit: number;
+  requestGeneration: number;
+}
+
 export type GitTreeEntryKind =
   | "regularFile"
   | "executableFile"

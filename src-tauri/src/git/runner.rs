@@ -30,6 +30,7 @@ pub const HISTORY_STDOUT_CAP: usize = 8 * 1024 * 1024;
 const REF_LIST_FORMAT: &str =
     "%(refname)%00%(objectname)%00%(objecttype)%00%(*objectname)%00%(*objecttype)%00";
 const RECENT_COMMIT_FORMAT: &str = "%H%x00%at%x00%s";
+const FILE_HISTORY_FORMAT: &str = "%x00%H%x00%at%x00%s";
 
 const SAFE_INHERITED_ENVIRONMENT: &[&str] = &[
     "HOME",
@@ -76,6 +77,12 @@ pub enum GitOperation {
     RecentCommits {
         repository: PathBuf,
         start_commit_id: String,
+        max_records: usize,
+    },
+    FileHistory {
+        repository: PathBuf,
+        start_commit_id: String,
+        path: OsString,
         max_records: usize,
     },
     Tree {
@@ -171,6 +178,32 @@ impl GitOperation {
                     OsString::from(format!("--max-count={max_records}")),
                     OsString::from(start_commit_id),
                     OsString::from("--"),
+                ]);
+            }
+            Self::FileHistory {
+                repository,
+                start_commit_id,
+                path,
+                max_records,
+            } => {
+                arguments.push(OsString::from("-C"));
+                arguments.push(repository.as_os_str().to_owned());
+                arguments.extend([
+                    OsString::from("log"),
+                    OsString::from("--no-decorate"),
+                    OsString::from("--no-color"),
+                    OsString::from("--no-show-signature"),
+                    OsString::from("--no-ext-diff"),
+                    OsString::from("--no-textconv"),
+                    OsString::from("--follow"),
+                    OsString::from("--find-renames"),
+                    OsString::from("--name-status"),
+                    OsString::from("-z"),
+                    OsString::from(format!("--format={FILE_HISTORY_FORMAT}")),
+                    OsString::from(format!("--max-count={max_records}")),
+                    OsString::from(start_commit_id),
+                    OsString::from("--"),
+                    path.clone(),
                 ]);
             }
             Self::Tree {
@@ -434,6 +467,7 @@ impl RunnerLimits {
                 GitOperation::Revision { .. } => 64 * 1024,
                 GitOperation::References { .. } => REF_LIST_STDOUT_CAP,
                 GitOperation::RecentCommits { .. } => HISTORY_STDOUT_CAP,
+                GitOperation::FileHistory { .. } => HISTORY_STDOUT_CAP,
                 GitOperation::Tree { .. } => TREE_LIST_STDOUT_CAP,
                 GitOperation::Blob {
                     query: BlobQuery::Content,
@@ -573,6 +607,7 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
         || validate_revision_query_arguments(query_arguments)
         || validate_ref_query_arguments(query_arguments)
         || validate_recent_commit_query_arguments(query_arguments)
+        || validate_file_history_query_arguments(query_arguments)
         || validate_tree_query_arguments(query_arguments)
         || validate_blob_query_arguments(query_arguments)
         || validate_changed_files_query_arguments(query_arguments)
@@ -586,6 +621,33 @@ fn validate_approved_arguments(arguments: &[OsString]) -> Result<(), RunnerError
     } else {
         Err(RunnerError::ForbiddenOperation)
     }
+}
+
+fn validate_file_history_query_arguments(arguments: &[OsString]) -> bool {
+    let expected_format = format!("--format={FILE_HISTORY_FORMAT}");
+    if arguments.len() != 15
+        || arguments[0] != "log"
+        || arguments[1] != "--no-decorate"
+        || arguments[2] != "--no-color"
+        || arguments[3] != "--no-show-signature"
+        || arguments[4] != "--no-ext-diff"
+        || arguments[5] != "--no-textconv"
+        || arguments[6] != "--follow"
+        || arguments[7] != "--find-renames"
+        || arguments[8] != "--name-status"
+        || arguments[9] != "-z"
+        || arguments[10] != OsStr::new(&expected_format)
+        || !is_full_object_id(&arguments[12])
+        || arguments[13] != "--"
+        || !validate_literal_path_argument(&arguments[14])
+    {
+        return false;
+    }
+    arguments[11]
+        .to_str()
+        .and_then(|argument| argument.strip_prefix("--max-count="))
+        .and_then(|count| count.parse::<usize>().ok())
+        .is_some_and(|count| (1..=501).contains(&count))
 }
 
 fn validate_recent_commit_query_arguments(arguments: &[OsString]) -> bool {
@@ -1550,6 +1612,90 @@ mod tests {
                 "--max-count=502",
                 "1111111111111111111111111111111111111111",
                 "--",
+            ],
+        ] {
+            let arguments = SAFE_GLOBAL_ARGUMENTS
+                .iter()
+                .copied()
+                .chain(["-C", "/tmp/repository"])
+                .chain(malformed)
+                .map(OsString::from)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                validate_approved_arguments(&arguments),
+                Err(RunnerError::ForbiddenOperation)
+            );
+        }
+    }
+
+    #[test]
+    fn file_history_operation_allows_only_local_follow_metadata_and_one_literal_path() {
+        let runner = ProductionGitRunner::new(current_test_executable())
+            .expect("test executable should be accepted");
+        let repository = std::env::temp_dir().join("file history repository 한글");
+        let commit_id = "2".repeat(40);
+        let plan = runner
+            .plan(GitOperation::FileHistory {
+                repository: repository.clone(),
+                start_commit_id: commit_id.clone(),
+                path: OsString::from("src/이력 file.txt"),
+                max_records: 51,
+            })
+            .expect("typed file history query should be approved");
+
+        assert!(validate_approved_arguments(&plan.arguments).is_ok());
+        assert_eq!(plan.limits.stdout_bytes, HISTORY_STDOUT_CAP);
+        assert!(plan.arguments.iter().any(|argument| argument == "--follow"));
+        assert!(
+            plan.arguments
+                .iter()
+                .any(|argument| argument == "--no-ext-diff")
+        );
+        assert!(
+            plan.arguments
+                .iter()
+                .any(|argument| argument == "--no-textconv")
+        );
+        assert!(!plan.arguments.iter().any(|argument| argument == "--all"));
+        assert_eq!(
+            plan.arguments.last(),
+            Some(&OsString::from("src/이력 file.txt"))
+        );
+
+        for malformed in [
+            vec![
+                "log",
+                "--no-decorate",
+                "--no-color",
+                "--no-show-signature",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--follow",
+                "--find-renames",
+                "--name-status",
+                "-z",
+                "--format=%x00%H%x00%at%x00%B",
+                "--max-count=51",
+                "2222222222222222222222222222222222222222",
+                "--",
+                "src/file.txt",
+            ],
+            vec![
+                "log",
+                "--no-decorate",
+                "--no-color",
+                "--no-show-signature",
+                "--no-ext-diff",
+                "--no-textconv",
+                "--follow",
+                "--find-renames",
+                "--name-status",
+                "-z",
+                "--format=%x00%H%x00%at%x00%s",
+                "--max-count=502",
+                "2222222222222222222222222222222222222222",
+                "--",
+                "src/file.txt",
             ],
         ] {
             let arguments = SAFE_GLOBAL_ARGUMENTS

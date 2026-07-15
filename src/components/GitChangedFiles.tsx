@@ -78,6 +78,7 @@ interface GitChangedFilesProps {
   onStatusFilterChange: (status: GitChangedFileStatusFilter) => void;
   onOpenModeChange?: (mode: GitChangedFileOpenMode) => void;
   onSelect: (entry: GitChangedFile) => void;
+  onShowHistory?: (entry: GitChangedFile) => void;
 }
 
 const TEXT = {
@@ -107,6 +108,7 @@ const TEXT = {
     previous: "Previous file",
     next: "Next file",
     nextUnviewed: "Next unviewed",
+    history: "File history",
     states: {
       text: "Text",
       missing: "Missing",
@@ -144,6 +146,7 @@ const TEXT = {
     previous: "이전 파일",
     next: "다음 파일",
     nextUnviewed: "다음 미검토",
+    history: "파일 이력",
     states: {
       text: "텍스트",
       missing: "없음",
@@ -194,6 +197,7 @@ export function GitChangedFiles({
   onStatusFilterChange,
   onOpenModeChange,
   onSelect,
+  onShowHistory,
 }: GitChangedFilesProps) {
   const text = TEXT[languageMode];
   const statusText = STATUS_TEXT[languageMode];
@@ -375,7 +379,7 @@ export function GitChangedFiles({
             <div
               ref={scrollRef}
               className="git-changed-file-list"
-              role="listbox"
+              role="list"
               tabIndex={0}
               aria-keyshortcuts="ArrowUp ArrowDown Home End Alt+ArrowUp Alt+ArrowDown Alt+N"
               aria-label={text.title}
@@ -387,26 +391,40 @@ export function GitChangedFiles({
                   const key = gitChangedFileKey(entry);
                   const viewed = reviewState.viewedKeys.has(key);
                   return (
-                    <button
+                    <div
                       key={key}
-                      type="button"
-                      role="option"
-                      aria-selected={selectedKey === key}
+                      role="listitem"
                       aria-posinset={window.startIndex + offset + 1}
                       aria-setsize={filteredEntries.length}
                       className="git-changed-file-row"
                       style={{ top: (window.startIndex + offset) * ROW_HEIGHT, height: ROW_HEIGHT }}
-                      onClick={() => onSelect(entry)}
                     >
-                      <span className="git-changed-file-status">{statusText[entry.status as ReviewableStatus]}</span>
-                      <span className="git-changed-file-path">{changedFilePath(entry)}</span>
-                      {entry.similarityScore != null && (
-                        <span className="git-changed-file-score">
-                          {text.similarity(entry.similarityScore)}
-                        </span>
+                      <button
+                        type="button"
+                        aria-pressed={selectedKey === key}
+                        className="git-changed-file-open"
+                        onClick={() => onSelect(entry)}
+                      >
+                        <span className="git-changed-file-status">{statusText[entry.status as ReviewableStatus]}</span>
+                        <span className="git-changed-file-path">{changedFilePath(entry)}</span>
+                        {entry.similarityScore != null && (
+                          <span className="git-changed-file-score">
+                            {text.similarity(entry.similarityScore)}
+                          </span>
+                        )}
+                        <span className="git-changed-file-viewed">{viewed ? text.viewed : text.unviewed}</span>
+                      </button>
+                      {onShowHistory && (
+                        <button
+                          type="button"
+                          className="git-changed-file-history"
+                          aria-label={`${text.history}: ${changedFilePath(entry)}`}
+                          onClick={() => onShowHistory(entry)}
+                        >
+                          {text.history}
+                        </button>
                       )}
-                      <span className="git-changed-file-viewed">{viewed ? text.viewed : text.unviewed}</span>
-                    </button>
+                    </div>
                   );
                 })}
               </div>

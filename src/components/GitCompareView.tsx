@@ -11,6 +11,7 @@ import type {
   GitChangedFileStatusFilter,
   GitConflictLoadState,
   GitConflictOpenState,
+  GitFileHistoryLoadState,
   GitRefLoadState,
   GitRevisionFieldState,
   GitSnapshotSelectionState,
@@ -23,6 +24,7 @@ import type { AppLanguage } from "../core/settings";
 import type { GitReviewState } from "../core/gitReview";
 import { GitChangedFiles } from "./GitChangedFiles";
 import { GitConflictView } from "./GitConflictView";
+import { GitFileHistory } from "./GitFileHistory";
 import { GitRevisionSelector } from "./GitRevisionSelector";
 import {
   GitTreePicker,
@@ -71,6 +73,7 @@ interface GitCompareViewProps {
   workingTreeReview?: GitWorkingTreeReviewState;
   conflictReview?: GitConflictReviewState;
   treePickerReview?: GitTreePickerReviewState;
+  fileHistoryReview?: GitFileHistoryReviewState;
   onBack: () => void;
   onOpenRepository: () => void;
   onCancelOpen: () => void;
@@ -80,6 +83,7 @@ interface GitCompareViewProps {
   onChangedFileStatusFilterChange?: (status: GitChangedFileStatusFilter) => void;
   onChangedFileOpenModeChange?: (mode: GitChangedFileOpenMode) => void;
   onSelectChangedFile?: (entry: GitChangedFile) => void;
+  onShowFileHistory?: (entry: GitChangedFile) => void;
   onLoadTrackedTrees?: () => void;
   onCancelTrackedTrees?: () => void;
   onCloseTrackedTrees?: () => void;
@@ -93,6 +97,10 @@ interface GitCompareViewProps {
   onSelectWorkingTreeFile?: (row: GitWorkingTreeRow) => void;
   onRefreshConflicts?: () => void;
   onSelectConflict?: (entry: GitConflictEntry) => void;
+  onLoadFileHistory?: () => void;
+  onCancelFileHistory?: () => void;
+  onFileHistorySelectionChange?: (selectedCommitIds: string[]) => void;
+  onCompareFileHistory?: () => void;
 }
 
 export interface GitRevisionReviewState {
@@ -130,6 +138,13 @@ export interface GitTreePickerReviewState {
   query: string;
   leftSelection: GitTreeSelectionKey;
   rightSelection: GitTreeSelectionKey;
+  openState: GitSnapshotSelectionState;
+}
+
+export interface GitFileHistoryReviewState {
+  path: import("../core/gitModels").GitPathIdentity;
+  state: GitFileHistoryLoadState;
+  selectedCommitIds: string[];
   openState: GitSnapshotSelectionState;
 }
 
@@ -190,6 +205,7 @@ export function GitCompareView({
   workingTreeReview,
   conflictReview,
   treePickerReview,
+  fileHistoryReview,
   onBack,
   onOpenRepository,
   onCancelOpen,
@@ -199,6 +215,7 @@ export function GitCompareView({
   onChangedFileStatusFilterChange,
   onChangedFileOpenModeChange,
   onSelectChangedFile,
+  onShowFileHistory,
   onLoadTrackedTrees,
   onCancelTrackedTrees,
   onCloseTrackedTrees,
@@ -212,6 +229,10 @@ export function GitCompareView({
   onSelectWorkingTreeFile,
   onRefreshConflicts,
   onSelectConflict,
+  onLoadFileHistory,
+  onCancelFileHistory,
+  onFileHistorySelectionChange,
+  onCompareFileHistory,
 }: GitCompareViewProps) {
   const text = GIT_COMPARE_TEXT[languageMode];
 
@@ -402,6 +423,26 @@ export function GitCompareView({
           onStatusFilterChange={onChangedFileStatusFilterChange}
           onOpenModeChange={onChangedFileOpenModeChange}
           onSelect={onSelectChangedFile}
+          onShowHistory={onShowFileHistory}
+        />
+      )}
+
+      {repository.head.kind !== "unborn"
+        && fileHistoryReview
+        && onLoadFileHistory
+        && onCancelFileHistory
+        && onFileHistorySelectionChange
+        && onCompareFileHistory && (
+        <GitFileHistory
+          path={fileHistoryReview.path}
+          state={fileHistoryReview.state}
+          selectedCommitIds={fileHistoryReview.selectedCommitIds}
+          openState={fileHistoryReview.openState}
+          languageMode={languageMode}
+          onLoad={onLoadFileHistory}
+          onCancel={onCancelFileHistory}
+          onSelectionChange={onFileHistorySelectionChange}
+          onCompare={onCompareFileHistory}
         />
       )}
     </main>

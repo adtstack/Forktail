@@ -13,6 +13,8 @@ import type {
   GitConflictEntry,
   GitConflictList,
   GitConflictSession,
+  GitFileHistoryEntry,
+  GitFileHistoryList,
   GitMergePreview,
   GitChangedFile,
   GitChangedFileList,
@@ -21,6 +23,7 @@ import type {
   GitRefList,
   GitRepositorySummary,
   GitRevision,
+  GitRevisionCompareRequest,
   GitSnapshotContentState,
   GitSnapshotDocument,
   GitSnapshotUnavailableReason,
@@ -94,6 +97,22 @@ export type GitChangedFileLoadState =
     }
   | {
       kind: "error";
+      requestGeneration: number;
+      message: string;
+    };
+
+export type GitFileHistoryLoadState =
+  | { kind: "idle" }
+  | { kind: "loading"; pathKey: string; requestGeneration: number }
+  | {
+      kind: "ready";
+      pathKey: string;
+      requestGeneration: number;
+      list: GitFileHistoryList;
+    }
+  | {
+      kind: "error";
+      pathKey: string;
       requestGeneration: number;
       message: string;
     };
@@ -382,6 +401,58 @@ export function gitChangedFileFromTreeSelection(
     oldPath: left.path,
     newPath: right.path,
     similarityScore: null,
+  };
+}
+
+export function toggleGitFileHistorySelection(
+  selectedCommitIds: string[],
+  entry: GitFileHistoryEntry,
+): string[] {
+  if (entry.boundary === "objectUnavailable") return selectedCommitIds;
+  const commitId = entry.commitId.hex;
+  if (selectedCommitIds.includes(commitId)) {
+    return selectedCommitIds.filter((selected) => selected !== commitId);
+  }
+  if (selectedCommitIds.length < 2) return [...selectedCommitIds, commitId];
+  return [selectedCommitIds[1]!, commitId];
+}
+
+export function gitFileHistoryCompareRequest(
+  entries: GitFileHistoryEntry[],
+  selectedCommitIds: string[],
+  generation: number,
+): GitRevisionCompareRequest | null {
+  if (selectedCommitIds.length !== 2 || selectedCommitIds[0] === selectedCommitIds[1]) {
+    return null;
+  }
+  const selected = selectedCommitIds
+    .map((commitId) => entries.findIndex((entry) => entry.commitId.hex === commitId));
+  if (selected.some((index) => index < 0)) return null;
+  const selectedEntries = selected.map((index) => entries[index]!);
+  if (selectedEntries.some((entry) => entry.boundary === "objectUnavailable")) return null;
+
+  const newerIndex = Math.min(...selected);
+  const olderIndex = Math.max(...selected);
+  const newer = entries[newerIndex]!;
+  const older = entries[olderIndex]!;
+  const revision = (entry: GitFileHistoryEntry): GitRevision => ({
+    rawLabel: entry.commitId.hex,
+    resolved: entry.commitId,
+    kind: "commit",
+    displayName: entry.shortDisplayId,
+  });
+  return {
+    leftRevision: revision(older),
+    rightRevision: revision(newer),
+    changedFile: {
+      status: older.pathAtCommit.opaqueId === newer.pathAtCommit.opaqueId
+        ? "modified"
+        : "renamed",
+      oldPath: older.pathAtCommit,
+      newPath: newer.pathAtCommit,
+      similarityScore: null,
+    },
+    generation,
   };
 }
 

@@ -17,6 +17,8 @@ import type {
   GitConflictSessionRequest,
   GitConflictSaveRequest,
   GitConflictSaveResult,
+  GitFileHistoryList,
+  GitFileHistoryRequest,
   GitConflictsRequest,
   GitIndexCompareRequest,
   GitMergeBase,
@@ -170,6 +172,19 @@ export async function listGitRecentCommits(
     repositorySessionId,
     startCommit,
     hardLimit,
+    jobId,
+  });
+}
+
+export async function listGitFileHistory(
+  repositorySessionId: string,
+  request: GitFileHistoryRequest,
+  jobId: number,
+): Promise<GitFileHistoryList> {
+  requireTauri();
+  return invoke<GitFileHistoryList>("list_git_file_history", {
+    repositorySessionId,
+    request,
     jobId,
   });
 }

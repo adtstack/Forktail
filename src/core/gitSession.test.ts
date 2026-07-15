@@ -7,6 +7,7 @@ import type {
   GitCompareSession,
   GitConflictOperation,
   GitConflictSession,
+  GitFileHistoryEntry,
   GitMergePreview,
   GitSnapshotDocument,
 } from "./gitModels";
@@ -15,6 +16,8 @@ import {
   adaptGitConflictSession,
   adaptGitMergePreview,
   gitSnapshotPatchAvailability,
+  gitFileHistoryCompareRequest,
+  toggleGitFileHistorySelection,
   keepsGitRepositorySession,
 } from "./gitSession";
 import { persistentCompareSessionInput } from "./settings";
@@ -28,6 +31,88 @@ describe("Git repository session lifecycle", () => {
     expect(keepsGitRepositorySession("merge", null, "gitPreview")).toBe(true);
     expect(keepsGitRepositorySession("merge", null, "files")).toBe(false);
     expect(keepsGitRepositorySession("home", null, null)).toBe(false);
+  });
+});
+
+function historyEntry(
+  digit: string,
+  pathId: string,
+  boundary: GitFileHistoryEntry["boundary"] = "normal",
+): GitFileHistoryEntry {
+  return {
+    commitId: { algorithm: "sha1", hex: digit.repeat(40) },
+    shortDisplayId: digit.repeat(12),
+    subject: `commit ${digit}`,
+    authorTimestamp: Number(digit),
+    pathAtCommit: {
+      opaqueId: pathId,
+      displayPath: pathId,
+      utf8Path: pathId,
+    },
+    boundary,
+  };
+}
+
+describe("Git file-history snapshot handoff", () => {
+  it("orders the older snapshot on the left and preserves rename path identities", () => {
+    const newest = historyEntry("3", "new-name");
+    const older = historyEntry("2", "old-name", "renameBoundary");
+    const request = gitFileHistoryCompareRequest(
+      [newest, older],
+      [newest.commitId.hex, older.commitId.hex],
+      9,
+    );
+
+    expect(request).toEqual({
+      leftRevision: {
+        rawLabel: older.commitId.hex,
+        resolved: older.commitId,
+        kind: "commit",
+        displayName: older.shortDisplayId,
+      },
+      rightRevision: {
+        rawLabel: newest.commitId.hex,
+        resolved: newest.commitId,
+        kind: "commit",
+        displayName: newest.shortDisplayId,
+      },
+      changedFile: {
+        status: "renamed",
+        oldPath: older.pathAtCommit,
+        newPath: newest.pathAtCommit,
+        similarityScore: null,
+      },
+      generation: 9,
+    });
+  });
+
+  it("rejects unavailable or incomplete selections and rotates a third selection predictably", () => {
+    const newest = historyEntry("3", "same-path");
+    const older = historyEntry("2", "same-path");
+    const deleted = historyEntry("1", "same-path", "objectUnavailable");
+
+    expect(gitFileHistoryCompareRequest([newest, deleted], [
+      newest.commitId.hex,
+      deleted.commitId.hex,
+    ], 4)).toBeNull();
+    expect(gitFileHistoryCompareRequest([newest, older], [newest.commitId.hex], 4)).toBeNull();
+    expect(toggleGitFileHistorySelection([], newest)).toEqual([newest.commitId.hex]);
+    expect(toggleGitFileHistorySelection([newest.commitId.hex], older)).toEqual([
+      newest.commitId.hex,
+      older.commitId.hex,
+    ]);
+    expect(toggleGitFileHistorySelection([
+      newest.commitId.hex,
+      older.commitId.hex,
+    ], deleted)).toEqual([
+      newest.commitId.hex,
+      older.commitId.hex,
+    ]);
+    const third = historyEntry("4", "same-path");
+    expect(toggleGitFileHistorySelection([
+      newest.commitId.hex,
+      older.commitId.hex,
+    ], third)).toEqual([older.commitId.hex, third.commitId.hex]);
   });
 });
 

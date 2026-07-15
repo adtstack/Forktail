@@ -16,6 +16,7 @@ import {
   getGitMergeBase,
   listGitChangedFiles,
   listGitConflicts,
+  listGitFileHistory,
   listGitRefs,
   listGitRecentCommits,
   listGitTree,
@@ -272,6 +273,41 @@ describe("Git revision selector bridge", () => {
     expect(mocks.invoke).toHaveBeenLastCalledWith("cancel_git_job", {
       repositorySessionId: "repository-session-1",
       jobId: 81,
+    });
+  });
+});
+
+describe("Git file-history bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("requests bounded local metadata with opaque path identity and stale generation", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({
+      entries: [],
+      truncated: false,
+      shallow: false,
+      generation: 4,
+    });
+    const request = {
+      startCommit: { algorithm: "sha1" as const, hex: "a".repeat(40) },
+      opaquePathId: "repository-session-1:path:4:7",
+      generation: 4,
+      hardLimit: 50,
+      requestGeneration: 19,
+    };
+
+    await listGitFileHistory("repository-session-1", request, 83);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("list_git_file_history", {
+      repositorySessionId: "repository-session-1",
+      request,
+      jobId: 83,
     });
   });
 });

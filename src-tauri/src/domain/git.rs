@@ -194,6 +194,35 @@ pub struct GitRecentCommitList {
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub enum GitFileHistoryBoundary {
+    Normal,
+    ShallowBoundary,
+    RenameBoundary,
+    ObjectUnavailable,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileHistoryEntry {
+    pub commit_id: GitObjectId,
+    pub short_display_id: String,
+    pub subject: String,
+    pub author_timestamp: i64,
+    pub path_at_commit: GitPathIdentity,
+    pub boundary: GitFileHistoryBoundary,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GitFileHistoryList {
+    pub entries: Vec<GitFileHistoryEntry>,
+    pub truncated: bool,
+    pub shallow: bool,
+    pub generation: u64,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub enum GitTreeEntryKind {
     RegularFile,
     ExecutableFile,
@@ -922,11 +951,12 @@ mod tests {
         GitBlobContent, GitBlobDocument, GitChangedFile, GitChangedFileCounts, GitChangedFileList,
         GitChangedFileStatus, GitCompareCapabilities, GitCompareSession, GitCompareSourceKind,
         GitConflictEntry, GitConflictList, GitConflictOperation, GitConflictSaveAction,
-        GitConflictSaveResult, GitConflictStage, GitHeadState, GitIndexComparison, GitMergeBase,
-        GitMergePreview, GitMergePreviewCapabilities, GitMergePreviewDisclaimer,
-        GitMergePreviewResult, GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType,
-        GitPathIdentity, GitRecentCommitEntry, GitRecentCommitList, GitRefKind, GitRefList,
-        GitRepositoryRef, GitRepositorySummary, GitRevision, GitRevisionKind, GitRevisionPair,
+        GitConflictSaveResult, GitConflictStage, GitFileHistoryBoundary, GitFileHistoryEntry,
+        GitFileHistoryList, GitHeadState, GitIndexComparison, GitMergeBase, GitMergePreview,
+        GitMergePreviewCapabilities, GitMergePreviewDisclaimer, GitMergePreviewResult,
+        GitObjectAlgorithm, GitObjectId, GitObjectIdError, GitObjectType, GitPathIdentity,
+        GitRecentCommitEntry, GitRecentCommitList, GitRefKind, GitRefList, GitRepositoryRef,
+        GitRepositorySummary, GitRevision, GitRevisionKind, GitRevisionPair,
         GitSnapshotContentState, GitSnapshotDocument, GitSnapshotOrigin, GitStatusBranch,
         GitStatusBranchState, GitStatusChangeKind, GitStatusEntry, GitStatusSnapshot,
         GitSubmoduleStatus, GitTextMetadata, GitTreeEntry, GitTreeEntryKind, GitTreeList,
@@ -1206,6 +1236,48 @@ mod tests {
                 }],
                 "truncated": true,
                 "shallow": true,
+            })
+        );
+    }
+
+    #[test]
+    fn serializes_file_history_with_opaque_paths_and_explicit_boundaries() {
+        let history = GitFileHistoryList {
+            entries: vec![GitFileHistoryEntry {
+                commit_id: sha1('b'),
+                short_display_id: "bbbbbbbbbbbb".to_string(),
+                subject: "renamed".to_string(),
+                author_timestamp: 1_700_000_001,
+                path_at_commit: GitPathIdentity {
+                    opaque_id: "repository-session-1:path:4:2".to_string(),
+                    display_path: "src/old.txt".to_string(),
+                    utf8_path: Some("src/old.txt".to_string()),
+                },
+                boundary: GitFileHistoryBoundary::RenameBoundary,
+            }],
+            truncated: false,
+            shallow: true,
+            generation: 4,
+        };
+
+        assert_eq!(
+            serde_json::to_value(history).expect("serialize file history"),
+            json!({
+                "entries": [{
+                    "commitId": { "algorithm": "sha1", "hex": "b".repeat(40) },
+                    "shortDisplayId": "bbbbbbbbbbbb",
+                    "subject": "renamed",
+                    "authorTimestamp": 1_700_000_001,
+                    "pathAtCommit": {
+                        "opaqueId": "repository-session-1:path:4:2",
+                        "displayPath": "src/old.txt",
+                        "utf8Path": "src/old.txt",
+                    },
+                    "boundary": "renameBoundary",
+                }],
+                "truncated": false,
+                "shallow": true,
+                "generation": 4,
             })
         );
     }
