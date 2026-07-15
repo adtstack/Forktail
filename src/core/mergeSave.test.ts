@@ -3,10 +3,12 @@ import {
   canSaveMergeResult,
   mergeSaveEncodingWarning,
   mergeSavePreconditionForPath,
+  mergeResultOriginalLineEnding,
   mergeSaveStateAfterWrite,
   unresolvedSaveMessage,
 } from "./mergeSave";
-import type { FileDocument, MergeSession } from "./models";
+import type { FileDocument, FileMergeSession, MergeSession } from "./models";
+import { virtualMissingFileDocument } from "./virtualDocument";
 
 const unresolved = `<<<<<<< ours
 ours
@@ -119,6 +121,38 @@ describe("mergeSaveEncodingWarning", () => {
       }),
     ).toContain("decode loss");
   });
+
+  it("uses existing Result metadata for mergetool EOL and UTF-8 conversion warnings", () => {
+    const session = mergeSession({ outputPath: "/repo/MERGED" });
+    const output = {
+      ...document("/repo/MERGED", 20, 2000),
+      encoding: "UTF-16LE BOM",
+      lineEnding: "crlf" as const,
+    };
+    const mergetool: MergeSession = {
+      ...session,
+      origin: "mergetool",
+      output,
+      outputPath: "/repo/MERGED",
+    };
+
+    expect(mergeResultOriginalLineEnding(mergetool)).toBe("crlf");
+    expect(mergeSaveEncodingWarning(mergetool)).toContain("original encoding");
+  });
+
+  it("does not treat a virtual missing Git Base as an encoding risk", () => {
+    const session = mergeSession({ outputPath: "/repo/MERGED" });
+
+    expect(
+      mergeSaveEncodingWarning({
+        ...session,
+        origin: "mergetool",
+        base: virtualMissingFileDocument("$BASE"),
+        output: document("/repo/MERGED", 20, 2000),
+        outputPath: "/repo/MERGED",
+      }),
+    ).toBeNull();
+  });
 });
 
 describe("mergeSavePreconditionForPath", () => {
@@ -150,11 +184,13 @@ describe("mergeSavePreconditionForPath", () => {
   });
 });
 
-function mergeSession({ outputPath }: { outputPath: string | null }): MergeSession {
+function mergeSession({ outputPath }: { outputPath: string | null }): FileMergeSession {
   return {
+    origin: "files",
     base: document("/repo/base.txt", 8, 1000),
     ours: document("/repo/ours.txt", 9, 1001),
     theirs: document("/repo/theirs.txt", 10, 1002),
+    output: null,
     result: "merged\n",
     outputPath,
   };

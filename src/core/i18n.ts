@@ -676,6 +676,7 @@ export const FOLDER_COMPARE_TEXT = {
 export const MERGE_VIEW_TEXT = {
   en: {
     home: "Home",
+    closeMergetool: "Close Forktail",
     conflictNavigationAria: "Conflict navigation",
     previousConflict: "Prev",
     nextConflict: "Next",
@@ -700,6 +701,10 @@ export const MERGE_VIEW_TEXT = {
     save: "Save",
     saveAs: "Save As",
     backups: "Backups",
+    mergetoolMode: "Git mergetool",
+    mergetoolFixedOutput: (path: string) =>
+      `Fixed $MERGED output: ${path}. Save writes only to this file.`,
+    missingSource: (label: string) => `${label} (missing)`,
     draftWarning: "An unsaved merge draft is available. Original file contents were not cached.",
     restoreDraft: "Restore draft",
     delete: "Delete",
@@ -725,6 +730,7 @@ export const MERGE_VIEW_TEXT = {
   },
   ko: {
     home: "홈",
+    closeMergetool: "Forktail 닫기",
     conflictNavigationAria: "충돌 탐색",
     previousConflict: "이전 충돌",
     nextConflict: "다음 충돌",
@@ -749,6 +755,10 @@ export const MERGE_VIEW_TEXT = {
     save: "저장",
     saveAs: "다른 이름으로 저장",
     backups: "백업 복원",
+    mergetoolMode: "Git mergetool",
+    mergetoolFixedOutput: (path: string) =>
+      `고정 $MERGED 출력: ${path}. 저장은 이 파일에만 기록합니다.`,
+    missingSource: (label: string) => `${label} (없음)`,
     draftWarning: "이전에 저장하지 못한 병합 결과 draft가 있습니다. 원본 파일 내용은 별도 캐시하지 않았습니다.",
     restoreDraft: "draft 복구",
     delete: "삭제",

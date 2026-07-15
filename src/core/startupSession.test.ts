@@ -75,13 +75,37 @@ describe("startup CLI session parser", () => {
       status: "valid",
       source: "mergetool",
       session: {
-        kind: "merge",
+        kind: "mergetool",
         basePath: "/base",
         oursPath: "/ours",
         theirsPath: "/theirs",
         outputPath: "/path",
       },
     });
+  });
+
+  it("preserves an empty Git $BASE argument as a missing base", () => {
+    expect(parseStartupSessionArgs(["--mergetool", "", "/ours", "/theirs", "/path"])).toEqual({
+      status: "valid",
+      source: "mergetool",
+      session: {
+        kind: "mergetool",
+        basePath: null,
+        oursPath: "/ours",
+        theirsPath: "/theirs",
+        outputPath: "/path",
+      },
+    });
+  });
+
+  it("rejects empty Git mergetool arguments other than $BASE", () => {
+    for (const args of [
+      ["--mergetool", "/base", "", "/theirs", "/out"],
+      ["--mergetool", "/base", "/ours", "", "/out"],
+      ["--mergetool", "/base", "/ours", "/theirs", ""],
+    ]) {
+      expect(parseStartupSessionArgs(args).status, JSON.stringify(args)).toBe("invalid");
+    }
   });
 
   it("rejects unknown flags and wrong argument counts", () => {

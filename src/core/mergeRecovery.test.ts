@@ -23,6 +23,26 @@ class MemoryStorage {
 }
 
 describe("merge recovery drafts", () => {
+  it("never persists Git mergetool paths or result text", () => {
+    const storage = new MemoryStorage();
+    const session = mergeSession({
+      result: "sensitive resolved content\n",
+      origin: "mergetool",
+    });
+
+    expect(saveMergeRecoveryDraft(session, storage, 1000)).toBe(false);
+    expect(loadMergeRecoveryDraft(session, storage)).toBeNull();
+
+    const legacySession: MergeSession = { ...session, origin: "files" };
+    expect(saveMergeRecoveryDraft(legacySession, storage, 900)).toBe(true);
+    expect(storage.getItem("forktail.merge-drafts.v1")).toContain("sensitive resolved content");
+
+    clearMergeRecoveryDraft(session, storage);
+    const serialized = storage.getItem("forktail.merge-drafts.v1") ?? "";
+    expect(serialized).not.toContain("sensitive resolved content");
+    expect(serialized).not.toContain(session.ours.path);
+  });
+
   it("stores and loads only the merge result draft for matching input versions", () => {
     const storage = new MemoryStorage();
     const session = mergeSession({ result: "merged draft\n" });
@@ -99,17 +119,20 @@ describe("merge recovery drafts", () => {
 function mergeSession({
   basePath = "/repo/base.ts",
   result = "auto merge\n",
+  origin = "files",
 }: {
   basePath?: string;
   result?: string;
+  origin?: MergeSession["origin"];
 } = {}): MergeSession {
-  return {
-    base: document(basePath, "base file contents\n", 1000),
-    ours: document("/repo/ours.ts", "ours file contents\n", 1001),
-    theirs: document("/repo/theirs.ts", "theirs file contents\n", 1002),
-    result,
-    outputPath: null,
-  };
+  const base = document(basePath, "base file contents\n", 1000);
+  const ours = document("/repo/ours.ts", "ours file contents\n", 1001);
+  const theirs = document("/repo/theirs.ts", "theirs file contents\n", 1002);
+  if (origin === "mergetool") {
+    const output = document("/repo/MERGED", result, 1003);
+    return { origin, base, ours, theirs, output, result, outputPath: output.path };
+  }
+  return { origin, base, ours, theirs, output: null, result, outputPath: null };
 }
 
 function document(path: string, text: string, modifiedMs: number): FileDocument {

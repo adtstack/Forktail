@@ -15,7 +15,7 @@ import {
   SAVE_LINE_ENDING_MODES,
   type SaveLineEndingMode,
 } from "./lineEndings";
-import type { FolderCompareMode, FolderScanOptions } from "./models";
+import type { FolderCompareMode, FolderScanOptions, MergeSession } from "./models";
 
 const COMPARE_VIEW_SETTINGS_KEY = "forktail.compare-view.v1";
 const FOLDER_SCAN_OPTIONS_KEY = "forktail.folder-scan-options.v1";
@@ -90,6 +90,15 @@ export interface RecentMergeSession extends RecentSessionBase {
   oursPath: string;
   theirsPath: string;
   outputPath: string | null;
+}
+
+export type PersistentMergeSessionInput = Omit<RecentMergeSession, "id" | "updatedAt">;
+
+export interface EphemeralMergetoolPaths {
+  basePath: string | null;
+  oursPath: string;
+  theirsPath: string;
+  outputPath: string;
 }
 
 interface SettingsStorage {
@@ -270,6 +279,22 @@ export function removeRecentSession(sessions: RecentSession[], id: string): Rece
   return sanitizeRecentSessions(sessions).filter((session) => session.id !== id);
 }
 
+export function removeLegacyMergetoolRecentSession(
+  sessions: RecentSession[],
+  paths: EphemeralMergetoolPaths,
+): RecentSession[] {
+  const sanitized = sanitizeRecentSessions(sessions);
+  if (paths.basePath == null) return sanitized;
+
+  return sanitized.filter((session) =>
+    session.kind !== "merge" ||
+    session.basePath !== paths.basePath ||
+    session.oursPath !== paths.oursPath ||
+    session.theirsPath !== paths.theirsPath ||
+    session.outputPath !== paths.outputPath
+  );
+}
+
 export function loadActiveSession(storage = browserStorage()): ActiveSession | null {
   if (!storage) return null;
 
@@ -289,6 +314,20 @@ export function saveActiveSession(
   if (!storage) return;
 
   storage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(sanitizeActiveSession(session)));
+}
+
+export function persistentMergeSessionInput(
+  session: MergeSession,
+): PersistentMergeSessionInput | null {
+  if (session.origin === "mergetool") return null;
+
+  return {
+    kind: "merge",
+    basePath: session.base.path,
+    oursPath: session.ours.path,
+    theirsPath: session.theirs.path,
+    outputPath: session.outputPath,
+  };
 }
 
 export function sanitizeFolderViewSettings(value: unknown): FolderViewSettings {

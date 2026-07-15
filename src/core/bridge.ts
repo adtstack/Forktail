@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   FileDocument,
@@ -35,6 +36,11 @@ export async function chooseTextFile(title: string): Promise<string | null> {
     directory: false,
   });
   return typeof selected === "string" ? selected : null;
+}
+
+export async function closeCurrentWindow(): Promise<void> {
+  requireTauri();
+  await getCurrentWindow().close();
 }
 
 export async function chooseDirectory(title: string): Promise<string | null> {

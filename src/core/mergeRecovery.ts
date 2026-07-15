@@ -41,6 +41,7 @@ export function saveMergeRecoveryDraft(
   storage = browserStorage(),
   updatedAt = Date.now(),
 ): boolean {
+  if (session.origin === "mergetool") return false;
   if (!storage) return false;
   if (utf8ByteLength(session.result) > MAX_MERGE_DRAFT_BYTES) {
     clearMergeRecoveryDraft(session, storage);
@@ -60,6 +61,7 @@ export function loadMergeRecoveryDraft(
   session: MergeSession,
   storage = browserStorage(),
 ): MergeRecoveryDraft | null {
+  if (session.origin === "mergetool") return null;
   if (!storage) return null;
   const id = mergeRecoveryDraftId(session);
   const draft = readMergeRecoveryDrafts(storage).find((current) => current.id === id);

@@ -3,6 +3,7 @@ import { saveEncodingWarningForDocument } from "./compareSave";
 import { CORE_TEXT } from "./i18n";
 import type { FileDocument, MergeSession, WriteResult } from "./models";
 import type { AppLanguage } from "./settings";
+import { isVirtualFileDocument } from "./virtualDocument";
 
 export type ConfirmSave = (message: string) => boolean;
 export type UnresolvedSavePolicy = "confirm-unresolved" | "block-unresolved";
@@ -49,7 +50,11 @@ export function mergeSaveEncodingWarning(
   language: AppLanguage = "en",
 ): string | null {
   const text = CORE_TEXT[language];
-  const documents = [session.base, session.ours, session.theirs];
+  const documents = [session.base, session.ours, session.theirs, session.output]
+    .filter(
+      (document): document is FileDocument =>
+        document != null && !isVirtualFileDocument(document),
+    );
   const hasDecodeLoss = documents.some((document) => document.decodeHadErrors);
   const hasEncodingRisk = documents.some((document) =>
     saveEncodingWarningForDocument(document, "utf8", language) != null
@@ -63,6 +68,12 @@ export function mergeSaveEncodingWarning(
   }
 
   return null;
+}
+
+export function mergeResultOriginalLineEnding(
+  session: MergeSession,
+): FileDocument["lineEnding"] {
+  return session.output?.lineEnding ?? session.ours.lineEnding;
 }
 
 export function mergeSavePreconditionForPath(

@@ -11,6 +11,7 @@ import {
 } from "../core/commands";
 import { languageFromPath } from "../core/language";
 import { parseConflictBlocks, resolveConflict, type ConflictResolution } from "../core/conflicts";
+import { mergetoolSessionCapabilities } from "../core/mergetoolSession";
 import { mergeSaveEncodingWarning } from "../core/mergeSave";
 import type { SaveLineEndingMode } from "../core/lineEndings";
 import { buildSideDiff, type SideDiffSegment } from "../core/sideDiff";
@@ -32,6 +33,7 @@ import {
   undoTextHistory,
 } from "../core/textHistory";
 import type { ConflictBlock, MergeSession } from "../core/models";
+import { isVirtualFileDocument } from "../core/virtualDocument";
 
 interface MergeViewProps {
   session: MergeSession;
@@ -53,6 +55,19 @@ interface MergeViewProps {
 interface PathCopyState {
   message: string;
   fallbackPath: string | null;
+}
+
+export function canRunMergeViewCommand(
+  commandId: AppCommandId,
+  session: Pick<MergeSession, "origin">,
+  conflictCount: number,
+): boolean {
+  const capabilities = mergetoolSessionCapabilities(session);
+  if (commandId === "saveAs") return capabilities.saveAs;
+  if (commandId === "save" && capabilities.unresolvedPolicy === "block-unresolved") {
+    return conflictCount === 0;
+  }
+  return true;
 }
 
 export function MergeView({
@@ -78,6 +93,9 @@ export function MergeView({
   const [pathCopyState, setPathCopyState] = useState<PathCopyState | null>(null);
   const resultText = resultHistory.present;
   const conflicts = useMemo(() => parseConflictBlocks(resultText), [resultText]);
+  const capabilities = useMemo(() => mergetoolSessionCapabilities(session), [session.origin]);
+  const isMergetool = session.origin === "mergetool";
+  const baseMissing = isVirtualFileDocument(session.base);
   const resultEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
   const activeDecorationIds = useRef<string[]>([]);
   const lastSyncedResult = useRef(session.result);
@@ -196,12 +214,17 @@ export function MergeView({
   }, [activeConflict, commitResult, mergeSettings.autoAdvanceConflict, resultText]);
 
   const saveResult = useCallback(() => {
+    if (!canRunMergeViewCommand("save", session, conflicts.length)) return;
+    if (capabilities.saveTarget === "output-only") {
+      if (session.outputPath) onSave(mergeSettings.saveLineEnding);
+      return;
+    }
     if (session.outputPath) {
       onSave(mergeSettings.saveLineEnding);
     } else {
       onSaveAs(mergeSettings.saveLineEnding);
     }
-  }, [mergeSettings.saveLineEnding, onSave, onSaveAs, session.outputPath]);
+  }, [capabilities.saveTarget, conflicts.length, mergeSettings.saveLineEnding, onSave, onSaveAs, session]);
 
   const previousConflict = useCallback(() => {
     if (conflicts.length === 0) return;
@@ -214,6 +237,7 @@ export function MergeView({
   }, [conflicts.length]);
 
   const handleCommand = useCallback((commandId: AppCommandId) => {
+    if (!canRunMergeViewCommand(commandId, session, conflicts.length)) return;
     if (commandId === "redo") {
       redoResult();
       return;
@@ -255,12 +279,14 @@ export function MergeView({
     }
   }, [
     applyResolution,
+    conflicts.length,
     mergeSettings.saveLineEnding,
     nextConflict,
     onSaveAs,
     previousConflict,
     redoResult,
     saveResult,
+    session,
     undoResult,
   ]);
 
@@ -334,8 +360,10 @@ export function MergeView({
 
   useEffect(() => {
     saveMergeSettings(mergeSettings);
-    onRecoveryDraftsEnabledChange(mergeSettings.recoveryDraftsEnabled);
-  }, [mergeSettings, onRecoveryDraftsEnabledChange]);
+    onRecoveryDraftsEnabledChange(
+      capabilities.recoveryDrafts && mergeSettings.recoveryDraftsEnabled,
+    );
+  }, [capabilities.recoveryDrafts, mergeSettings, onRecoveryDraftsEnabledChange]);
 
   useEffect(() => {
     setPathCopyState(null);
@@ -359,7 +387,9 @@ export function MergeView({
     <main className="workspace merge-workspace">
       <header className="toolbar command-toolbar merge-command-toolbar">
         <div className="command-group">
-          <button className="command-button" onClick={onBack}>{text.home}</button>
+          <button className="command-button" onClick={onBack} disabled={busy}>
+            {isMergetool ? text.closeMergetool : text.home}
+          </button>
         </div>
         <div className="command-group command-group-primary" aria-label={text.conflictNavigationAria}>
           <button
@@ -431,19 +461,21 @@ export function MergeView({
             />
             {text.autoNext}
           </label>
-          <label className="toolbar-check">
-            <input
-              type="checkbox"
-              checked={mergeSettings.recoveryDraftsEnabled}
-              onChange={(event) =>
-                setMergeSettings((current) => ({
-                  ...current,
-                  recoveryDraftsEnabled: event.target.checked,
-                }))
-              }
-            />
-            {text.drafts}
-          </label>
+          {capabilities.recoveryDrafts && (
+            <label className="toolbar-check">
+              <input
+                type="checkbox"
+                checked={mergeSettings.recoveryDraftsEnabled}
+                onChange={(event) =>
+                  setMergeSettings((current) => ({
+                    ...current,
+                    recoveryDraftsEnabled: event.target.checked,
+                  }))
+                }
+              />
+              {text.drafts}
+            </label>
+          )}
           <label className="toolbar-field">
             <span>{text.saveEol}</span>
             <select
@@ -468,28 +500,39 @@ export function MergeView({
           <button
             className="command-button primary-button"
             onClick={saveResult}
-            disabled={busy}
+            disabled={busy || !canRunMergeViewCommand("save", session, conflicts.length)}
             aria-keyshortcuts={commandAriaKeyshortcuts("save")}
           >
             {text.save}
           </button>
-          <button
-            className="command-button"
-            onClick={() => onSaveAs(mergeSettings.saveLineEnding)}
-            disabled={busy}
-            aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
-          >
-            {text.saveAs}
-          </button>
-          <button
-            className="command-button"
-            onClick={onShowBackups}
-            disabled={busy || !session.outputPath}
-          >
-            {text.backups}
-          </button>
+          {capabilities.saveAs && (
+            <button
+              className="command-button"
+              onClick={() => onSaveAs(mergeSettings.saveLineEnding)}
+              disabled={busy}
+              aria-keyshortcuts={commandAriaKeyshortcuts("saveAs")}
+            >
+              {text.saveAs}
+            </button>
+          )}
+          {capabilities.backupRestore && (
+            <button
+              className="command-button"
+              onClick={onShowBackups}
+              disabled={busy || !session.outputPath}
+            >
+              {text.backups}
+            </button>
+          )}
         </div>
       </header>
+
+      {isMergetool && (
+        <div className="metadata-warning mergetool-output-notice" role="status">
+          <strong>{text.mergetoolMode}</strong>
+          <span>{text.mergetoolFixedOutput(session.outputPath ?? text.noOutputPath)}</span>
+        </div>
+      )}
 
       {activeConflict && sideDiffs && (
         <ConflictSideDiff
@@ -504,6 +547,7 @@ export function MergeView({
         <PaneHeading
           label="BASE"
           path={session.base.path}
+          missing={baseMissing}
           text={text}
           onCopyPath={() => {
             void copyPath("BASE", session.base.path);
@@ -532,7 +576,7 @@ export function MergeView({
           {pathCopyState.fallbackPath && <code>{pathCopyState.fallbackPath}</code>}
         </div>
       )}
-      {recoveryDraft && (
+      {capabilities.recoveryDrafts && recoveryDraft && (
         <div className="metadata-warning merge-draft-warning" role="status">
           <span>
             {text.draftWarning}
@@ -555,8 +599,11 @@ export function MergeView({
 
       <section className="merge-grid">
         <SourceEditor
-          label={text.sourceLabel("BASE")}
+          label={baseMissing
+            ? text.missingSource(text.sourceLabel("BASE"))
+            : text.sourceLabel("BASE")}
           path={session.base.path}
+          missing={baseMissing}
           value={session.base.text}
           language={editorLanguage}
           editorTheme={editorTheme}
@@ -738,22 +785,31 @@ function DiffLine({
 function PaneHeading({
   label,
   path,
+  missing = false,
   text,
   onCopyPath,
 }: {
   label: string;
   path: string;
+  missing?: boolean;
   text: (typeof MERGE_VIEW_TEXT)[AppLanguage];
   onCopyPath: () => void;
 }) {
+  const displayLabel = missing ? text.missingSource(label) : label;
   return (
-    <div title={path} role="group" aria-label={text.filePathAria(label, path)}>
-      <span className="side-label">{label}</span>
-      <strong>{path.split(/[\\/]/).pop()}</strong>
-      <button type="button" className="file-copy-button" onClick={onCopyPath}>
-        {text.copyPath}
-      </button>
-      <small>{path}</small>
+    <div
+      title={missing ? displayLabel : path}
+      role="group"
+      aria-label={missing ? text.missingSource(text.sourceLabel(label)) : text.filePathAria(label, path)}
+    >
+      <span className="side-label">{displayLabel}</span>
+      <strong>{missing ? displayLabel : path.split(/[\\/]/).pop()}</strong>
+      {!missing && (
+        <button type="button" className="file-copy-button" onClick={onCopyPath}>
+          {text.copyPath}
+        </button>
+      )}
+      <small>{missing ? displayLabel : path}</small>
     </div>
   );
 }
@@ -761,18 +817,24 @@ function PaneHeading({
 function SourceEditor({
   label,
   path,
+  missing = false,
   value,
   language,
   editorTheme,
 }: {
   label: string;
   path: string;
+  missing?: boolean;
   value: string;
   language: string;
   editorTheme: "vs" | "vs-dark";
 }) {
   return (
-    <div className="source-editor" role="region" aria-label={`${label}: ${path}`}>
+    <div
+      className="source-editor"
+      role="region"
+      aria-label={missing ? label : `${label}: ${path}`}
+    >
       <Editor
         height="100%"
         language={language}

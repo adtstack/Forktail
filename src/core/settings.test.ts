@@ -13,6 +13,8 @@ import {
   loadFolderViewSettings,
   loadMergeSettings,
   loadRecentSessions,
+  persistentMergeSessionInput,
+  removeLegacyMergetoolRecentSession,
   removeRecentSession,
   sanitizeActiveSession,
   sanitizeAppearanceSettings,
@@ -36,6 +38,7 @@ import {
   type MergeSettings,
   type RecentSession,
 } from "./settings";
+import type { FileDocument, MergeSession } from "./models";
 
 class MemoryStorage {
   private values = new Map<string, string>();
@@ -392,4 +395,81 @@ describe("active session restore settings", () => {
       },
     });
   });
+
+  it("does not convert mergetool temporary paths into a persistent session", () => {
+    const storage = new MemoryStorage();
+    const session: MergeSession = {
+      origin: "mergetool",
+      base: testDocument("/tmp/git/base.txt"),
+      ours: testDocument("/tmp/git/local.txt"),
+      theirs: testDocument("/tmp/git/remote.txt"),
+      output: testDocument("/repo/merged.txt"),
+      result: "resolved\n",
+      outputPath: "/repo/merged.txt",
+    };
+
+    saveActiveSession({
+      kind: "merge",
+      basePath: session.base.path,
+      oursPath: session.ours.path,
+      theirsPath: session.theirs.path,
+      outputPath: session.outputPath,
+    }, storage);
+    expect(storage.getItem("forktail.active-session.v1")).toContain("/tmp/git/");
+
+    const persistent = persistentMergeSessionInput(session);
+    expect(persistent).toBeNull();
+    saveActiveSession(persistent, storage);
+    saveRecentSessions([], storage);
+
+    const serialized = [
+      storage.getItem("forktail.active-session.v1"),
+      storage.getItem("forktail.recent-sessions.v1"),
+    ].join("\n");
+    expect(serialized).not.toContain("/tmp/git/");
+    expect(serialized).not.toContain("/repo/merged.txt");
+  });
+
+  it("purges a legacy recent entry that contains the current mergetool paths", () => {
+    const storage = new MemoryStorage();
+    const legacy = upsertRecentSession([], {
+      kind: "merge",
+      basePath: "/tmp/git/base.txt",
+      oursPath: "/tmp/git/local.txt",
+      theirsPath: "/tmp/git/remote.txt",
+      outputPath: "/repo/merged.txt",
+    }, 1000);
+    const kept = upsertRecentSession(legacy, {
+      kind: "compare",
+      leftPath: "/repo/left.txt",
+      rightPath: "/repo/right.txt",
+    }, 2000);
+
+    const cleaned = removeLegacyMergetoolRecentSession(kept, {
+      basePath: "/tmp/git/base.txt",
+      oursPath: "/tmp/git/local.txt",
+      theirsPath: "/tmp/git/remote.txt",
+      outputPath: "/repo/merged.txt",
+    });
+    saveRecentSessions(cleaned, storage);
+
+    expect(cleaned).toHaveLength(1);
+    expect(cleaned[0]).toMatchObject({ kind: "compare" });
+    expect(storage.getItem("forktail.recent-sessions.v1")).not.toContain("/tmp/git/");
+  });
 });
+
+function testDocument(path: string): FileDocument {
+  return {
+    path,
+    name: path.split("/").pop() ?? path,
+    text: "",
+    encoding: "UTF-8",
+    lineEnding: "lf",
+    hadFinalNewline: true,
+    size: 0,
+    modifiedMs: 1000,
+    isBinary: false,
+    decodeHadErrors: false,
+  };
+}

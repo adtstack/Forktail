@@ -141,10 +141,23 @@ export interface CompareSession {
   right: FileDocument;
 }
 
-export interface MergeSession {
+interface MergeSessionBase {
   base: FileDocument;
   ours: FileDocument;
   theirs: FileDocument;
   result: string;
+}
+
+export interface FileMergeSession extends MergeSessionBase {
+  origin: "files";
+  output: FileDocument | null;
   outputPath: string | null;
 }
+
+export interface MergetoolMergeSession extends MergeSessionBase {
+  origin: "mergetool";
+  output: FileDocument;
+  outputPath: string;
+}
+
+export type MergeSession = FileMergeSession | MergetoolMergeSession;

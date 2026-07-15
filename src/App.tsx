@@ -6,6 +6,7 @@ import {
   chooseDirectory,
   chooseSavePath,
   chooseTextFile,
+  closeCurrentWindow,
   isTauriRuntime,
   listFileBackups,
   mergeTexts,
@@ -43,6 +44,7 @@ import {
 } from "./core/fileVersion";
 import {
   mergeSavePreconditionForPath,
+  mergeResultOriginalLineEnding,
   mergeSaveStateAfterWrite,
   type WritePrecondition,
 } from "./core/mergeSave";
@@ -74,11 +76,13 @@ import {
   loadMergeSettings,
   loadRecentSessions,
   removeRecentSession,
+  removeLegacyMergetoolRecentSession,
   saveAppearanceSettings,
   saveActiveSession,
   saveFolderScanOptions,
   saveRecentSessions,
   upsertRecentSession,
+  persistentMergeSessionInput,
   type ActiveSession,
   type AppLanguage,
   type ThemeMode,
@@ -90,8 +94,16 @@ import {
   hasUnsavedMergeChanges,
   markBeforeUnloadIfUnsaved,
 } from "./core/unsaved";
-import { APP_TEXT, localeForLanguage } from "./core/i18n";
-import { parseStartupSessionArgs } from "./core/startupSession";
+import { APP_TEXT, MERGE_VIEW_TEXT, localeForLanguage } from "./core/i18n";
+import {
+  parseStartupSessionArgs,
+  type MergetoolStartupSession,
+} from "./core/startupSession";
+import {
+  buildMergetoolSession,
+  isMissingMergetoolBaseError,
+  mergetoolSessionCapabilities,
+} from "./core/mergetoolSession";
 import type {
   AppMode,
   CompareSession,
@@ -175,6 +187,7 @@ export default function App() {
   const [systemTheme, setSystemTheme] = useState<"dark" | "light">(() => preferredSystemTheme());
   const pendingLeaveAction = useRef<(() => void) | null>(null);
   const pendingSaveAction = useRef<(() => void) | null>(null);
+  const allowWindowClose = useRef(false);
   const activeFolderScanId = useRef(0);
   const releasedFolderScanIds = useRef(new Set<number>());
   const attemptedActiveSessionRestore = useRef(false);
@@ -237,7 +250,11 @@ export default function App() {
     setMergeSession(session);
     setSavedMergeResult(session.result);
     setMergeOutputVersion(outputVersion);
-    setMergeRecoveryDraft(mergeRecoveryEnabled ? loadMergeRecoveryDraft(session) : null);
+    setMergeRecoveryDraft(
+      session.origin === "files" && mergeRecoveryEnabled
+        ? loadMergeRecoveryDraft(session)
+        : null,
+    );
   }, [mergeRecoveryEnabled]);
 
   const updateCompareSideText = useCallback((side: CompareSide, text: string) => {
@@ -491,9 +508,11 @@ export default function App() {
       }
       const merged = await mergeTexts(base.text, ours.text, theirs.text);
       setCleanMergeSession({
+        origin: "files",
         base,
         ours,
         theirs,
+        output: null,
         result: merged.output,
         outputPath: session.outputPath,
       });
@@ -508,6 +527,44 @@ export default function App() {
     setCleanMergeSession,
     startFolderScan,
   ]);
+
+  const restoreMergetoolSession = useCallback((
+    startup: MergetoolStartupSession,
+  ) => run(async () => {
+    if (!isTauriRuntime()) {
+      throw new Error(appText.demoRestoreOnly);
+    }
+
+    const readBase = async () => {
+      if (startup.basePath == null) return null;
+      try {
+        return await readTextFile(startup.basePath);
+      } catch (caught) {
+        if (isMissingMergetoolBaseError(caught)) return null;
+        throw caught;
+      }
+    };
+    const [base, ours, theirs, merged] = await Promise.all([
+      readBase(),
+      readTextFile(startup.oursPath),
+      readTextFile(startup.theirsPath),
+      readTextFile(startup.outputPath),
+    ]);
+    if (base?.isBinary || ours.isBinary || theirs.isBinary || merged.isBinary) {
+      throw new Error(appText.mergeTextOnly);
+    }
+
+    const prepared = buildMergetoolSession(startup, { base, ours, theirs, merged });
+    saveActiveSession(null);
+    clearMergeRecoveryDraft(prepared.session);
+    setRecentSessions((current) => {
+      const next = removeLegacyMergetoolRecentSession(current, startup);
+      saveRecentSessions(next);
+      return next;
+    });
+    setCleanMergeSession(prepared.session, prepared.outputVersion);
+    setMode("merge");
+  }), [appText, run, setCleanMergeSession]);
 
   useEffect(() => {
     saveAppearanceSettings({ language: languageMode, theme: themeMode });
@@ -554,6 +611,7 @@ export default function App() {
 
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (allowWindowClose.current) return;
       markBeforeUnloadIfUnsaved(event, activeUnsavedMessage);
     };
 
@@ -570,7 +628,11 @@ export default function App() {
         try {
           const startupSession = parseStartupSessionArgs(await startupArgs(), languageMode);
           if (startupSession.status === "valid") {
-            await restoreStoredSession(startupSession.session, { remember: true });
+            if (startupSession.source === "mergetool") {
+              await restoreMergetoolSession(startupSession.session);
+            } else {
+              await restoreStoredSession(startupSession.session, { remember: true });
+            }
             return;
           }
           if (startupSession.status === "invalid") {
@@ -593,7 +655,7 @@ export default function App() {
       .finally(() => {
         setActiveSessionStorageReady(true);
       });
-  }, [languageMode, restoreStoredSession]);
+  }, [languageMode, restoreMergetoolSession, restoreStoredSession]);
 
   useEffect(() => {
     if (!activeSessionStorageReady) return;
@@ -623,13 +685,7 @@ export default function App() {
     }
 
     if (mode === "merge" && mergeSession) {
-      saveActiveSession({
-        kind: "merge",
-        basePath: mergeSession.base.path,
-        oursPath: mergeSession.ours.path,
-        theirsPath: mergeSession.theirs.path,
-        outputPath: mergeSession.outputPath,
-      });
+      saveActiveSession(persistentMergeSessionInput(mergeSession));
       return;
     }
 
@@ -647,6 +703,10 @@ export default function App() {
 
   useEffect(() => {
     if (mode !== "merge" || !mergeSession) return;
+    if (mergeSession.origin === "mergetool") {
+      setMergeRecoveryDraft(null);
+      return;
+    }
     if (!mergeRecoveryEnabled) {
       clearMergeRecoveryDraft(mergeSession);
       setMergeRecoveryDraft(null);
@@ -704,6 +764,16 @@ export default function App() {
       setCompareBackTarget("home");
       setMessage(null);
       setError(null);
+    });
+  };
+
+  const closeMergetoolWindow = () => {
+    requestLeaveActiveSession(() => {
+      allowWindowClose.current = true;
+      void closeCurrentWindow().catch((caught) => {
+        allowWindowClose.current = false;
+        setError(errorMessage(caught, languageMode));
+      });
     });
   };
 
@@ -876,7 +946,15 @@ export default function App() {
     }
 
     const merged = await mergeTexts(base.text, ours.text, theirs.text);
-    setCleanMergeSession({ base, ours, theirs, result: merged.output, outputPath: null });
+    setCleanMergeSession({
+      origin: "files",
+      base,
+      ours,
+      theirs,
+      output: null,
+      result: merged.output,
+      outputPath: null,
+    });
     rememberRecentSession({
       kind: "merge",
       basePath,
@@ -926,7 +1004,15 @@ export default function App() {
     }
 
     const merged = await mergeTexts(base.text, ours.text, theirs.text);
-    setCleanMergeSession({ base, ours, theirs, result: merged.output, outputPath: session.outputPath });
+    setCleanMergeSession({
+      origin: "files",
+      base,
+      ours,
+      theirs,
+      output: null,
+      result: merged.output,
+      outputPath: session.outputPath,
+    });
     rememberRecentSession({
       kind: "merge",
       basePath: session.basePath,
@@ -1024,7 +1110,14 @@ export default function App() {
     lineEndingMode: SaveLineEndingMode = "original",
   ) => run(async () => {
     if (!mergeSession) return;
-    let outputPath = forceSaveAs ? null : mergeSession.outputPath;
+    const capabilities = mergetoolSessionCapabilities(mergeSession);
+    if (forceSaveAs && !capabilities.saveAs) return;
+
+    let outputPath = capabilities.saveTarget === "output-only"
+      ? mergeSession.outputPath
+      : forceSaveAs
+        ? null
+        : mergeSession.outputPath;
     if (!outputPath) {
       outputPath = await chooseSavePath(
         mergeSession.outputPath ?? mergeSession.ours.path,
@@ -1035,7 +1128,7 @@ export default function App() {
     const precondition = mergeSavePreconditionForPath(mergeSession, outputPath, mergeOutputVersion);
     const saveText = textForSaveLineEnding(
       mergeSession.result,
-      mergeSession.ours.lineEnding,
+      mergeResultOriginalLineEnding(mergeSession),
       lineEndingMode,
     );
     const written = await writeTextFileAtomic(
@@ -1049,17 +1142,45 @@ export default function App() {
     clearMergeRecoveryDraft(mergeSession);
     setMergeRecoveryDraft(null);
     setMergeSession((current) =>
-      current ? { ...current, result: saved.savedSnapshot, outputPath: saved.outputPath } : current,
+      current?.origin === "mergetool"
+        ? {
+            ...current,
+            output: {
+              ...fileDocumentWithText(current.output, saved.savedSnapshot),
+              path: saved.outputPath,
+              encoding: "UTF-8",
+              size: written.size,
+              modifiedMs: written.modifiedMs,
+              decodeHadErrors: false,
+            },
+            result: saved.savedSnapshot,
+            outputPath: saved.outputPath,
+          }
+        : current
+          ? {
+              ...current,
+              output: current.output
+                ? {
+                    ...fileDocumentWithText(current.output, saved.savedSnapshot),
+                    path: saved.outputPath,
+                    encoding: "UTF-8",
+                    size: written.size,
+                    modifiedMs: written.modifiedMs,
+                    decodeHadErrors: false,
+                  }
+                : null,
+              result: saved.savedSnapshot,
+              outputPath: saved.outputPath,
+            }
+          : current,
     );
     setSavedMergeResult(saved.savedSnapshot);
     setMergeOutputVersion(saved.outputVersion);
-    rememberRecentSession({
-      kind: "merge",
-      basePath: mergeSession.base.path,
-      oursPath: mergeSession.ours.path,
-      theirsPath: mergeSession.theirs.path,
+    const persistentSession = persistentMergeSessionInput({
+      ...mergeSession,
       outputPath: saved.outputPath,
     });
+    if (persistentSession) rememberRecentSession(persistentSession);
     setMessage(appText.saved(written.backupPath));
   }), [appText, mergeOutputVersion, mergeSession, rememberRecentSession, run]);
 
@@ -1107,6 +1228,7 @@ export default function App() {
     } else {
       setMergeSession((current) => current ? {
         ...current,
+        output: restored,
         result: restored.text,
         outputPath: restored.path,
       } : current);
@@ -1133,14 +1255,23 @@ export default function App() {
     lineEndingMode: SaveLineEndingMode = "original",
   ) => {
     if (!mergeSession) return;
+    const capabilities = mergetoolSessionCapabilities(mergeSession);
+    if (forceSaveAs && !capabilities.saveAs) return;
     if (!hasUnresolvedConflicts(mergeSession.result)) {
       saveMergeNow(forceSaveAs, lineEndingMode);
       return;
     }
 
+    if (capabilities.unresolvedPolicy === "block-unresolved") {
+      pendingSaveAction.current = null;
+      setShowUnresolvedSaveDialog(false);
+      setError(MERGE_VIEW_TEXT[languageMode].resolveBeforeSaving);
+      return;
+    }
+
     pendingSaveAction.current = () => saveMergeNow(forceSaveAs, lineEndingMode);
     setShowUnresolvedSaveDialog(true);
-  }, [mergeSession, saveMergeNow]);
+  }, [languageMode, mergeSession, saveMergeNow]);
 
   const handleShellCommand = useCallback((commandId: AppCommandId) => {
     if (commandId === "openMerge") {
@@ -1403,7 +1534,7 @@ export default function App() {
             dirty={mergeHasUnsavedChanges}
             editorTheme={editorTheme}
             recoveryDraft={mergeRecoveryDraft}
-            onBack={backHome}
+            onBack={mergeSession.origin === "mergetool" ? closeMergetoolWindow : backHome}
             onResultChange={updateMergeResult}
             onRecoveryDraftsEnabledChange={setMergeRecoveryEnabled}
             onRestoreRecoveryDraft={() => {

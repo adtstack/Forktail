@@ -139,7 +139,8 @@ interface MergeResult {
 1. 기본 `original` 저장은 원본이 LF/CRLF/CR 중 하나로 일관되면 해당 줄끝으로 저장 직전에 정규화한다.
 2. 원본이 `mixed` 또는 `none`이면 `original` 저장은 현재 편집 텍스트의 줄끝을 그대로 보존한다.
 3. 사용자가 `system`, `LF`, `CRLF`를 선택하면 저장 직전에 모든 줄끝을 선택한 정책으로 변환한다.
-4. 3-way 병합 결과의 `original` 기준은 OURS 파일의 줄끝 메타데이터다.
+4. 일반 3-way 병합 결과의 `original` 기준은 OURS 파일의 줄끝 메타데이터다.
+5. 외부 `git mergetool`은 Git이 만든 기존 `$MERGED`를 초기 Result로 사용하므로, 이 모드의 `original` 기준은 `$MERGED`를 열 때 읽은 줄끝 메타데이터다.
 
 ## 6. 폴더 비교 알고리즘
 
@@ -220,7 +221,7 @@ forktail --mergetool "$BASE" "$LOCAL" "$REMOTE" "$MERGED"
 
 mergetool session은 `$MERGED`의 기존 내용을 초기 Result로 읽고 open fingerprint를 보관한다. Base/Ours/Theirs에서 새 결과를 재생성해 `$MERGED`를 덮어쓰지 않는다. Git 임시 source path는 recent session, active-session restore, recovery draft에 저장하지 않는다. 기본 Git marker label과 base 없는 marker를 parser가 인식해야 하며, 미해결 conflict를 강제 저장하는 동작은 mergetool mode에서 허용하지 않는다.
 
-Phase 1 GUI는 Save & Close/Abort를 안정적인 exit code로 전달하지 않는다. Git 설정은 `trustExitCode = false`와 tool-specific `hideResolved = false`를 사용한다. Git은 target timestamp와 사용자 확인 흐름으로 성공 여부를 판단하므로 packaged app이 닫힐 때까지 Git 호출이 기다리는지 세 OS에서 검증해야 한다. Forktail 프로세스가 실행 중일 때는 index를 바꾸지 않지만, 프로세스 종료 뒤 사용자가 성공을 확인하면 `git mergetool` wrapper가 해당 path를 stage할 수 있다. 저장은 일반 safe save의 precondition/backup/atomic replace를 재사용하며, Git이 만드는 `.orig`와 Forktail의 `.bak.*`가 함께 남을 수 있음을 안내한다.
+Phase 1 GUI는 Save & Close/Abort를 안정적인 exit code로 전달하지 않는다. mergetool 화면의 `Close Forktail`은 dirty Result의 discard 확인 뒤 실제 Tauri 창과 프로세스를 닫아 Git의 wait를 끝내지만, 저장 성공을 exit code로 주장하지 않는다. Git 설정은 `trustExitCode = false`와 tool-specific `hideResolved = false`를 사용한다. Git은 target timestamp와 사용자 확인 흐름으로 성공 여부를 판단하므로 packaged app이 닫힐 때까지 Git 호출이 기다리는지 세 OS에서 검증해야 한다. Forktail 프로세스가 실행 중일 때는 index를 바꾸지 않지만, 프로세스 종료 뒤 사용자가 성공을 확인하면 `git mergetool` wrapper가 해당 path를 stage할 수 있다. 저장은 일반 safe save의 precondition/backup/atomic replace를 재사용하며, Git이 만드는 `.orig`와 Forktail의 `.bak.*`가 함께 남을 수 있음을 안내한다.
 
 repository-aware branch/commit/index 비교는 이 adapter와 별개인 Phase 1 이후 후보이며 `docs/17_GIT_INTEGRATION.md`를 따른다.
 

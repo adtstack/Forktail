@@ -4,7 +4,7 @@ import type {
   FolderEntry,
   FolderScanResult,
   FsEntryMeta,
-  MergeSession,
+  FileMergeSession,
 } from "./models";
 import { folderExpectedPath, virtualMissingFileDocument } from "./virtualDocument";
 
@@ -81,16 +81,18 @@ export function demoFolderEntryCompareSession(entry: FolderEntry): CompareSessio
   };
 }
 
-export function demoMergeSession(): MergeSession {
+export function demoMergeSession(): FileMergeSession {
   const base = `export function greet(name: string) {\n  return \`Hello, \${name}\`;\n}\n\nexport function signoff() {\n  return "Goodbye";\n}\n`;
   const ours = `export function greet(name: string) {\n  const safeName = name.trim();\n  return \`Hello, \${safeName}\`;\n}\n\nexport function signoff() {\n  return "See you soon";\n}\n`;
   const theirs = `export function greet(name: string, excited = false) {\n  const message = \`Hello, \${name}\`;\n  return excited ? \`\${message}!\` : message;\n}\n\nexport function signoff(name: string) {\n  return \`Goodbye, \${name}\`;\n}\n`;
   const result = `<<<<<<< ours\nexport function greet(name: string) {\n  const safeName = name.trim();\n  return \`Hello, \${safeName}\`;\n}\n||||||| original\nexport function greet(name: string) {\n  return \`Hello, \${name}\`;\n}\n=======\nexport function greet(name: string, excited = false) {\n  const message = \`Hello, \${name}\`;\n  return excited ? \`\${message}!\` : message;\n}\n>>>>>>> theirs\n\n<<<<<<< ours\nexport function signoff() {\n  return "See you soon";\n}\n||||||| original\nexport function signoff() {\n  return "Goodbye";\n}\n=======\nexport function signoff(name: string) {\n  return \`Goodbye, \${name}\`;\n}\n>>>>>>> theirs\n`;
 
   return {
+    origin: "files",
     base: document(DEMO_MERGE_BASE_PATH, base),
     ours: document(DEMO_MERGE_OURS_PATH, ours),
     theirs: document(DEMO_MERGE_THEIRS_PATH, theirs),
+    output: null,
     result,
     outputPath: null,
   };
