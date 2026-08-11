@@ -135,6 +135,26 @@ function readProject(root) {
   const packageJson = parseJsonFile(files.get("package.json"));
   const packageLock = parseJsonFile(files.get("package-lock.json"));
   const tauriConfig = parseJsonFile(files.get("src-tauri/tauri.conf.json"));
+  const packageJsonTarget = findJsonStringTarget(
+    files.get("package.json").text,
+    ["version"],
+    "package.json version",
+  );
+  const packageLockTarget = findJsonStringTarget(
+    files.get("package-lock.json").text,
+    ["version"],
+    "package-lock.json version",
+  );
+  const packageLockRootTarget = findJsonStringTarget(
+    files.get("package-lock.json").text,
+    ["packages", "", "version"],
+    'package-lock.json packages[""].version',
+  );
+  const tauriConfigTarget = findJsonStringTarget(
+    files.get("src-tauri/tauri.conf.json").text,
+    ["version"],
+    "src-tauri/tauri.conf.json version",
+  );
   const cargoTomlTarget = findCargoTomlVersion(files.get("src-tauri/Cargo.toml").text);
   const cargoLockTarget = findCargoLockVersion(files.get("src-tauri/Cargo.lock").text);
 
@@ -148,11 +168,25 @@ function readProject(root) {
     tauriConfig.version,
     "src-tauri/tauri.conf.json version",
   );
+  verifyJsonTarget(packageJsonTarget, packageVersion, "package.json version");
+  verifyJsonTarget(packageLockTarget, packageLockVersion, "package-lock.json version");
+  verifyJsonTarget(
+    packageLockRootTarget,
+    packageLockRootVersion,
+    'package-lock.json packages[""].version',
+  );
+  verifyJsonTarget(tauriConfigTarget, tauriVersion, "src-tauri/tauri.conf.json version");
 
   return {
     files,
-    parsed: { packageJson, packageLock, tauriConfig },
-    targets: { cargoTomlTarget, cargoLockTarget },
+    targets: {
+      packageJsonTarget,
+      packageLockTarget,
+      packageLockRootTarget,
+      tauriConfigTarget,
+      cargoTomlTarget,
+      cargoLockTarget,
+    },
     versions: [
       ["package.json", packageVersion],
       ["package-lock.json", packageLockVersion],
@@ -181,20 +215,23 @@ function validateCurrentVersions(versions) {
 }
 
 function buildOutputs(project, nextVersion) {
-  const packageJson = { ...project.parsed.packageJson, version: nextVersion };
-  const packageLock = {
-    ...project.parsed.packageLock,
-    version: nextVersion,
-    packages: {
-      ...project.parsed.packageLock.packages,
-      "": { ...project.parsed.packageLock.packages[""], version: nextVersion },
-    },
-  };
-  const tauriConfig = { ...project.parsed.tauriConfig, version: nextVersion };
-
   return [
-    jsonOutput(project.files.get("package.json"), packageJson),
-    jsonOutput(project.files.get("package-lock.json"), packageLock),
+    textOutput(
+      project.files.get("package.json"),
+      replaceTargets(
+        project.files.get("package.json").text,
+        [project.targets.packageJsonTarget],
+        nextVersion,
+      ),
+    ),
+    textOutput(
+      project.files.get("package-lock.json"),
+      replaceTargets(
+        project.files.get("package-lock.json").text,
+        [project.targets.packageLockTarget, project.targets.packageLockRootTarget],
+        nextVersion,
+      ),
+    ),
     textOutput(
       project.files.get("src-tauri/Cargo.toml"),
       replaceTarget(
@@ -211,12 +248,15 @@ function buildOutputs(project, nextVersion) {
         nextVersion,
       ),
     ),
-    jsonOutput(project.files.get("src-tauri/tauri.conf.json"), tauriConfig),
+    textOutput(
+      project.files.get("src-tauri/tauri.conf.json"),
+      replaceTargets(
+        project.files.get("src-tauri/tauri.conf.json").text,
+        [project.targets.tauriConfigTarget],
+        nextVersion,
+      ),
+    ),
   ];
-}
-
-function jsonOutput(file, value) {
-  return textOutput(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
 function textOutput(file, nextText) {
@@ -288,6 +328,149 @@ function removeTemp(path) {
 
 function replaceTarget(text, target, version) {
   return `${text.slice(0, target.start)}${version}${text.slice(target.end)}`;
+}
+
+function replaceTargets(text, targets, version) {
+  return [...targets]
+    .sort((left, right) => right.start - left.start)
+    .reduce((result, target) => replaceTarget(result, target, version), text);
+}
+
+function verifyJsonTarget(target, parsedVersion, label) {
+  if (target.version !== parsedVersion) {
+    throw new Error(`${label} source token does not match its parsed JSON value.`);
+  }
+}
+
+function findJsonStringTarget(text, path, label) {
+  let objectStart = firstNonWhitespace(text, 0);
+  if (text[objectStart] !== "{") {
+    throw new Error(`${label} must be inside a JSON object.`);
+  }
+  let objectEnd = findMatchingJsonDelimiter(text, objectStart);
+
+  for (let index = 0; index < path.length; index += 1) {
+    const property = findDirectJsonProperty(
+      text,
+      objectStart,
+      objectEnd,
+      path[index],
+      label,
+    );
+    const last = index === path.length - 1;
+    if (last) {
+      if (text[property.valueStart] !== '"') {
+        throw new Error(`${label} must be a JSON string.`);
+      }
+      const valueEnd = readJsonStringEnd(text, property.valueStart);
+      if (valueEnd !== property.valueEnd) {
+        throw new Error(`${label} must contain one JSON string value.`);
+      }
+      return {
+        version: JSON.parse(text.slice(property.valueStart, property.valueEnd)),
+        start: property.valueStart + 1,
+        end: property.valueEnd - 1,
+      };
+    }
+
+    if (text[property.valueStart] !== "{") {
+      throw new Error(`${label} path ${JSON.stringify(path.slice(0, index + 1))} must be an object.`);
+    }
+    objectStart = property.valueStart;
+    objectEnd = property.valueEnd - 1;
+  }
+
+  throw new Error(`${label} path must not be empty.`);
+}
+
+function findDirectJsonProperty(text, objectStart, objectEnd, propertyName, label) {
+  const matches = [];
+  let cursor = objectStart + 1;
+
+  while (cursor < objectEnd) {
+    cursor = firstNonWhitespace(text, cursor);
+    if (cursor >= objectEnd) break;
+    if (text[cursor] !== '"') {
+      throw new Error(`${label} contains an unsupported JSON object layout.`);
+    }
+
+    const keyEnd = readJsonStringEnd(text, cursor);
+    const key = JSON.parse(text.slice(cursor, keyEnd));
+    cursor = firstNonWhitespace(text, keyEnd);
+    if (text[cursor] !== ":") {
+      throw new Error(`${label} contains an invalid JSON property.`);
+    }
+
+    const valueStart = firstNonWhitespace(text, cursor + 1);
+    const valueEnd = skipJsonValue(text, valueStart);
+    if (key === propertyName) matches.push({ valueStart, valueEnd });
+    cursor = firstNonWhitespace(text, valueEnd);
+    if (text[cursor] === ",") {
+      cursor += 1;
+    } else if (cursor < objectEnd) {
+      throw new Error(`${label} contains an invalid JSON object separator.`);
+    }
+  }
+
+  if (matches.length !== 1) {
+    throw new Error(
+      `${label} path property ${JSON.stringify(propertyName)} must occur exactly once; found ${matches.length}.`,
+    );
+  }
+  return matches[0];
+}
+
+function skipJsonValue(text, start) {
+  const character = text[start];
+  if (character === '"') return readJsonStringEnd(text, start);
+  if (character === "{" || character === "[") {
+    return findMatchingJsonDelimiter(text, start) + 1;
+  }
+
+  let cursor = start;
+  while (cursor < text.length && !/[\s,}\]]/.test(text[cursor])) cursor += 1;
+  return cursor;
+}
+
+function findMatchingJsonDelimiter(text, start) {
+  const opening = text[start];
+  const closing = opening === "{" ? "}" : opening === "[" ? "]" : null;
+  if (!closing) throw new Error("Expected a JSON object or array delimiter.");
+
+  const stack = [closing];
+  let cursor = start + 1;
+  while (cursor < text.length) {
+    const character = text[cursor];
+    if (character === '"') {
+      cursor = readJsonStringEnd(text, cursor);
+      continue;
+    }
+    if (character === "{") stack.push("}");
+    else if (character === "[") stack.push("]");
+    else if (character === stack.at(-1)) {
+      stack.pop();
+      if (stack.length === 0) return cursor;
+    }
+    cursor += 1;
+  }
+  throw new Error("JSON object or array delimiter is not closed.");
+}
+
+function readJsonStringEnd(text, start) {
+  let escaped = false;
+  for (let cursor = start + 1; cursor < text.length; cursor += 1) {
+    const character = text[cursor];
+    if (!escaped && character === '"') return cursor + 1;
+    if (!escaped && character === "\\") escaped = true;
+    else escaped = false;
+  }
+  throw new Error("JSON string is not closed.");
+}
+
+function firstNonWhitespace(text, start) {
+  let cursor = start;
+  while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
+  return cursor;
 }
 
 function findCargoTomlVersion(text) {

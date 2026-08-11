@@ -53,8 +53,10 @@ describe("strict SemVer", () => {
 describe("version bump transaction", () => {
   it.each(["0.2.3", "v0.3.0-beta.1"])("updates all six version fields for %s", (version) => {
     const root = fixture();
+    const before = snapshot(root);
     const result = applyVersionBump(version, { root });
     const expected = normalizeReleaseVersion(version);
+    const after = snapshot(root);
 
     expect(result).toMatchObject({ currentVersion: "0.2.2", nextVersion: expected, dryRun: false });
     expect(result.changedFiles).toHaveLength(5);
@@ -67,6 +69,8 @@ describe("version bump transaction", () => {
     expect(readFileSync(join(root, "src-tauri/Cargo.lock"), "utf8")).toContain(
       'name = "dependency"\nversion = "7.6.5"',
     );
+    expect(after.map((text) => text.replaceAll(expected, "0.2.2"))).toEqual(before);
+    expect(after[4]).toContain('"targets": ["app"]');
   });
 
   it.each([
@@ -238,7 +242,7 @@ function fixture() {
   );
   writeFileSync(
     join(root, "src-tauri/tauri.conf.json"),
-    `${JSON.stringify({ productName: "forktail", version: "0.2.2", bundle: {} }, null, 2)}\n`,
+    '{\n  "productName": "forktail",\n  "version": "0.2.2",\n  "bundle": { "targets": ["app"] }\n}\n',
   );
   return root;
 }
