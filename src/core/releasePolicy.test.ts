@@ -1,12 +1,21 @@
 /// <reference types="node" />
 
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import releaseWorkflow from "../../.github/workflows/release.yml?raw";
 import validateReleaseScript from "../../scripts/validate-release.mjs?raw";
+
+const validateReleaseScriptUrl = new URL("../../scripts/validate-release.mjs", import.meta.url);
 
 describe("release workflow policy", () => {
   it("builds release artifacts only from tags or explicit workflow dispatch", () => {
@@ -221,15 +230,118 @@ describe("release workflow policy", () => {
     expect(acceptedDispatch.outputs).toMatchObject({ prerelease: "false", publish_updater: "true" });
   });
 
-  it("requires the release tag to match package, Tauri, and Cargo versions", () => {
+  it("requires the release tag to match every package, lock, Tauri, and Cargo version", () => {
     expect(validateReleaseScript).toContain("process.argv[2]");
     expect(validateReleaseScript).toContain("RELEASE_TAG");
     expect(validateReleaseScript).toContain("package.json");
+    expect(validateReleaseScript).toContain("package-lock.json");
+    expect(validateReleaseScript).toContain('packages[\"\"]');
     expect(validateReleaseScript).toContain("src-tauri/tauri.conf.json");
     expect(validateReleaseScript).toContain("src-tauri/Cargo.toml");
+    expect(validateReleaseScript).toContain("src-tauri/Cargo.lock");
     expect(validateReleaseScript).toContain("must match project version");
   });
+
+  it("accepts a v-prefixed strict SemVer tag when all six version fields match", () => {
+    const result = runReleaseValidator("v1.2.3-beta.1+build.7");
+
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("6 project version fields");
+  });
+
+  it.each([
+    ["package.json version", { packageVersion: "1.2.2" }],
+    ["package-lock.json version", { packageLockVersion: "1.2.2" }],
+    ['package-lock.json packages[""].version', { packageLockRootVersion: "1.2.2" }],
+    ["src-tauri/tauri.conf.json version", { tauriVersion: "1.2.2" }],
+    ["src-tauri/Cargo.toml version", { cargoVersion: "1.2.2" }],
+    ["src-tauri/Cargo.lock", { cargoLockVersion: "1.2.2" }],
+  ])("rejects a mismatched %s", (field, overrides) => {
+    const result = runReleaseValidator("v1.2.3", overrides);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("must match project version");
+    expect(result.stderr).toContain(field);
+  });
+
+  it.each([
+    ["1.2.3", "must start with v"],
+    ["v1.2.3-01", "leading zero"],
+  ])("rejects invalid release tag %s", (tag, message) => {
+    const result = runReleaseValidator(tag);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain(message);
+  });
+
+  it("strictly validates project versions and a unique forktail Cargo.lock package", () => {
+    const invalidVersion = runReleaseValidator("v1.2.3", { cargoVersion: "1.02.3" });
+    expect(invalidVersion.status).not.toBe(0);
+    expect(invalidVersion.stderr).toContain("src-tauri/Cargo.toml version must be valid SemVer");
+
+    const duplicateLock = runReleaseValidator("v1.2.3", { duplicateCargoLock: true });
+    expect(duplicateLock.status).not.toBe(0);
+    expect(duplicateLock.stderr).toContain(
+      "src-tauri/Cargo.lock must contain exactly one [[package]] named forktail",
+    );
+  });
 });
+
+type ReleaseFixtureOverrides = {
+  packageVersion?: string;
+  packageLockVersion?: string;
+  packageLockRootVersion?: string;
+  tauriVersion?: string;
+  cargoVersion?: string;
+  cargoLockVersion?: string;
+  duplicateCargoLock?: boolean;
+};
+
+function runReleaseValidator(tag: string, overrides: ReleaseFixtureOverrides = {}) {
+  const version = tag.startsWith("v") ? tag.slice(1) : tag;
+  const directory = mkdtempSync(join(tmpdir(), "forktail-release-validator-"));
+  mkdirSync(join(directory, "src-tauri"), { recursive: true });
+
+  writeFileSync(
+    join(directory, "package.json"),
+    JSON.stringify({ name: "forktail", version: overrides.packageVersion ?? version }),
+  );
+  writeFileSync(
+    join(directory, "package-lock.json"),
+    JSON.stringify({
+      name: "forktail",
+      version: overrides.packageLockVersion ?? version,
+      lockfileVersion: 3,
+      packages: {
+        "": { name: "forktail", version: overrides.packageLockRootVersion ?? version },
+        "node_modules/dependency": { version: "9.8.7" },
+      },
+    }),
+  );
+  writeFileSync(
+    join(directory, "src-tauri/tauri.conf.json"),
+    JSON.stringify({ productName: "forktail", version: overrides.tauriVersion ?? version }),
+  );
+  writeFileSync(
+    join(directory, "src-tauri/Cargo.toml"),
+    `[package]\nname = "forktail"\nversion = "${overrides.cargoVersion ?? version}"\n\n[dependencies]\ndependency = "7"\n`,
+  );
+  const cargoLockPackage = `[[package]]\nname = "forktail"\nversion = "${overrides.cargoLockVersion ?? version}"\n`;
+  writeFileSync(
+    join(directory, "src-tauri/Cargo.lock"),
+    `version = 4\n\n[[package]]\nname = "dependency"\nversion = "7.6.5"\n\n${cargoLockPackage}${overrides.duplicateCargoLock ? `\n${cargoLockPackage}` : ""}`,
+  );
+
+  try {
+    return spawnSync(
+      process.execPath,
+      [validateReleaseScriptUrl.pathname, tag, "--root", directory],
+      { cwd: directory, encoding: "utf8" },
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
 
 function expectInOrder(text: string, fragments: string[]): void {
   let cursor = -1;

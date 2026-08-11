@@ -471,9 +471,9 @@ mod tests {
         list_recent_commits, materialize_file_history, parse_file_history_records,
         parse_recent_commit_records,
     };
-    use crate::domain::git::{
-        GitFileHistoryBoundary, GitObjectAlgorithm, GitObjectId, GitPathPlatform,
-    };
+    #[cfg(unix)]
+    use crate::domain::git::GitPathPlatform;
+    use crate::domain::git::{GitFileHistoryBoundary, GitObjectAlgorithm, GitObjectId};
     use crate::git::executable::ValidatedGitExecutable;
     use crate::git::repository::GitRepositorySession;
     use crate::git::runner::{CancellationToken, RunnerError};

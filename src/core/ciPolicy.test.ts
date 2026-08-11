@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import { describe, expect, it } from "vitest";
+import gitAttributes from "../../.gitattributes?raw";
 import ciWorkflow from "../../.github/workflows/ci.yml?raw";
 import firstSprint from "../../docs/13_FIRST_SPRINT.md?raw";
 
@@ -27,6 +28,23 @@ describe("CI branch gate policy", () => {
     ]);
     expect(ciWorkflow).toContain("timeout-minutes: 15");
     expect(ciWorkflow).toContain("timeout-minutes: 30");
+  });
+
+  it("exercises the version bump transaction on a real Windows filesystem", () => {
+    const windowsJob = ciWorkflow.slice(
+      ciWorkflow.indexOf("git-tool-harness-windows:"),
+      ciWorkflow.indexOf("\n  rust:"),
+    );
+
+    expect(windowsJob).toContain("runs-on: windows-2022");
+    expect(windowsJob).toContain("npx vitest run scripts/version-bump.test.mjs");
+    expect(gitAttributes).toMatch(
+      /^fixtures\/three-way\/cases\/\*\/\*\.txt text eol=lf$/m,
+    );
+    expect(gitAttributes).toMatch(
+      /^fixtures\/three-way\/cases\/crlf-non-overlap\/\*\.txt -text$/m,
+    );
+    expect(gitAttributes).toMatch(/^\*\.mjs text eol=lf$/m);
   });
 
   it("does not publish artifacts or release builds from the PR validation workflow", () => {

@@ -15,10 +15,11 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { compareSemver, parseSemver } from "./semver.mjs";
 
 const args = parseArgs(process.argv.slice(2));
 const candidate = readManifest(requiredArg(args, "candidate"), "candidate");
-const candidateVersion = parseSemver(candidate.version, "candidate");
+const candidateVersion = parseManifestVersion(candidate.version, "candidate");
 
 if (candidateVersion.prerelease.length > 0) {
   fail("A prerelease manifest must not be promoted to stable/latest.json.");
@@ -31,7 +32,7 @@ if (!currentPath) {
 }
 
 const current = readManifest(currentPath, "current");
-const currentVersion = parseSemver(current.version, "current");
+const currentVersion = parseManifestVersion(current.version, "current");
 const comparison = compareSemver(candidateVersion, currentVersion);
 
 if (comparison <= 0) {
@@ -79,51 +80,15 @@ function requiredArg(args, key) {
   return value;
 }
 
-function parseSemver(value, label) {
-  const match = value.match(
-    /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/,
-  );
-  if (!match) fail(`${label} manifest version must be valid SemVer, got ${value}.`);
-
-  const prerelease = match[4] ? match[4].split(".") : [];
-  if (prerelease.some((identifier) => /^\d+$/.test(identifier) && !/^(0|[1-9]\d*)$/.test(identifier))) {
-    fail(`${label} manifest version has a prerelease identifier with a leading zero.`);
-  }
-
-  return {
-    major: Number(match[1]),
-    minor: Number(match[2]),
-    patch: Number(match[3]),
-    prerelease,
-  };
-}
-
-function compareSemver(left, right) {
-  for (const field of ["major", "minor", "patch"]) {
-    if (left[field] !== right[field]) return left[field] > right[field] ? 1 : -1;
-  }
-
-  if (left.prerelease.length === 0 && right.prerelease.length > 0) return 1;
-  if (left.prerelease.length > 0 && right.prerelease.length === 0) return -1;
-
-  const length = Math.max(left.prerelease.length, right.prerelease.length);
-  for (let index = 0; index < length; index += 1) {
-    const leftIdentifier = left.prerelease[index];
-    const rightIdentifier = right.prerelease[index];
-    if (leftIdentifier === undefined) return -1;
-    if (rightIdentifier === undefined) return 1;
-    if (leftIdentifier === rightIdentifier) continue;
-
-    const leftNumeric = /^\d+$/.test(leftIdentifier);
-    const rightNumeric = /^\d+$/.test(rightIdentifier);
-    if (leftNumeric && rightNumeric) {
-      return Number(leftIdentifier) > Number(rightIdentifier) ? 1 : -1;
+function parseManifestVersion(value, label) {
+  try {
+    return parseSemver(value, `${label} manifest version`);
+  } catch (error) {
+    if (error instanceof Error && error.message.includes("leading zero")) {
+      fail(`${label} manifest version has a prerelease identifier with a leading zero.`);
     }
-    if (leftNumeric !== rightNumeric) return leftNumeric ? -1 : 1;
-    return leftIdentifier > rightIdentifier ? 1 : -1;
+    fail(`${label} manifest version must be valid SemVer, got ${value}.`);
   }
-
-  return 0;
 }
 
 function fail(message) {

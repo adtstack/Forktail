@@ -323,6 +323,16 @@ Nightly/weekly:
 - large generated folder benchmark
 - fuzz corpus and SEC-004 marker flood/control character/path edge fixtures
 - direct JS dependency license allowlist unit test, npm/Rust advisory triage
+
+릴리즈 준비(`REL-005`):
+
+- `npm run version:bump -- X.Y.Z`는 package/npm lock/Tauri/Cargo/Cargo lock의 6개 project version
+  필드만 같은 값으로 갱신한다.
+- invalid, 동일, 하향, build-metadata-only 버전과 기존 version 불일치는 zero-mutation으로 실패한다.
+- 중간 file replace 실패를 주입해 이미 갱신한 파일까지 원문으로 rollback되는지 확인한다.
+- 교체 직전 대상 파일이 바뀌면 stale snapshot을 덮지 않고, 이미 교체한 파일만 안전하게 rollback한다.
+- Windows CI에서도 version bump의 실제 rename/rollback fault-injection 테스트를 실행한다.
+- `npm run release:validate -- vX.Y.Z`는 위 6개 필드와 tag가 모두 일치할 때만 통과한다.
 - Tauri E2E
 - three-platform build
 

@@ -34,6 +34,12 @@ const CONFIG_KEYS = Object.freeze([
   "mergetool.forktail.hideResolved",
 ]);
 const CONFIG_KEY_SET = new Set(CONFIG_KEYS.map((key) => key.toLowerCase()));
+const FIXTURE_IDENTITY_ARGS = Object.freeze([
+  "-c",
+  "user.name=Forktail Smoke",
+  "-c",
+  "user.email=forktail-smoke@invalid.example",
+]);
 const REPOSITORY_KEYS = Object.freeze([
   "difftool",
   "mergetoolSave",
@@ -439,7 +445,7 @@ function createConflictRepository(path, kind, environment) {
   git(path, ["switch", "--quiet", "ours"], environment);
   const mergeStatus = gitExit(
     path,
-    ["merge", "--no-commit", "--no-ff", "theirs"],
+    [...FIXTURE_IDENTITY_ARGS, "merge", "--no-commit", "--no-ff", "theirs"],
     environment,
   );
   if (mergeStatus !== 1) {
@@ -480,10 +486,7 @@ function commitAll(path, message, environment) {
   git(
     path,
     [
-      "-c",
-      "user.name=Forktail Smoke",
-      "-c",
-      "user.email=forktail-smoke@invalid.example",
+      ...FIXTURE_IDENTITY_ARGS,
       "commit",
       "--quiet",
       "-m",

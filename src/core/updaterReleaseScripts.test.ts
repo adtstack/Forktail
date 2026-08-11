@@ -255,6 +255,22 @@ describe("updater release scripts", () => {
     ]);
     expect(prerelease.status).not.toBe(0);
     expect(prerelease.stderr).toContain("prerelease manifest");
+
+    writeManifest(candidate, "1.2.5-01");
+    const invalidPrerelease = runNode(promotionScript, [
+      "--candidate", candidate,
+      "--current", current,
+    ]);
+    expect(invalidPrerelease.status).not.toBe(0);
+    expect(invalidPrerelease.stderr).toContain("leading zero");
+
+    writeManifest(current, "9007199254740992.0.0");
+    writeManifest(candidate, "9007199254740993.0.0");
+    const largeVersion = runNode(promotionScript, [
+      "--candidate", candidate,
+      "--current", current,
+    ]);
+    expect(largeVersion.status).toBe(0);
   });
 });
 

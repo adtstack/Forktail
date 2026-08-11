@@ -99,7 +99,7 @@
 live folder cross-item 복원은 자동 계약 검증까지 구현됐다. folder reopen은 content-free scan identity와
 cancellable all-or-nothing pair-read만 사용한다. Git cross-item은 T081/T082가 남아 있으므로 별도 완료
 조건으로 유지한다. packaged hardware 검증은 사용자 소유이며 자동 검증 결과로 대체하지 않는다.
-| REL-005 | release workflow | tag 기반 3 OS artifact, checksum, draft release | REL-002~004 |
+| REL-005 | release workflow | 검증·rollback 가능한 version/lock 동기화, tag 기반 3 OS artifact, checksum, draft release | REL-002~004 |
 | REL-006 | signing policy | 개인용 unsigned와 public signed 경로 분리 | REL-005 |
 | REL-007 | SBOM/NOTICE | JS/Rust 전체 dependency license와 SBOM 첨부 | SEC-003 |
 | REL-008 | updater | 서명된 artifact가 안정된 뒤 R2 static feed 기반 opt-in updater; 실행 기준은 `docs/16_R2_UPDATER_RUNBOOK.md` | REL-006 |

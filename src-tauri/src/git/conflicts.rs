@@ -795,7 +795,7 @@ mod tests {
     fn groups_stage_sets_with_explicit_missing_modes_and_lossless_paths() {
         let object = b"a".repeat(40);
         let mut output = Vec::new();
-        for stage in [b'1', b'2', b'3'] {
+        for stage in *b"123" {
             output.extend(record(
                 b"100644",
                 &object,
@@ -803,13 +803,13 @@ mod tests {
                 b"both\tmodified\n\xff.txt",
             ));
         }
-        for stage in [b'2', b'3'] {
+        for stage in *b"23" {
             output.extend(record(b"100755", &object, stage, b"add-add.sh"));
         }
-        for stage in [b'1', b'2'] {
+        for stage in *b"12" {
             output.extend(record(b"100644", &object, stage, b"deleted-by-theirs"));
         }
-        for stage in [b'1', b'3'] {
+        for stage in *b"13" {
             output.extend(record(b"100644", &object, stage, b"deleted-by-ours"));
         }
         output.extend(record(b"120000", &object, b'2', b"type-change"));
@@ -1249,8 +1249,23 @@ mod tests {
             fs::write(fixture.repository.join("conflict.txt"), b"main\n").expect("main");
             fixture.run(["add", "--", "conflict.txt"]);
             fixture.commit("main");
-            let merge = fixture.run_allow_failure(["merge", "--no-edit", "other"]);
-            assert!(!merge.status.success(), "fixture merge must conflict");
+            let merge = fixture.run_allow_failure([
+                "-c",
+                "user.useConfigOnly=true",
+                "-c",
+                "user.name=Forktail Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "merge",
+                "--no-edit",
+                "other",
+            ]);
+            assert_eq!(
+                merge.status.code(),
+                Some(1),
+                "fixture merge must produce a conflict: {}",
+                String::from_utf8_lossy(&merge.stderr)
+            );
             fixture
         }
 

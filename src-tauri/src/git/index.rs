@@ -446,7 +446,7 @@ mod tests {
     fn preserves_unmerged_stages_and_rejects_malformed_or_truncated_records() {
         let object = b"c".repeat(40);
         let mut unmerged = Vec::new();
-        for stage in [b'1', b'2', b'3'] {
+        for stage in *b"123" {
             unmerged.extend(record(b'M', b"100644", &object, stage, b"conflict.txt"));
         }
         let parsed = parse_index_records(&unmerged, GitObjectAlgorithm::Sha1)
@@ -812,8 +812,23 @@ mod tests {
             fs::write(fixture.repository.join("conflict.txt"), b"main\n").expect("main file");
             fixture.run(["add", "--", "conflict.txt"]);
             fixture.commit("main");
-            let merge = fixture.run_allow_failure(["merge", "--no-edit", "other"]);
-            assert!(!merge.status.success(), "fixture merge must conflict");
+            let merge = fixture.run_allow_failure([
+                "-c",
+                "user.useConfigOnly=true",
+                "-c",
+                "user.name=Forktail Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "merge",
+                "--no-edit",
+                "other",
+            ]);
+            assert_eq!(
+                merge.status.code(),
+                Some(1),
+                "fixture merge must produce a conflict: {}",
+                String::from_utf8_lossy(&merge.stderr)
+            );
             fixture
         }
 
