@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-save-git-conflict-result"
+description = "Enables the save_git_conflict_result command without any pre-configured scope."
+commands.allow = ["save_git_conflict_result"]
+
+[[permission]]
+identifier = "deny-save-git-conflict-result"
+description = "Denies the save_git_conflict_result command without any pre-configured scope."
+commands.deny = ["save_git_conflict_result"]

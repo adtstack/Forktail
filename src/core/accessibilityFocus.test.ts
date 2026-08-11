@@ -62,6 +62,35 @@ describe("accessibility focus styles", () => {
       expect(tokens["--active-conflict-glyph"], `${selector} --active-conflict-glyph`).toBeTruthy();
     }
   });
+
+  it("keeps the editor navigation status neutral and non-interactive", () => {
+    const navigationStatus = cssBlock(".editor-navigation-status");
+    expect(navigationStatus).toContain("background: var(--status-bg);");
+    expect(navigationStatus).toContain("color: var(--toolbar-text);");
+    expect(navigationStatus).toContain("pointer-events: none;");
+  });
+
+  it("keeps compare, merge, and scan controls available at a 200% zoom viewport", () => {
+    const narrowViewport = cssBlock("@media (max-width: 900px)");
+
+    for (const selector of [
+      ".toolbar-check",
+      ".toolbar-field",
+      'aria-label="Merge options"',
+      'aria-label="Scan options"',
+      'aria-label="병합 옵션"',
+      'aria-label="스캔 옵션"',
+      ".option-bar",
+    ]) {
+      const hiddenControl = new RegExp(
+        `${escapeRegExp(selector)}[^{}]*\\{[^{}]*display\\s*:\\s*none`,
+        "i",
+      );
+      expect(narrowViewport).not.toMatch(hiddenControl);
+    }
+
+    expect(narrowViewport).toContain("overflow-y: auto;");
+  });
 });
 
 function cssVariables(selector: string): Record<string, string> {
@@ -86,4 +115,8 @@ function cssBlock(selector: string): string {
     }
   }
   throw new Error(`Unterminated CSS block for ${selector}`);
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

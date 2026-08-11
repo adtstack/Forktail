@@ -16,7 +16,9 @@ export function fileDocumentVersionChanged(
 ): boolean {
   if (isVirtualFileDocument(document)) return false;
   if (!version) return true;
-  return document.size !== version.size || document.modifiedMs !== version.modifiedMs;
+  return document.size !== version.size
+    || document.modifiedMs !== version.modifiedMs
+    || (document.contentHash != null && document.contentHash !== version.contentHash);
 }
 
 export function buildCompareFileChangeNotice(
@@ -46,5 +48,11 @@ export function compareFileChangeVersionKey(
 
 function versionKeyPart(side: "left" | "right", version: FileVersion | null): string {
   if (!version) return `${side}:unavailable`;
-  return `${side}:${version.path}:${version.size}:${version.modifiedMs ?? "unknown"}`;
+  return [
+    side,
+    version.path,
+    version.size,
+    version.modifiedMs ?? "unknown",
+    version.contentHash,
+  ].join(":");
 }

@@ -1,0 +1,8 @@
+[[permission]]
+identifier = "detached-folder-review"
+description = "Caller-bound read-only commands for one detached folder review window"
+commands.allow = [
+  "load_detached_folder_review",
+  "check_detached_folder_review_versions",
+  "reload_detached_folder_review",
+]

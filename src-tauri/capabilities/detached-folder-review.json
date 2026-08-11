@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "detached-folder-review-capability",
+  "description": "Read-only permissions for detached folder review windows",
+  "windows": ["folder-review-*"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-close",
+    "detached-folder-review"
+  ]
+}

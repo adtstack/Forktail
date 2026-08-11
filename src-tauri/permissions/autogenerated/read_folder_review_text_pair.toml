@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-folder-review-text-pair"
+description = "Enables the read_folder_review_text_pair command without any pre-configured scope."
+commands.allow = ["read_folder_review_text_pair"]
+
+[[permission]]
+identifier = "deny-read-folder-review-text-pair"
+description = "Denies the read_folder_review_text_pair command without any pre-configured scope."
+commands.deny = ["read_folder_review_text_pair"]

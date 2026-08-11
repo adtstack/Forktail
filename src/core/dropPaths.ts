@@ -55,7 +55,7 @@ export function sideLabel(side: CompareDropSide, language: AppLanguage = "en"): 
 function pathsFromFileList(files: ArrayLike<DroppedFileLike> | null | undefined): string[] {
   if (!files) return [];
   return Array.from({ length: files.length }, (_, index) => files[index])
-    .map((file) => (typeof file?.path === "string" ? file.path.trim() : ""))
+    .map((file) => (typeof file?.path === "string" ? file.path : ""))
     .filter((path) => path.length > 0);
 }
 

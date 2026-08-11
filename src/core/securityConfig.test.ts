@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import packageJson from "../../package.json";
 import defaultCapability from "../../src-tauri/capabilities/default.json";
+import detachedCapability from "../../src-tauri/capabilities/detached-folder-review.json";
 import tauriConfig from "../../src-tauri/tauri.conf.json";
 
 interface TauriSecurityConfig {
@@ -57,7 +58,16 @@ describe("Tauri security config", () => {
       "core:default",
       "dialog:allow-open",
       "dialog:allow-save",
+      "main-commands",
     ]);
+    expect(detachedCapability.windows).toEqual(["folder-review-*"]);
+    expect(detachedCapability.permissions).toEqual([
+      "core:event:allow-listen",
+      "core:event:allow-unlisten",
+      "core:window:allow-close",
+      "detached-folder-review",
+    ]);
+    expect(detachedCapability.permissions).not.toContain("core:default");
 
     const dependencies = Object.keys(packageJson.dependencies);
     for (const plugin of [

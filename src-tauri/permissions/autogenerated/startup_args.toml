@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-startup-args"
+description = "Enables the startup_args command without any pre-configured scope."
+commands.allow = ["startup_args"]
+
+[[permission]]
+identifier = "deny-startup-args"
+description = "Denies the startup_args command without any pre-configured scope."
+commands.deny = ["startup_args"]

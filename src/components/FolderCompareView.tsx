@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type MouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
 import {
   APP_COMMAND_EVENT,
   commandAriaKeyshortcuts,
@@ -16,9 +16,12 @@ import {
   folderEntryDepth,
   folderEntryDetailRows,
   folderEntryHasChildren,
+  folderEntryName,
+  folderEntryParentPath,
   folderEntryModifiedMs,
   folderEntryPathActions,
   folderEntryPrimaryAction,
+  folderRowGesturePlan,
   folderScanOptionsWithMode,
   folderScanOptionsWithToggle,
   folderVirtualRange,
@@ -26,7 +29,8 @@ import {
   isFolderSearchShortcut,
   nextFolderSelectionIndex,
   nextFolderSort,
-  prepareFolderEntries,
+  prepareFolderTree,
+  progressiveFolderViewEntries,
   summarizeFolderSyncDryRun,
   type FolderEntryPrimaryAction,
   type FolderEntryPathAction,
@@ -38,6 +42,7 @@ import { FOLDER_COMPARE_TEXT, localeForLanguage } from "../core/i18n";
 import type {
   FolderCompareMode,
   FolderEntry,
+  FolderEntryUpsert,
   FolderEntryStatus,
   FolderScanOptions,
   FolderScanProgress,
@@ -56,6 +61,7 @@ interface FolderCompareViewProps {
   busy: boolean;
   languageMode?: AppLanguage;
   scanProgress: FolderScanProgress | null;
+  progressiveRows?: FolderEntryUpsert[] | null;
   onBack: () => void;
   onNewScan: () => void;
   onRescan: (options: FolderScanOptions) => void;
@@ -64,12 +70,15 @@ interface FolderCompareViewProps {
   onRevealPath: (path: string) => void;
 }
 
+const EMPTY_FOLDER_PATHS: ReadonlySet<string> = new Set();
+
 export function FolderCompareView({
   result,
   options,
   busy,
   languageMode = "en",
   scanProgress,
+  progressiveRows = null,
   onBack,
   onNewScan,
   onRescan,
@@ -81,8 +90,9 @@ export function FolderCompareView({
   const statusLabels = text.statusLabels;
   const [query, setQuery] = useState("");
   const [viewSettings, setViewSettings] = useState(() => loadFolderViewSettings());
-  const [selectedIndex, setSelectedIndex] = useState(0);
+  const [selectedRelativePath, setSelectedRelativePath] = useState<string | null>(null);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
+  const [syncDryRunOpen, setSyncDryRunOpen] = useState(false);
   const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const [collapsedPaths, setCollapsedPaths] = useState<ReadonlySet<string>>(() => new Set());
   const [viewport, setViewport] = useState({ scrollTop: 0, height: 0 });
@@ -117,28 +127,53 @@ export function FolderCompareView({
     };
   }, []);
 
+  const progressiveView = useMemo(
+    () => progressiveRows == null ? null : progressiveFolderViewEntries(progressiveRows),
+    [progressiveRows],
+  );
+  const sourceEntries = progressiveView?.entries ?? result.entries;
+  const pendingPaths = progressiveView?.pendingPaths ?? EMPTY_FOLDER_PATHS;
   const statusCounts = useMemo(() => countFolderStatuses(result.entries), [result.entries]);
-  const pathConflicts = useMemo(() => detectFolderPathConflicts(result.entries), [result.entries]);
-  const syncDryRun = useMemo(() => ({
-    leftToRight: summarizeFolderSyncDryRun(
-      buildFolderSyncDryRunPlan(result, "leftToRight", languageMode),
-    ),
-    rightToLeft: summarizeFolderSyncDryRun(
-      buildFolderSyncDryRunPlan(result, "rightToLeft", languageMode),
-    ),
-  }), [languageMode, result]);
-  const preparedEntries = useMemo(() => {
-    return prepareFolderEntries(
-      result.entries,
+  const pathConflicts = useMemo(() => detectFolderPathConflicts(sourceEntries), [sourceEntries]);
+  const scanIncomplete = scanProgress?.active === true || pendingPaths.size > 0;
+  const syncDryRun = useMemo(() => {
+    if (!syncDryRunOpen || scanIncomplete) return null;
+    return {
+      leftToRight: summarizeFolderSyncDryRun(
+        buildFolderSyncDryRunPlan(result, "leftToRight", languageMode),
+      ),
+      rightToLeft: summarizeFolderSyncDryRun(
+        buildFolderSyncDryRunPlan(result, "rightToLeft", languageMode),
+      ),
+    };
+  }, [languageMode, result, scanIncomplete, syncDryRunOpen]);
+  const preparedTree = useMemo(() => {
+    return prepareFolderTree(
+      sourceEntries,
       { query, statuses: viewSettings.statusFilters },
       viewSettings.sort,
+      pendingPaths,
     );
-  }, [query, result.entries, viewSettings]);
+  }, [pendingPaths, query, sourceEntries, viewSettings]);
+  const preparedEntries = preparedTree.entries;
   const entries = useMemo(
     () => applyCollapsedFolderEntries(preparedEntries, collapsedPaths),
     [collapsedPaths, preparedEntries],
   );
+  const visibleMatchedCount = useMemo(
+    () => entries.reduce(
+      (count, entry) => count + (preparedTree.contextFolderPaths.has(entry.relativePath) ? 0 : 1),
+      0,
+    ),
+    [entries, preparedTree.contextFolderPaths],
+  );
 
+  const selectedIndexFromPath = selectedRelativePath == null
+    ? -1
+    : entries.findIndex((entry) => entry.relativePath === selectedRelativePath);
+  const selectedIndex = selectedIndexFromPath >= 0
+    ? selectedIndexFromPath
+    : clampFolderSelectionIndex(0, entries.length);
   const selectedEntry = selectedIndex >= 0 ? entries[selectedIndex] : null;
   const detailEntry = detailPanelOpen ? selectedEntry : null;
   const virtualRange = useMemo(
@@ -151,7 +186,10 @@ export function FolderCompareView({
   );
 
   useEffect(() => {
-    setSelectedIndex((current) => clampFolderSelectionIndex(current, entries.length));
+    setSelectedRelativePath((current) => {
+      if (current && entries.some((entry) => entry.relativePath === current)) return current;
+      return entries[0]?.relativePath ?? null;
+    });
     rowRefs.current = rowRefs.current.slice(0, entries.length);
     if (entries.length === 0) setDetailPanelOpen(false);
   }, [entries.length]);
@@ -162,7 +200,12 @@ export function FolderCompareView({
 
   useEffect(() => {
     setCollapsedPaths(new Set());
+    setSelectedRelativePath(null);
   }, [result.leftRoot, result.rightRoot]);
+
+  useEffect(() => {
+    if (scanIncomplete) setSyncDryRunOpen(false);
+  }, [scanIncomplete]);
 
   useEffect(() => {
     const element = tableWrapRef.current;
@@ -216,7 +259,7 @@ export function FolderCompareView({
 
   const selectRow = (index: number, focus = false) => {
     const nextIndex = clampFolderSelectionIndex(index, entries.length);
-    setSelectedIndex(nextIndex);
+    setSelectedRelativePath(nextIndex >= 0 ? entries[nextIndex]?.relativePath ?? null : null);
     if (focus && nextIndex >= 0) {
       requestAnimationFrame(() => focusRow(nextIndex));
     }
@@ -254,13 +297,17 @@ export function FolderCompareView({
     }
     if (event.key === "Enter") {
       event.preventDefault();
-      runPrimaryAction(entry);
+      if (folderRowGesturePlan("enter").activatePrimaryAction) {
+        runPrimaryAction(entry);
+      }
       return;
     }
     if (event.key === " ") {
       event.preventDefault();
-      setSelectedIndex(index);
-      setDetailPanelOpen((current) => !current);
+      if (folderRowGesturePlan("space").toggleDetails) {
+        setSelectedRelativePath(entry.relativePath);
+        setDetailPanelOpen((current) => !current);
+      }
     }
   };
 
@@ -302,7 +349,7 @@ export function FolderCompareView({
   };
 
   const runPrimaryAction = (entry: FolderEntry) => {
-    const action = folderEntryPrimaryAction(entry, preparedEntries);
+    const action = primaryActionForEntry(entry);
     if (action.kind === "compare") {
       onOpenEntry(entry);
       return;
@@ -316,23 +363,23 @@ export function FolderCompareView({
     }
   };
 
-  const handleRowClick = (
-    event: MouseEvent<HTMLTableRowElement>,
-    entry: FolderEntry,
-    index: number,
-  ) => {
-    selectRow(index);
-    if (event.detail !== 1) return;
+  const primaryActionForEntry = (entry: FolderEntry): FolderEntryPrimaryAction => {
+    if (!pendingPaths.has(entry.relativePath)) {
+      return folderEntryPrimaryAction(entry, preparedEntries);
+    }
+    return folderEntryHasChildren(entry, preparedEntries)
+      ? { kind: "toggle", path: entry.relativePath }
+      : { kind: "none" };
+  };
 
-    const action = folderEntryPrimaryAction(entry, preparedEntries);
-    if (action.kind === "compare") {
-      onOpenEntry(entry);
+  const handleRowClick = (index: number) => {
+    if (folderRowGesturePlan("singleClick").selectOnly) {
+      selectRow(index);
     }
   };
 
   const handleRowDoubleClick = (entry: FolderEntry) => {
-    const action = folderEntryPrimaryAction(entry, preparedEntries);
-    if (action.kind !== "compare") {
+    if (folderRowGesturePlan("doubleClick").activatePrimaryAction) {
       runPrimaryAction(entry);
     }
   };
@@ -450,10 +497,23 @@ export function FolderCompareView({
           aria-live="polite"
         >
           <div>
-            <strong>{scanProgress.active ? text.scanning : text.cancelled}</strong>
-            <span>{scanProgress.message}</span>
+            <strong>{folderScanStatusTitle(scanProgress, text)}</strong>
+            <span>{folderScanStatusMessage(scanProgress, text)}</span>
+            {scanProgress.progress && (
+              <span className="folder-scan-metrics">
+                <b>{folderScanPhaseLabel(scanProgress.progress.phase, text)}</b>
+                <span>{text.progressDiscovered(scanProgress.progress.discovered)}</span>
+                <span>{text.progressFinalized(scanProgress.progress.finalized)}</span>
+                <span>{text.progressPending(scanProgress.progress.pending)}</span>
+                <span>{text.progressErrors(scanProgress.progress.errors)}</span>
+                {scanProgress.progress.hashedFiles > 0 && (
+                  <span>{text.progressHashed(scanProgress.progress.hashedFiles)}</span>
+                )}
+              </span>
+            )}
             <small>
-              {text.job} #{scanProgress.jobId} · {scanProgress.leftRoot} ↔ {scanProgress.rightRoot}
+              {scanProgress.jobId == null ? "" : `${text.job} #${scanProgress.jobId} · `}
+              {scanProgress.leftRoot} ↔ {scanProgress.rightRoot}
             </small>
           </div>
           {scanProgress.active && (
@@ -472,18 +532,59 @@ export function FolderCompareView({
         </section>
       )}
 
-      <section className="folder-sync-dry-run" aria-label={text.syncDryRunAria}>
-        <strong>{text.syncDryRun}</strong>
-        <span>{text.noFileChanges}</span>
-        <DryRunSummary direction="leftToRight" summary={syncDryRun.leftToRight} text={text} />
-        <DryRunSummary direction="rightToLeft" summary={syncDryRun.rightToLeft} text={text} />
+      <section className="folder-sync-disclosure" aria-label={text.syncDryRunAria}>
+        <button
+          type="button"
+          className="folder-sync-toggle"
+          aria-expanded={syncDryRunOpen}
+          aria-controls="folder-sync-dry-run-content"
+          aria-disabled={scanIncomplete}
+          disabled={scanIncomplete}
+          onClick={() => {
+            if (!scanIncomplete) setSyncDryRunOpen((current) => !current);
+          }}
+        >
+          <span className="folder-sync-chevron" aria-hidden="true">
+            {syncDryRunOpen ? "▾" : "▸"}
+          </span>
+          <strong>{text.syncDryRun}</strong>
+          <span>{text.noFileChanges}</span>
+        </button>
+        {syncDryRun && (
+          <div id="folder-sync-dry-run-content" className="folder-sync-dry-run">
+            <DryRunSummary direction="leftToRight" summary={syncDryRun.leftToRight} text={text} />
+            <DryRunSummary direction="rightToLeft" summary={syncDryRun.rightToLeft} text={text} />
+          </div>
+        )}
+      </section>
+
+      <section
+        id="folder-interaction-guide"
+        className="folder-interaction-guide"
+        aria-label={text.interactionGuideAria}
+      >
+        <strong>{text.interactionGuideTitle}</strong>
+        <span>
+          <kbd>{text.singleClick}</kbd>
+          {text.selectOnly}
+        </span>
+        <span>
+          <kbd>{text.doubleClick}</kbd>
+          <span aria-hidden="true"> / </span>
+          <kbd>Enter</kbd>
+          {text.activateRow}
+        </span>
+        <span>
+          <kbd>{text.detailsKey}</kbd>
+          {text.showDetails}
+        </span>
       </section>
 
       <section
         ref={tableWrapRef}
         className="folder-table-wrap"
         aria-label={text.resultsAria}
-        aria-describedby="folder-selection-status"
+        aria-describedby="folder-interaction-guide folder-selection-status"
         onScroll={updateScrollViewport}
       >
         <table className="folder-table" aria-rowcount={entries.length}>
@@ -509,35 +610,50 @@ export function FolderCompareView({
               const index = virtualRange.start + visibleIndex;
               const collapsible = folderEntryHasChildren(entry, preparedEntries);
               const collapsed = collapsedPaths.has(entry.relativePath);
-              const primaryAction = folderEntryPrimaryAction(entry, preparedEntries);
+              const pending = pendingPaths.has(entry.relativePath);
+              const primaryAction = primaryActionForEntry(entry);
               const rowTitle = folderPrimaryActionTitle(primaryAction, text);
+              const directory = isFolderDirectoryEntry(entry);
+              const contextFolder = preparedTree.contextFolderPaths.has(entry.relativePath);
+              const parentPath = folderEntryParentPath(entry);
+              const rowStatusLabel = contextFolder
+                ? text.folderContext
+                : pending ? text.checking : statusLabels[entry.status];
               return (
                 <tr
                   key={entry.relativePath}
                   ref={(element) => {
                     rowRefs.current[index] = element;
                   }}
-                  tabIndex={0}
+                  tabIndex={selectedIndex === index ? 0 : -1}
                   aria-rowindex={index + 2}
                   aria-selected={selectedIndex === index}
-                  aria-label={`${entry.relativePath}, ${statusLabels[entry.status]}, ${rowTitle}`}
-                  className={`status-${entry.status} ${selectedIndex === index ? "selected-row" : ""}`}
+                  aria-label={`${entry.relativePath}, ${rowStatusLabel}, ${rowTitle}`}
+                  className={`${pending ? "status-pending" : `status-${entry.status}`} ${directory ? "directory-row" : "file-row"} ${contextFolder ? "folder-context-row" : ""} ${selectedIndex === index ? "selected-row" : ""}`}
                   onFocus={() => selectRow(index)}
-                  onClick={(event) => handleRowClick(event, entry, index)}
+                  onClick={() => handleRowClick(index)}
                   onDoubleClick={() => handleRowDoubleClick(entry)}
                   onKeyDown={(event) => handleRowKeyDown(event, entry, index)}
-                  title={entry.message ?? rowTitle}
+                  title={entry.message ?? `${entry.relativePath} · ${rowTitle}`}
                 >
                   <td>
-                    <span
-                      className={`status-chip ${entry.status}`}
-                      aria-label={text.statusAria(statusLabels[entry.status])}
-                    >
-                      {statusLabels[entry.status]}
-                    </span>
+                    {contextFolder ? (
+                      <span className="folder-context-chip">{text.folderContext}</span>
+                    ) : pending ? (
+                      <span className="status-chip pending" aria-label={text.statusAria(text.checking)}>
+                        {text.checking}
+                      </span>
+                    ) : (
+                      <span
+                        className={`status-chip ${entry.status}`}
+                        aria-label={text.statusAria(statusLabels[entry.status])}
+                      >
+                        {statusLabels[entry.status]}
+                      </span>
+                    )}
                   </td>
                   <td
-                    className={`path-cell ${isFolderDirectoryEntry(entry) ? "directory-path" : ""}`}
+                    className={`path-cell ${directory ? "directory-path" : ""}`}
                     style={{ paddingLeft: 10 + folderEntryDepth(entry) * 16 }}
                   >
                     <span className="path-cell-content">
@@ -559,7 +675,12 @@ export function FolderCompareView({
                         </button>
                       )}
                       {!collapsible && <span className="folder-tree-spacer" aria-hidden="true" />}
-                      <span>{entry.relativePath}</span>
+                      <span className="folder-entry-label">
+                        <span className="folder-entry-name">{folderEntryName(entry)}</span>
+                        {parentPath && (
+                          <small className="folder-entry-parent">{parentPath}/</small>
+                        )}
+                      </span>
                     </span>
                   </td>
                   <td>{formatEntrySize(entry)}</td>
@@ -588,12 +709,16 @@ export function FolderCompareView({
             <button
               type="button"
               onClick={() => onOpenEntry(detailEntry)}
-              disabled={busy || !canCompareFolderEntry(detailEntry)}
+              disabled={
+                busy
+                || pendingPaths.has(detailEntry.relativePath)
+                || !canCompareFolderEntry(detailEntry)
+              }
             >
               {text.compare}
             </button>
           </div>
-          {!canCompareFolderEntry(detailEntry) && (
+          {(pendingPaths.has(detailEntry.relativePath) || !canCompareFolderEntry(detailEntry)) && (
             <p className="folder-action-note">{text.compareUnavailable}</p>
           )}
           <div className="folder-path-actions">
@@ -633,13 +758,13 @@ export function FolderCompareView({
       )}
 
       <footer className="status-bar">
-        <span>{text.shownTotal(entries.length, result.entries.length)}</span>
+        <span>{text.shownTotal(visibleMatchedCount, sourceEntries.length)}</span>
         <span id="folder-selection-status" aria-live="polite">
           {selectedEntry
             ? text.selectedStatus(
                 selectedEntry.relativePath,
                 folderPrimaryActionTitle(
-                  folderEntryPrimaryAction(selectedEntry, preparedEntries),
+                  primaryActionForEntry(selectedEntry),
                   text,
                 ),
               )
@@ -656,6 +781,42 @@ function VirtualSpacer({ height }: { height: number }) {
       <td colSpan={5} style={{ height }} />
     </tr>
   );
+}
+
+function folderScanStatusTitle(
+  progress: FolderScanProgress,
+  text: (typeof FOLDER_COMPARE_TEXT)[AppLanguage],
+): string {
+  if (progress.active) return text.scanning;
+  if (progress.terminal?.outcome === "completed") return text.completed;
+  if (progress.terminal?.outcome === "failed") return text.failed;
+  return text.cancelled;
+}
+
+function folderScanStatusMessage(
+  progress: FolderScanProgress,
+  text: (typeof FOLDER_COMPARE_TEXT)[AppLanguage],
+): string {
+  const terminal = progress.terminal;
+  if (!terminal) return progress.message;
+  if (terminal.outcome === "completed") {
+    return text.completedSummary(terminal.entryCount, terminal.durationMs);
+  }
+  if (terminal.outcome === "cancelled") {
+    return text.cancelledSummary(terminal.finalized, terminal.pending);
+  }
+  return terminal.message;
+}
+
+function folderScanPhaseLabel(
+  phase: NonNullable<FolderScanProgress["progress"]>["phase"],
+  text: (typeof FOLDER_COMPARE_TEXT)[AppLanguage],
+): string {
+  switch (phase) {
+    case "inventory": return text.phaseInventory;
+    case "classify": return text.phaseClassify;
+    case "hash": return text.phaseHash;
+  }
 }
 
 function SortableHeader({

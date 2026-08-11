@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-git-working-tree-compare"
+description = "Enables the open_git_working_tree_compare command without any pre-configured scope."
+commands.allow = ["open_git_working_tree_compare"]
+
+[[permission]]
+identifier = "deny-open-git-working-tree-compare"
+description = "Denies the open_git_working_tree_compare command without any pre-configured scope."
+commands.deny = ["open_git_working_tree_compare"]

@@ -22,6 +22,28 @@ const mergeRecoverySource = readFileSync(
   "utf8",
 );
 const gitModelsSource = readFileSync(new URL("./gitModels.ts", import.meta.url), "utf8");
+const editorNavigationHistorySource = readFileSync(
+  new URL("./editorNavigationHistory.ts", import.meta.url),
+  "utf8",
+);
+const navigationInputSource = readFileSync(new URL("./navigationInput.ts", import.meta.url), "utf8");
+const commandSource = readFileSync(new URL("./commands.ts", import.meta.url), "utf8");
+const detachedReviewSource = readFileSync(
+  new URL("../DetachedFolderReviewApp.tsx", import.meta.url),
+  "utf8",
+);
+const detachedReviewNativeSource = readFileSync(
+  new URL("../../src-tauri/src/detached_review.rs", import.meta.url),
+  "utf8",
+);
+const detachedReviewCommandSource = readFileSync(
+  new URL("../../src-tauri/src/commands/detached_review.rs", import.meta.url),
+  "utf8",
+);
+const fileCompareSource = readFileSync(
+  new URL("../components/FileCompareView.tsx", import.meta.url),
+  "utf8",
+);
 const forbiddenRuntimeLogPatterns = [
   { label: "browser console logging", pattern: /\bconsole\.(debug|info|log|warn|error)\s*\(/ },
   { label: "Rust stdout logging", pattern: /\bprintln!\s*\(/ },
@@ -98,6 +120,34 @@ describe("privacy logging policy", () => {
     expect(historyModels).not.toMatch(/\b(text|content|body|diff|patch)\s*:/);
     expect(historyModels).toContain("subject: string;");
     expect(historyModels).toContain("opaquePathId: string;");
+  });
+
+  it("keeps editor navigation history process-only and content-free", () => {
+    expect(editorNavigationHistorySource).not.toMatch(
+      /\b(localStorage|indexedDB|serialize|deserialize|FileDocument|selectedText|surroundingText)\b/,
+    );
+    expect(editorNavigationHistorySource).not.toMatch(/\b(content|text|diff|mergeResult)\s*:/);
+    expect(navigationInputSource).not.toMatch(/\b(localStorage|indexedDB|FileDocument)\b/);
+    const commandEnvelope = commandSource.slice(
+      commandSource.indexOf("export interface AppCommandEventDetail"),
+      commandSource.indexOf("export type RuntimePlatform"),
+    );
+    expect(commandEnvelope).toContain("commandId: AppCommandId");
+    expect(commandEnvelope).toContain("source?: AppCommandSource");
+    expect(commandEnvelope).toContain("monotonicEventTime?: number");
+    expect(commandEnvelope).not.toMatch(/\b(path|content|cursor|document|text)\b/i);
+  });
+
+  it("keeps detached review identity, routing, models, and persistence path-free", () => {
+    expect(detachedReviewCommandSource).toContain(
+      'DETACHED_FOLDER_REVIEW_ROUTE: &str = "index.html?surface=folder-review"',
+    );
+    expect(detachedReviewNativeSource).toContain('format!("folder-review-{session_id}")');
+    expect(detachedReviewNativeSource).not.toContain("FileDocument");
+    expect(detachedReviewSource).not.toMatch(/\.(?:setItem|removeItem)\s*\(/);
+    expect(detachedReviewSource).toContain("persistViewSettings={false}");
+    expect(fileCompareSource).toContain("detachedFolderReviewModelPath");
+    expect(fileCompareSource).toContain("if (shouldPersistViewSettings)");
   });
 });
 

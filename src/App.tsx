@@ -1,4 +1,5 @@
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccessibleModal } from "./components/AccessibleModal";
 import { FolderCompareView } from "./components/FolderCompareView";
 import {
   GitCompareView,
@@ -8,6 +9,8 @@ import {
 } from "./components/GitCompareView";
 import { StartPage } from "./components/StartPage";
 import {
+  ackFolderScan,
+  cancelFolderReviewTextRead,
   cancelFolderScan as cancelFolderScanJob,
   cancelGitJob,
   chooseDirectory,
@@ -25,22 +28,31 @@ import {
   listGitRefs,
   listGitTree,
   mergeTexts,
+  nativeDialogDepthSnapshot,
+  openDetachedFolderReview,
   openGitConflict,
   openGitRevisionCompare,
   openGitIndexCompare,
   openGitMergePreview,
+  readFolderReviewTextPair,
   readTextFile,
   readGitStatus,
+  invalidateDetachedFolderReviewSource,
+  runtimeIntegrationProfile,
   revealPath,
   restoreTextFileBackup,
   resolveGitRevision,
   saveGitConflictResult,
-  scanDirectories,
+  startFolderScan as startFolderScanJob,
+  setEditorNavigationBackEnabled,
+  setSettingsCommandEnabled,
   statTextFileVersion,
   statOptionalTextFileVersion,
   startupArgs,
+  subscribeNativeDialogDepth,
   writeTextFileAtomic,
 } from "./core/bridge";
+import { detachedFolderReviewOpenRequest } from "./core/detachedFolderReview";
 import {
   adaptGitCompareSession,
   adaptGitConflictSession,
@@ -100,16 +112,54 @@ import {
   compareReportDefaultPath,
   saveGitSnapshotPatchAs,
 } from "./core/diffReport";
-import type { CompareDropSide } from "./core/dropPaths";
+import {
+  compareDropRejectionMessage,
+  paneDropRejectionMessage,
+  type CompareDropSide,
+} from "./core/dropPaths";
+import { CompareDropReplacementCoordinator } from "./core/compareDropReplacement";
+import {
+  listenForNativeFileDrops,
+  mountNativeFileDropListener,
+  routeNativeFileDrop,
+  type CompareDropTargetRect,
+} from "./core/nativeFileDrop";
 import {
   APP_COMMAND_EVENT,
-  commandIdFromEvent,
+  commandDetailFromEvent,
   isShellOpenCommandAllowed,
   matchesCommandShortcut,
+  settingsCommandPlan,
+  type AppCommandSource,
   type AppCommandId,
+  type RuntimePlatform,
 } from "./core/commands";
-import { listenForNativeMenuCommands } from "./core/nativeMenu";
+import { stopModalCommandEvent } from "./core/modalFocus";
+import {
+  closeCurrentNativeWindow,
+  listenForNativeMenuCommands,
+  listenForNativeWindowCloseRequests,
+  preventNativeWindowCloseWhenGuarded,
+} from "./core/nativeMenu";
 import { modeAfterCompareBack, type CompareBackTarget } from "./core/navigation";
+import { NavigationBackInputRouter } from "./core/navigationInput";
+import { EditorNavigationCoordinator } from "./core/editorNavigationCoordinator";
+import {
+  EditorNavigationRestoreCoordinator,
+  type NavigationRestoreMountedResult,
+  type NavigationRestoreOpenResult,
+  type NavigationRestoreResolution,
+} from "./core/editorNavigationRestore";
+import {
+  navigationTargetsEqual,
+  type NavigationLocation,
+  type NavigationTarget,
+} from "./core/editorNavigationHistory";
+import {
+  directCompareNavigationTarget,
+  directMergeNavigationTarget,
+} from "./core/appEditorNavigation";
+import type { EditorNavigationBinding } from "./core/monacoNavigation";
 import {
   type CompareSide,
   compareSavePreconditionForPath,
@@ -126,6 +176,7 @@ import {
 } from "./core/fileVersion";
 import {
   gitConflictSaveRequest,
+  mergeOutputBaselineForRestore,
   mergeSavePreconditionForPath,
   mergeResultOriginalLineEnding,
   mergeSaveStateAfterWrite,
@@ -152,6 +203,16 @@ import {
   isVirtualFileDocument,
   virtualMissingFileDocument,
 } from "./core/virtualDocument";
+import {
+  folderReviewNavigationTarget,
+  folderReviewReadFailureIsStale,
+  resolveFolderReviewNavigationTarget,
+  type FolderReviewScope,
+} from "./core/folderView";
+import {
+  createFolderScanAccumulator,
+  type FolderScanAccumulatorSnapshot,
+} from "./core/folderScanState";
 import {
   loadAppearanceSettings,
   loadActiveSession,
@@ -197,6 +258,7 @@ import type {
   AppMode,
   CompareSession,
   FolderEntry,
+  FolderEntryUpsert,
   FolderScanOptions,
   FolderScanProgress,
   FolderScanResult,
@@ -237,6 +299,7 @@ type BackupDialogState =
 
 export default function App() {
   const [mode, setMode] = useState<AppMode>("home");
+  const modeRef = useRef<AppMode>(mode);
   const [compareSession, setCompareSession] = useState<CompareSession | null>(null);
   const [compareBackTarget, setCompareBackTarget] = useState<CompareBackTarget>("home");
   const [savedCompareText, setSavedCompareText] = useState<Record<CompareSide, string | null>>({
@@ -246,9 +309,23 @@ export default function App() {
   const [compareOutputVersion, setCompareOutputVersion] =
     useState<Record<CompareSide, WritePrecondition | null>>({ left: null, right: null });
   const [compareModelRevision, setCompareModelRevision] = useState(0);
+  const compareSessionRef = useRef<CompareSession | null>(null);
+  const compareSessionRevision = useRef(0);
+  const compareDropReplacementCoordinatorRef =
+    useRef<CompareDropReplacementCoordinator | null>(null);
+  if (!compareDropReplacementCoordinatorRef.current) {
+    compareDropReplacementCoordinatorRef.current = new CompareDropReplacementCoordinator();
+  }
+  const compareDropReplacementCoordinator = compareDropReplacementCoordinatorRef.current;
   const [folderResult, setFolderResult] = useState<FolderScanResult | null>(null);
+  const [progressiveFolderRows, setProgressiveFolderRows] =
+    useState<FolderEntryUpsert[] | null>(null);
+  const [folderReviewScope, setFolderReviewScope] = useState<FolderReviewScope | null>(null);
+  const [activeEditorNavigationTarget, setActiveEditorNavigationTarget] =
+    useState<NavigationTarget | null>(null);
   const [folderOptions, setFolderOptions] = useState(() => loadFolderScanOptions());
   const [mergeSession, setMergeSession] = useState<MergeSession | null>(null);
+  const [mergeModelRevision, setMergeModelRevision] = useState(0);
   const [gitRepositoryState, setGitRepositoryState] =
     useState<GitRepositoryScreenState | null>(null);
   const [gitRevisionFields, setGitRevisionFields] =
@@ -303,6 +380,7 @@ export default function App() {
     useState<GitConflictOpenState>({ kind: "idle" });
   const [savedMergeResult, setSavedMergeResult] = useState<string | null>(null);
   const [mergeOutputVersion, setMergeOutputVersion] = useState<WritePrecondition | null>(null);
+  const [mergeOutputExpectedAbsent, setMergeOutputExpectedAbsent] = useState(false);
   const [mergeRecoveryDraft, setMergeRecoveryDraft] = useState<MergeRecoveryDraft | null>(null);
   const [mergeRecoveryEnabled, setMergeRecoveryEnabled] = useState(
     () => loadMergeSettings().recoveryDraftsEnabled,
@@ -329,8 +407,23 @@ export default function App() {
   const pendingLeaveAction = useRef<(() => void) | null>(null);
   const pendingSaveAction = useRef<(() => void) | null>(null);
   const allowWindowClose = useRef(false);
+  const nativeWindowCloseRequestHandler = useRef<
+    (event: Parameters<typeof preventNativeWindowCloseWhenGuarded>[0]) => void
+  >(() => {});
   const activeFolderScanId = useRef(0);
-  const releasedFolderScanIds = useRef(new Set<number>());
+  const activeProgressiveFolderScan = useRef<{
+    generation: number;
+    jobId: number | null;
+    accumulator: ReturnType<typeof createFolderScanAccumulator> | null;
+    publishFrame: number | null;
+  } | null>(null);
+  const nextFolderReviewToken = useRef(0);
+  const nextFolderReviewTextReadJobId = useRef(0);
+  const activeFolderReviewTextRead =
+    useRef<{ requestId: number; jobId: number } | null>(null);
+  const folderResultRef = useRef<FolderScanResult | null>(null);
+  const folderReviewScopeRef = useRef<FolderReviewScope | null>(null);
+  const activeEditorNavigationTargetRef = useRef<NavigationTarget | null>(null);
   const activeGitRepositoryRequestId = useRef(0);
   const releasedGitRepositoryRequestIds = useRef(new Set<number>());
   const gitRepositoryPickerActive = useRef(false);
@@ -360,13 +453,58 @@ export default function App() {
   const activeGitSnapshotRequestId = useRef(0);
   const activeGitSnapshotJob = useRef<{ repositorySessionId: string; jobId: number } | null>(null);
   const attemptedActiveSessionRestore = useRef(false);
+  const lastNativeNavigationEnabled = useRef<boolean | null>(null);
+  const lastNativeSettingsEnabled = useRef<boolean | null>(null);
   const [showUnsavedDialog, setShowUnsavedDialog] = useState(false);
   const [showUnresolvedSaveDialog, setShowUnresolvedSaveDialog] = useState(false);
   const [activeSessionStorageReady, setActiveSessionStorageReady] = useState(false);
+  const [runtimePlatform, setRuntimePlatform] = useState<RuntimePlatform | null>(null);
+  const [settingsFocusRequest, setSettingsFocusRequest] = useState(0);
+  const [nativeDialogDepth, setNativeDialogDepth] = useState(nativeDialogDepthSnapshot);
+  const [editorNavigationStatus, setEditorNavigationStatus] = useState<string | null>(null);
+  const [, refreshEditorNavigation] = useState(0);
+  const editorNavigationCoordinatorRef = useRef<EditorNavigationCoordinator | null>(null);
+  if (!editorNavigationCoordinatorRef.current) {
+    editorNavigationCoordinatorRef.current = new EditorNavigationCoordinator();
+  }
+  const editorNavigationCoordinator = editorNavigationCoordinatorRef.current;
+  const editorNavigationRestoreHandlers = useRef<{
+    resolve: (location: NavigationLocation) => NavigationRestoreResolution;
+    restoreMounted: (location: NavigationLocation) => NavigationRestoreMountedResult;
+    open: (location: NavigationLocation, requestId: number) => Promise<NavigationRestoreOpenResult>;
+    cancelOpen: (requestId: number) => void;
+    progress: (active: boolean) => void;
+  }>({
+    resolve: () => "stale",
+    restoreMounted: () => "stale",
+    open: async () => "failed",
+    cancelOpen: () => {},
+    progress: () => {},
+  });
+  const editorNavigationRestoreCoordinatorRef =
+    useRef<EditorNavigationRestoreCoordinator | null>(null);
+  if (!editorNavigationRestoreCoordinatorRef.current) {
+    editorNavigationRestoreCoordinatorRef.current = new EditorNavigationRestoreCoordinator({
+      history: editorNavigationCoordinator.history,
+      resolve: (location) => editorNavigationRestoreHandlers.current.resolve(location),
+      restoreMounted: (location) =>
+        editorNavigationRestoreHandlers.current.restoreMounted(location),
+      open: (location, requestId) =>
+        editorNavigationRestoreHandlers.current.open(location, requestId),
+      cancelOpen: (requestId) => editorNavigationRestoreHandlers.current.cancelOpen(requestId),
+      onProgress: (active) => editorNavigationRestoreHandlers.current.progress(active),
+    });
+  }
+  const editorNavigationRestoreCoordinator = editorNavigationRestoreCoordinatorRef.current;
 
   const busy = busyCount > 0;
   const appText = APP_TEXT[languageMode];
+  modeRef.current = mode;
+  compareSessionRef.current = compareSession;
   gitRepositoryStateRef.current = gitRepositoryState;
+  folderResultRef.current = folderResult;
+  folderReviewScopeRef.current = folderReviewScope;
+  activeEditorNavigationTargetRef.current = activeEditorNavigationTarget;
 
   const beginBusy = useCallback(() => {
     setBusyCount((current) => current + 1);
@@ -403,8 +541,14 @@ export default function App() {
     });
   }, []);
 
-  const setCleanCompareSession = useCallback((session: CompareSession) => {
+  const setCleanCompareSession = useCallback((
+    session: CompareSession,
+    navigationTarget: NavigationTarget | null = null,
+  ) => {
+    compareSessionRevision.current += 1;
+    compareSessionRef.current = session;
     setCompareSession(session);
+    setActiveEditorNavigationTarget(navigationTarget);
     setSavedCompareText({ left: session.left.text, right: session.right.text });
     setCompareOutputVersion({
       left: isVirtualFileDocument(session.left) ? null : writePreconditionFromDocument(session.left),
@@ -413,13 +557,39 @@ export default function App() {
     setCompareModelRevision((current) => current + 1);
   }, []);
 
+  const invalidatePendingCompareDrops = useCallback(() => {
+    compareSessionRevision.current += 1;
+  }, []);
+
+  const replaceFolderReviewScope = useCallback((next: FolderReviewScope) => {
+    const previous = folderReviewScopeRef.current;
+    if (
+      previous
+      && (
+        previous.reviewToken !== next.reviewToken
+        || previous.scanGeneration !== next.scanGeneration
+      )
+      && isTauriRuntime()
+    ) {
+      void invalidateDetachedFolderReviewSource({
+        sourceReviewToken: previous.reviewToken,
+        scanGeneration: previous.scanGeneration,
+      }).catch(() => {});
+    }
+    folderReviewScopeRef.current = next;
+    setFolderReviewScope(next);
+  }, []);
+
   const setCleanMergeSession = useCallback((
     session: MergeSession,
     outputVersion: WritePrecondition | null = null,
+    outputExpectedAbsent = false,
   ) => {
     setMergeSession(session);
+    setMergeModelRevision((current) => current + 1);
     setSavedMergeResult(session.result);
     setMergeOutputVersion(outputVersion);
+    setMergeOutputExpectedAbsent(outputExpectedAbsent);
     setMergeRecoveryDraft(
       session.origin === "files" && mergeRecoveryEnabled
         ? loadMergeRecoveryDraft(session)
@@ -428,15 +598,16 @@ export default function App() {
   }, [mergeRecoveryEnabled]);
 
   const updateCompareSideText = useCallback((side: CompareSide, text: string) => {
-    setCompareSession((current) => {
-      if (!current || current[side].text === text) return current;
-      if (!compareSessionCapabilities(current).edit) return current;
-      if (isVirtualFileDocument(current[side])) return current;
-      return {
-        ...current,
-        [side]: fileDocumentWithText(current[side], text),
-      };
-    });
+    const current = compareSessionRef.current;
+    if (!current || current[side].text === text) return;
+    if (!compareSessionCapabilities(current).edit) return;
+    if (isVirtualFileDocument(current[side])) return;
+    const next = {
+      ...current,
+      [side]: fileDocumentWithText(current[side], text),
+    };
+    compareSessionRef.current = next;
+    setCompareSession(next);
   }, []);
 
   const updateMergeResult = useCallback((result: string) => {
@@ -446,6 +617,191 @@ export default function App() {
         : current);
     setMergeRecoveryDraft(null);
   }, []);
+
+  const compareNavigationActive = mode === "compare" && compareSession != null;
+  const compareEditorNavigation = useMemo<EditorNavigationBinding | undefined>(() => {
+    if (!compareNavigationActive) return undefined;
+    const sessionToken = `compare:${compareModelRevision}`;
+    const targetFor = (handle: Parameters<EditorNavigationBinding["register"]>[0]) =>
+      activeEditorNavigationTarget
+        ?? directCompareNavigationTarget(sessionToken, compareModelRevision, handle);
+    return {
+      isReplaying: () => editorNavigationCoordinator.isReplaying(),
+      register(handle) {
+        const target = targetFor(handle);
+        const unregister = editorNavigationCoordinator.register(handle, target);
+        editorNavigationRestoreCoordinator.acknowledgeMounted(
+          target,
+          handle.pane,
+          (location) => editorNavigationCoordinator.restoreLocation(location),
+        );
+        refreshEditorNavigation((current) => current + 1);
+        return () => {
+          unregister();
+          refreshEditorNavigation((current) => current + 1);
+        };
+      },
+      observe(handle, snapshot, kind) {
+        editorNavigationCoordinator.observe(handle, targetFor(handle), snapshot, kind);
+      },
+      commitCurrent(reason) {
+        editorNavigationCoordinator.commitCurrent(reason);
+        refreshEditorNavigation((current) => current + 1);
+      },
+    };
+  }, [
+    activeEditorNavigationTarget,
+    compareModelRevision,
+    compareNavigationActive,
+    editorNavigationCoordinator,
+    editorNavigationRestoreCoordinator,
+  ]);
+
+  const mergeNavigationActive = mode === "merge" && mergeSession != null &&
+    mergeSession.origin !== "gitPreview";
+  const mergeEditorNavigation = useMemo<EditorNavigationBinding | undefined>(() => {
+    if (!mergeNavigationActive) return undefined;
+    const sessionToken = `merge:${mergeModelRevision}`;
+    const targetFor = (handle: Parameters<EditorNavigationBinding["register"]>[0]) =>
+      directMergeNavigationTarget(sessionToken, mergeModelRevision, handle);
+    return {
+      isReplaying: () => editorNavigationCoordinator.isReplaying(),
+      register(handle) {
+        const unregister = editorNavigationCoordinator.register(handle, targetFor(handle));
+        refreshEditorNavigation((current) => current + 1);
+        return () => {
+          unregister();
+          refreshEditorNavigation((current) => current + 1);
+        };
+      },
+      observe(handle, snapshot, kind) {
+        editorNavigationCoordinator.observe(handle, targetFor(handle), snapshot, kind);
+      },
+      commitCurrent(reason) {
+        editorNavigationCoordinator.commitCurrent(reason);
+        refreshEditorNavigation((current) => current + 1);
+      },
+    };
+  }, [editorNavigationCoordinator, mergeModelRevision, mergeNavigationActive]);
+
+  const navigationContext = useMemo(() => ({
+    blockingModal: showUnsavedDialog || showUnresolvedSaveDialog || backupDialog != null,
+    nativeDialogOpen: nativeDialogDepth > 0,
+  }), [backupDialog, nativeDialogDepth, showUnresolvedSaveDialog, showUnsavedDialog]);
+
+  const navigationCompareDirty = mode === "compare"
+    && compareSession != null
+    && (hasUnsavedCompareChanges(compareSession.left.text, savedCompareText.left)
+      || hasUnsavedCompareChanges(compareSession.right.text, savedCompareText.right));
+  editorNavigationRestoreHandlers.current = {
+    resolve(location) {
+      if (editorNavigationCoordinator.hasMountedLocation(location)) return "mounted";
+      const activeTarget = activeEditorNavigationTargetRef.current;
+      if (
+        navigationCompareDirty
+        && (!activeTarget || !navigationTargetsEqual(activeTarget, location.target))
+      ) {
+        return "blockedDirty";
+      }
+      const result = folderResultRef.current;
+      const scope = folderReviewScopeRef.current;
+      if (!result || !scope || location.target.scope.kind !== "folderReview") return "stale";
+      return resolveFolderReviewNavigationTarget(location.target, scope, result).kind === "valid"
+        ? "reopen"
+        : "stale";
+    },
+    restoreMounted: (location) => editorNavigationCoordinator.restoreLocation(location),
+    async open(location, requestId) {
+      const result = folderResultRef.current;
+      const scope = folderReviewScopeRef.current;
+      if (!result || !scope) return "stale";
+      const resolution = resolveFolderReviewNavigationTarget(location.target, scope, result);
+      if (resolution.kind !== "valid") return "stale";
+
+      if (isDemoFolderRoots(result.leftRoot, result.rightRoot)) {
+        const session = demoFolderEntryCompareSession(resolution.entry);
+        if (!session) return "stale";
+        setCleanCompareSession(session, location.target);
+        setCompareBackTarget("folders");
+        setMode("compare");
+        return "opened";
+      }
+
+      const jobId = nextFolderReviewTextReadJobId.current + 1;
+      nextFolderReviewTextReadJobId.current = jobId;
+      activeFolderReviewTextRead.current = { requestId, jobId };
+      try {
+        const pair = await readFolderReviewTextPair(resolution.request, jobId);
+        if (
+          activeFolderReviewTextRead.current?.requestId !== requestId
+          || folderResultRef.current !== result
+          || folderReviewScopeRef.current !== scope
+        ) return "cancelled";
+        const left = pair.left ?? virtualMissingFileDocument(
+          folderExpectedPath(result.leftRoot, resolution.entry.relativePath),
+        );
+        const right = pair.right ?? virtualMissingFileDocument(
+          folderExpectedPath(result.rightRoot, resolution.entry.relativePath),
+        );
+        setCleanCompareSession({ origin: "files", left, right }, location.target);
+        setCompareBackTarget("folders");
+        setMode("compare");
+        return "opened";
+      } catch (caught) {
+        if (isErrorCode(caught, "CANCELLED")) return "cancelled";
+        if (folderReviewReadFailureIsStale(caught)) return "stale";
+        setError(errorMessage(caught, languageMode));
+        return "failed";
+      } finally {
+        if (activeFolderReviewTextRead.current?.requestId === requestId) {
+          activeFolderReviewTextRead.current = null;
+        }
+      }
+    },
+    cancelOpen(requestId) {
+      const active = activeFolderReviewTextRead.current;
+      if (!active || active.requestId !== requestId) return;
+      activeFolderReviewTextRead.current = null;
+      void cancelFolderReviewTextRead(active.jobId).catch(() => {});
+    },
+    progress(active) {
+      setEditorNavigationStatus(active ? appText.navigationBackRestoring : null);
+    },
+  };
+
+  const handleEditorNavigationBack = useCallback((
+    source: AppCommandSource,
+    _monotonicEventTime?: number,
+  ) => {
+    return editorNavigationRestoreCoordinator.navigateBack(source, navigationContext)
+      .then((outcome) => {
+        refreshEditorNavigation((current) => current + 1);
+        setEditorNavigationStatus({
+          restored: appText.navigationBackRestored,
+          empty: appText.navigationBackEmpty,
+          allStale: appText.navigationBackAllStale,
+          blockedModal: appText.navigationBackBlocked,
+          blockedDirty: appText.navigationBackDirty,
+          inFlight: appText.navigationBackInFlight,
+          cancelled: appText.navigationBackCancelled,
+          failed: appText.navigationBackFailed,
+        }[outcome.kind]);
+        return outcome;
+      });
+  }, [appText, editorNavigationRestoreCoordinator, navigationContext]);
+
+  const handleEditorNavigationBackRef = useRef(handleEditorNavigationBack);
+  handleEditorNavigationBackRef.current = handleEditorNavigationBack;
+  const navigationInputRouter = useMemo(() => runtimePlatform
+    ? new NavigationBackInputRouter(
+        runtimePlatform,
+        (source, monotonicEventTime) =>
+          handleEditorNavigationBackRef.current(source, monotonicEventTime),
+      )
+    : null, [runtimePlatform]);
+
+  const editorNavigationMenuEnabled =
+    editorNavigationRestoreCoordinator.availability(navigationContext);
 
   const clearRecentSessions = useCallback(() => {
     saveRecentSessions([]);
@@ -492,6 +848,14 @@ export default function App() {
     : mergeHasUnsavedChanges
       ? appText.unsavedMergeMessage
       : null;
+  const externalGitToolActive =
+    (mode === "compare" && compareSession?.origin === "difftool")
+    || (mode === "merge" && mergeSession?.origin === "mergetool");
+  const settingsMenuEnabled = settingsCommandPlan({
+    mode,
+    compareOrigin: compareSession?.origin ?? null,
+    mergeOrigin: mergeSession?.origin ?? null,
+  }) != null;
   const activeUnsavedTitle = compareHasUnsavedChanges
     ? appText.unsavedCompareTitle
     : appText.unsavedMergeTitle;
@@ -574,50 +938,186 @@ export default function App() {
     options: FolderScanOptions,
     onError?: (message: string) => void,
   ) => {
-    const scanId = activeFolderScanId.current + 1;
-    activeFolderScanId.current = scanId;
-    beginBusy();
+    editorNavigationRestoreCoordinator.cancel();
+    const activeRead = activeFolderReviewTextRead.current;
+    activeFolderReviewTextRead.current = null;
+    if (activeRead) void cancelFolderReviewTextRead(activeRead.jobId).catch(() => {});
+    const previous = activeProgressiveFolderScan.current;
+    previous?.accumulator?.invalidate();
+    if (previous?.publishFrame != null) cancelAnimationFrame(previous.publishFrame);
+    if (previous?.jobId != null) {
+      void cancelFolderScanJob(previous.jobId, previous.generation).catch(() => {});
+    }
+    const scanGeneration = activeFolderScanId.current + 1;
+    activeFolderScanId.current = scanGeneration;
+    const activeScan = {
+      generation: scanGeneration,
+      jobId: null as number | null,
+      accumulator: null as ReturnType<typeof createFolderScanAccumulator> | null,
+      publishFrame: null as number | null,
+    };
+    activeProgressiveFolderScan.current = activeScan;
     setError(null);
     setMessage(null);
     setRecentSessionFailure(null);
+    setFolderOptions(options);
+    saveFolderScanOptions(options);
+    setFolderResult({
+      leftRoot,
+      rightRoot,
+      entries: [],
+      stats: {
+        same: 0,
+        different: 0,
+        leftOnly: 0,
+        rightOnly: 0,
+        typeMismatch: 0,
+        errors: 0,
+      },
+      durationMs: 0,
+    });
+    setProgressiveFolderRows([]);
+    const token = nextFolderReviewToken.current + 1;
+    nextFolderReviewToken.current = token;
+    replaceFolderReviewScope({
+      reviewToken: `folder-review:${token}`,
+      scanGeneration,
+    });
+    setActiveEditorNavigationTarget(null);
+    setMode("folders");
     setFolderScanProgress({
-      jobId: scanId,
+      jobId: null,
+      scanGeneration,
       active: true,
       leftRoot,
       rightRoot,
       message: appText.folderScanActive,
+      progress: null,
+      terminal: null,
     });
+
+    const publishSnapshot = (snapshot: FolderScanAccumulatorSnapshot) => {
+      if (activeProgressiveFolderScan.current !== activeScan) return;
+      const terminalDuration = snapshot.terminal?.durationMs ?? 0;
+      setProgressiveFolderRows(snapshot.rows);
+      setFolderResult({
+        leftRoot,
+        rightRoot,
+        entries: snapshot.entries,
+        stats: snapshot.finalCounts,
+        durationMs: terminalDuration,
+      });
+      setFolderScanProgress((current) => {
+        if (!current || current.scanGeneration !== scanGeneration) return current;
+        return {
+          ...current,
+          jobId: activeScan.jobId,
+          active: snapshot.terminal == null && snapshot.protocolError == null,
+          progress: snapshot.progress,
+          terminal: snapshot.terminal,
+          message: snapshot.protocolError ?? current.message,
+        };
+      });
+      if (snapshot.protocolError) {
+        setError(snapshot.protocolError);
+        if (activeScan.jobId != null) {
+          void cancelFolderScanJob(activeScan.jobId, scanGeneration).catch(() => {});
+        }
+      }
+    };
+
+    const schedulePublish = () => {
+      if (activeProgressiveFolderScan.current !== activeScan || activeScan.publishFrame != null) {
+        return;
+      }
+      activeScan.publishFrame = requestAnimationFrame(() => {
+        activeScan.publishFrame = null;
+        const snapshot = activeScan.accumulator?.snapshot();
+        if (snapshot) publishSnapshot(snapshot);
+      });
+    };
 
     void (async () => {
       try {
-        const result = await scanDirectories(leftRoot, rightRoot, options, scanId);
-        if (activeFolderScanId.current !== scanId) return;
-        setFolderOptions(options);
-        saveFolderScanOptions(options);
-        setFolderResult(result);
+        const started = await startFolderScanJob(
+          { scanGeneration, leftRoot, rightRoot, options },
+          (scanMessage) => {
+            if (activeProgressiveFolderScan.current !== activeScan) return;
+            const accumulator = activeScan.accumulator;
+            if (!accumulator) return;
+            const applied = accumulator.apply(scanMessage);
+            if (applied.ackSequence != null) {
+              void ackFolderScan({
+                jobId: accumulator.identity.jobId,
+                scanGeneration,
+                appliedThroughSequence: applied.ackSequence,
+              }).catch((caught) => {
+                if (isErrorCode(caught, "CANCELLED")) return;
+                if (
+                  activeProgressiveFolderScan.current === activeScan
+                  && accumulator.snapshot().terminal == null
+                ) {
+                  setError(errorMessage(caught, languageMode));
+                }
+              });
+            }
+            schedulePublish();
+          },
+          (startedJob) => {
+            if (activeProgressiveFolderScan.current !== activeScan) {
+              void cancelFolderScanJob(
+                startedJob.jobId,
+                startedJob.scanGeneration,
+              ).catch(() => {});
+              return;
+            }
+            activeScan.jobId = startedJob.jobId;
+            activeScan.accumulator = createFolderScanAccumulator({
+              jobId: startedJob.jobId,
+              scanGeneration: startedJob.scanGeneration,
+              optionsFingerprint: startedJob.optionsFingerprint,
+            });
+            setFolderScanProgress((current) => current?.scanGeneration === scanGeneration
+              ? { ...current, jobId: startedJob.jobId }
+              : current);
+          },
+        );
+        if (
+          activeProgressiveFolderScan.current !== activeScan
+          || activeFolderScanId.current !== scanGeneration
+        ) {
+          void cancelFolderScanJob(started.jobId, started.scanGeneration).catch(() => {});
+          return;
+        }
         rememberRecentSession({ kind: "folders", leftRoot, rightRoot, options });
-        setMode("folders");
-        setFolderScanProgress(null);
       } catch (caught) {
-        if (activeFolderScanId.current !== scanId) return;
+        if (activeProgressiveFolderScan.current !== activeScan) return;
         const message = errorMessage(caught, languageMode);
         setError(message);
         onError?.(message);
-        setFolderScanProgress(null);
-      } finally {
-        if (releasedFolderScanIds.current.delete(scanId)) return;
-        endBusy();
+        setFolderScanProgress((current) => current?.scanGeneration === scanGeneration
+          ? { ...current, active: false, message }
+          : current);
       }
     })();
-  }, [appText, beginBusy, endBusy, languageMode, rememberRecentSession]);
+  }, [
+    appText,
+    editorNavigationRestoreCoordinator,
+    languageMode,
+    rememberRecentSession,
+    replaceFolderReviewScope,
+  ]);
 
   const cancelFolderScan = useCallback(() => {
     if (!folderScanProgress?.active) return;
-    const scanId = activeFolderScanId.current;
-    activeFolderScanId.current = scanId + 1;
-    releasedFolderScanIds.current.add(scanId);
-    void cancelFolderScanJob(scanId).catch(() => {});
-    endBusy();
+    const activeScan = activeProgressiveFolderScan.current;
+    activeScan?.accumulator?.invalidate();
+    activeFolderScanId.current += 1;
+    activeProgressiveFolderScan.current = null;
+    if (activeScan?.publishFrame != null) cancelAnimationFrame(activeScan.publishFrame);
+    if (activeScan?.jobId != null) {
+      void cancelFolderScanJob(activeScan.jobId, activeScan.generation).catch(() => {});
+    }
     setError(null);
     setMessage(appText.folderScanCancelled);
     setFolderScanProgress({
@@ -625,7 +1125,7 @@ export default function App() {
       active: false,
       message: appText.folderScanCancelledLate,
     });
-  }, [appText, endBusy, folderScanProgress]);
+  }, [appText, folderScanProgress]);
 
   const restoreStoredSession = useCallback((
     session: ActiveSession,
@@ -655,6 +1155,7 @@ export default function App() {
       saveFolderScanOptions(session.options);
       if (isDemoFolderRoots(session.leftRoot, session.rightRoot)) {
         setFolderResult(demoFolderScanResult());
+        setProgressiveFolderRows(null);
         if (options.remember) rememberRecentSession(session);
         setMode("folders");
         return;
@@ -666,30 +1167,45 @@ export default function App() {
       return;
     }
 
+    const outputBaselinePromise = session.outputPath && isTauriRuntime()
+      ? statOptionalTextFileVersion(session.outputPath).then((version) =>
+          mergeOutputBaselineForRestore(session.outputPath, version))
+      : Promise.resolve(mergeOutputBaselineForRestore(null, null));
+
     if (isDemoMergePaths(session.basePath, session.oursPath, session.theirsPath)) {
-      setCleanMergeSession({ ...demoMergeSession(), outputPath: session.outputPath });
+      const outputBaseline = await outputBaselinePromise;
+      setCleanMergeSession(
+        { ...demoMergeSession(), outputPath: session.outputPath },
+        outputBaseline.precondition,
+        outputBaseline.expectedAbsent,
+      );
     } else {
       if (!isTauriRuntime()) {
         throw new Error(appText.demoRestoreOnly);
       }
-      const [base, ours, theirs] = await Promise.all([
+      const [base, ours, theirs, outputBaseline] = await Promise.all([
         readTextFile(session.basePath),
         readTextFile(session.oursPath),
         readTextFile(session.theirsPath),
+        outputBaselinePromise,
       ]);
       if (base.isBinary || ours.isBinary || theirs.isBinary) {
         throw new Error(appText.mergeTextOnly);
       }
       const merged = await mergeTexts(base.text, ours.text, theirs.text);
-      setCleanMergeSession({
-        origin: "files",
-        base,
-        ours,
-        theirs,
-        output: null,
-        result: merged.output,
-        outputPath: session.outputPath,
-      });
+      setCleanMergeSession(
+        {
+          origin: "files",
+          base,
+          ours,
+          theirs,
+          output: null,
+          result: merged.output,
+          outputPath: session.outputPath,
+        },
+        outputBaseline.precondition,
+        outputBaseline.expectedAbsent,
+      );
     }
     if (options.remember) rememberRecentSession(session);
     setMode("merge");
@@ -765,6 +1281,103 @@ export default function App() {
   useEffect(() => {
     saveAppearanceSettings({ language: languageMode, theme: themeMode });
   }, [languageMode, themeMode]);
+
+  useEffect(() => subscribeNativeDialogDepth(setNativeDialogDepth), []);
+
+  useEffect(() => {
+    if (mode === "folders" || (mode === "compare" && compareBackTarget === "folders")) return;
+    const activeScan = activeProgressiveFolderScan.current;
+    if (!activeScan) return;
+    activeScan.accumulator?.invalidate();
+    activeFolderScanId.current += 1;
+    activeProgressiveFolderScan.current = null;
+    if (activeScan.publishFrame != null) cancelAnimationFrame(activeScan.publishFrame);
+    if (activeScan.jobId != null) {
+      void cancelFolderScanJob(activeScan.jobId, activeScan.generation).catch(() => {});
+    }
+  }, [compareBackTarget, mode]);
+
+  useEffect(() => () => {
+    const activeScan = activeProgressiveFolderScan.current;
+    activeScan?.accumulator?.invalidate();
+    activeProgressiveFolderScan.current = null;
+    if (activeScan?.publishFrame != null) cancelAnimationFrame(activeScan.publishFrame);
+    if (activeScan?.jobId != null) {
+      void cancelFolderScanJob(activeScan.jobId, activeScan.generation).catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!isTauriRuntime()) return;
+    let cancelled = false;
+    void runtimeIntegrationProfile()
+      .then((profile) => {
+        if (!cancelled) setRuntimePlatform(profile.platform);
+      })
+      .catch(() => {
+        if (!cancelled) setEditorNavigationStatus(appText.navigationPlatformUnavailable);
+      });
+    return () => { cancelled = true; };
+  }, [appText.navigationPlatformUnavailable]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || lastNativeNavigationEnabled.current === editorNavigationMenuEnabled) {
+      return;
+    }
+    lastNativeNavigationEnabled.current = editorNavigationMenuEnabled;
+    let cancelled = false;
+    void setEditorNavigationBackEnabled(editorNavigationMenuEnabled).catch(() => {
+      if (cancelled) return;
+      setEditorNavigationStatus(appText.navigationMenuUnavailable);
+      if (editorNavigationMenuEnabled) {
+        lastNativeNavigationEnabled.current = false;
+        void setEditorNavigationBackEnabled(false).catch(() => {});
+      }
+    });
+    return () => { cancelled = true; };
+  }, [appText.navigationMenuUnavailable, editorNavigationMenuEnabled]);
+
+  useEffect(() => {
+    if (!isTauriRuntime() || lastNativeSettingsEnabled.current === settingsMenuEnabled) return;
+    lastNativeSettingsEnabled.current = settingsMenuEnabled;
+    void setSettingsCommandEnabled(settingsMenuEnabled).catch(() => {
+      if (!settingsMenuEnabled) return;
+      lastNativeSettingsEnabled.current = false;
+      void setSettingsCommandEnabled(false).catch(() => {});
+    });
+  }, [settingsMenuEnabled]);
+
+  useEffect(() => {
+    if (!navigationInputRouter) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (navigationContext.blockingModal) return;
+      navigationInputRouter.keydown(event);
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      if (navigationContext.blockingModal) return;
+      navigationInputRouter.pointerdown(event);
+    };
+    const handleAuxClick = (event: MouseEvent) => {
+      if (navigationContext.blockingModal) return;
+      navigationInputRouter.auxclick(event);
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener("pointerdown", handlePointerDown, true);
+    window.addEventListener("auxclick", handleAuxClick, true);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener("pointerdown", handlePointerDown, true);
+      window.removeEventListener("auxclick", handleAuxClick, true);
+    };
+  }, [navigationContext.blockingModal, navigationInputRouter]);
+
+  useEffect(() => {
+    if (!navigationContext.blockingModal) return;
+    const stopCommand = (event: Event) => stopModalCommandEvent(event);
+    window.addEventListener(APP_COMMAND_EVENT, stopCommand, true);
+    return () => window.removeEventListener(APP_COMMAND_EVENT, stopCommand, true);
+  }, [navigationContext.blockingModal]);
 
   useEffect(() => {
     setCompareFileChangeNotice(null);
@@ -2087,6 +2700,28 @@ export default function App() {
     setShowUnsavedDialog(true);
   }, [activeUnsavedMessage]);
 
+  const closeApprovedNativeWindow = useCallback(() => {
+    if (allowWindowClose.current) return;
+    allowWindowClose.current = true;
+    void closeCurrentNativeWindow().catch((caught) => {
+      allowWindowClose.current = false;
+      setError(errorMessage(caught, languageMode));
+    });
+  }, [languageMode]);
+
+  const exitApprovedApplication = useCallback(() => {
+    if (allowWindowClose.current) return;
+    allowWindowClose.current = true;
+    void exitExternalGitTool().catch((caught) => {
+      allowWindowClose.current = false;
+      setError(errorMessage(caught, languageMode));
+    });
+  }, [languageMode]);
+
+  const requestApplicationExit = useCallback(() => {
+    requestLeaveActiveSession(exitApprovedApplication);
+  }, [exitApprovedApplication, requestLeaveActiveSession]);
+
   const cancelPendingLeave = useCallback(() => {
     pendingLeaveAction.current = null;
     setShowUnsavedDialog(false);
@@ -2196,54 +2831,103 @@ export default function App() {
     resetGitRevisionReview,
   ]);
 
-  const leaveGitRepository = useCallback(() => {
-    requestLeaveActiveSession(() => {
-      const state = gitRepositoryStateRef.current;
-      activeGitRepositoryRequestId.current += 1;
-      const exitPlan = planGitRepositoryExit(state);
-      if (exitPlan.releaseRequestId != null) {
-        if (!releasedGitRepositoryRequestIds.current.has(exitPlan.releaseRequestId)) {
-          releasedGitRepositoryRequestIds.current.add(exitPlan.releaseRequestId);
-          endBusy();
-        }
-      } else if (exitPlan.closeSessionId != null) {
-        void closeGitRepository(exitPlan.closeSessionId).catch(() => {});
+  const completeGitRepositoryLeave = useCallback((afterLeave?: () => void) => {
+    invalidatePendingCompareDrops();
+    const state = gitRepositoryStateRef.current;
+    activeGitRepositoryRequestId.current += 1;
+    const exitPlan = planGitRepositoryExit(state);
+    if (exitPlan.releaseRequestId != null) {
+      if (!releasedGitRepositoryRequestIds.current.has(exitPlan.releaseRequestId)) {
+        releasedGitRepositoryRequestIds.current.add(exitPlan.releaseRequestId);
+        endBusy();
       }
-      resetGitRevisionReview(null);
-      setGitRepositoryState(null);
-      setMode("home");
-      setMessage(null);
-      setError(null);
-    });
-  }, [endBusy, requestLeaveActiveSession, resetGitRevisionReview]);
+    } else if (exitPlan.closeSessionId != null) {
+      void closeGitRepository(exitPlan.closeSessionId).catch(() => {});
+    }
+    resetGitRevisionReview(null);
+    setGitRepositoryState(null);
+    setMode("home");
+    setMessage(null);
+    setError(null);
+    afterLeave?.();
+  }, [endBusy, invalidatePendingCompareDrops, resetGitRevisionReview]);
 
-  const backHome = () => {
-    requestLeaveActiveSession(() => {
-      setMode("home");
-      setCompareBackTarget("home");
-      setMessage(null);
-      setError(null);
+  const leaveGitRepository = useCallback(() => {
+    requestLeaveActiveSession(() => completeGitRepositoryLeave());
+  }, [completeGitRepositoryLeave, requestLeaveActiveSession]);
+
+  const completeBackHome = useCallback((afterLeave?: () => void) => {
+    editorNavigationRestoreCoordinator.cancel();
+    const activeRead = activeFolderReviewTextRead.current;
+    activeFolderReviewTextRead.current = null;
+    if (activeRead) void cancelFolderReviewTextRead(activeRead.jobId).catch(() => {});
+    invalidatePendingCompareDrops();
+    setMode("home");
+    setActiveEditorNavigationTarget(null);
+    setFolderReviewScope(null);
+    setCompareBackTarget("home");
+    setMessage(null);
+    setError(null);
+    afterLeave?.();
+  }, [editorNavigationRestoreCoordinator, invalidatePendingCompareDrops]);
+
+  const backHome = useCallback(() => {
+    requestLeaveActiveSession(() => completeBackHome());
+  }, [completeBackHome, requestLeaveActiveSession]);
+
+  const focusHomeSettings = useCallback(() => {
+    setSettingsFocusRequest((current) => current + 1);
+  }, []);
+
+  const handleSettingsCommand = useCallback((): boolean => {
+    const plan = settingsCommandPlan({
+      mode,
+      compareOrigin: compareSession?.origin ?? null,
+      mergeOrigin: mergeSession?.origin ?? null,
     });
-  };
+    if (!plan) return false;
+    if (!plan.requiresLeaveGuard) {
+      focusHomeSettings();
+      return true;
+    }
+    requestLeaveActiveSession(() => {
+      if (keepsGitRepositorySession(
+        mode,
+        compareSession?.origin ?? null,
+        mergeSession?.origin ?? null,
+      )) {
+        completeGitRepositoryLeave(focusHomeSettings);
+      } else {
+        completeBackHome(focusHomeSettings);
+      }
+    });
+    return true;
+  }, [
+    compareSession?.origin,
+    completeBackHome,
+    completeGitRepositoryLeave,
+    focusHomeSettings,
+    mergeSession?.origin,
+    mode,
+    requestLeaveActiveSession,
+  ]);
 
   const closeExternalGitToolWindow = () => {
-    requestLeaveActiveSession(() => {
-      allowWindowClose.current = true;
-      void exitExternalGitTool().catch((caught) => {
-        allowWindowClose.current = false;
-        setError(errorMessage(caught, languageMode));
-      });
-    });
+    requestApplicationExit();
   };
 
   const backFromCompare = () => {
     requestLeaveActiveSession(() => {
+      invalidatePendingCompareDrops();
+      editorNavigationRestoreCoordinator.cancel();
+      editorNavigationCoordinator.commitCurrent("leaveEditorTarget");
       const nextMode = modeAfterCompareBack(compareBackTarget, folderResult != null);
       if (compareBackTarget === "git") {
         setCompareSession(null);
         setSavedCompareText({ left: null, right: null });
         setCompareOutputVersion({ left: null, right: null });
       }
+      if (nextMode !== "folders") setActiveEditorNavigationTarget(null);
       setMode(nextMode);
       setCompareBackTarget("home");
       setMessage(null);
@@ -2257,6 +2941,7 @@ export default function App() {
       setMergeSession(null);
       setSavedMergeResult(null);
       setMergeOutputVersion(null);
+      setMergeOutputExpectedAbsent(false);
       setMode("git");
       setMessage(null);
       setError(null);
@@ -2286,31 +2971,48 @@ export default function App() {
     }));
 
   const replaceDroppedCompareSide = (side: CompareDropSide, path: string) => {
-    if (compareSession && !compareSessionCapabilities(compareSession).replaceInput) return;
+    const activeSession = compareSessionRef.current;
+    if (activeSession && !compareSessionCapabilities(activeSession).replaceInput) return;
     const replaceSide = () => {
+      const currentSession = compareSessionRef.current;
+      if (!currentSession || !compareSessionCapabilities(currentSession).replaceInput) return;
+      const request = compareDropReplacementCoordinator.begin(
+        side,
+        compareSessionRevision.current,
+        currentSession[side],
+      );
       void run(async () => {
-        if (!compareSession) return;
-        const document = await readTextFile(path);
-        if (side === "left") {
-          setCompareSession({ ...compareSession, left: document });
-          setSavedCompareText((current) => ({ ...current, left: document.text }));
+        try {
+          const document = await readTextFile(path);
+          const outcome = compareDropReplacementCoordinator.complete(
+            request,
+            compareSessionRevision.current,
+            modeRef.current,
+            compareSessionRef.current,
+            document,
+          );
+          if (outcome.kind === "stale") {
+            if (outcome.reason !== "superseded") {
+              setMessage(null);
+              setError(appText.dropReplacementStale);
+            }
+            return;
+          }
+
+          compareSessionRef.current = outcome.session;
+          setCompareSession(outcome.session);
+          setSavedCompareText((current) => ({ ...current, [side]: document.text }));
           setCompareOutputVersion((current) => ({
             ...current,
-            left: writePreconditionFromDocument(document),
+            [side]: writePreconditionFromDocument(document),
           }));
           setCompareModelRevision((current) => current + 1);
-          setMessage(appText.leftFileReplacedFromDrop);
-          return;
+          setMessage(side === "left"
+            ? appText.leftFileReplacedFromDrop
+            : appText.rightFileReplacedFromDrop);
+        } finally {
+          compareDropReplacementCoordinator.finish(request);
         }
-
-        setCompareSession({ ...compareSession, right: document });
-        setSavedCompareText((current) => ({ ...current, right: document.text }));
-        setCompareOutputVersion((current) => ({
-          ...current,
-          right: writePreconditionFromDocument(document),
-        }));
-        setCompareModelRevision((current) => current + 1);
-        setMessage(appText.rightFileReplacedFromDrop);
       });
     };
 
@@ -2321,6 +3023,53 @@ export default function App() {
 
     replaceSide();
   };
+
+  useEffect(() => mountNativeFileDropListener(listenForNativeFileDrops, (drop) => {
+    const compareTargets = Array.from(
+      document.querySelectorAll<HTMLElement>("[data-compare-drop-side]"),
+    ).flatMap<CompareDropTargetRect>((element) => {
+      const side = element.dataset.compareDropSide;
+      if (side !== "left" && side !== "right") return [];
+      const bounds = element.getBoundingClientRect();
+      return [{
+        side,
+        left: bounds.left,
+        top: bounds.top,
+        right: bounds.right,
+        bottom: bounds.bottom,
+      }];
+    });
+    const route = routeNativeFileDrop({
+      mode,
+      busy,
+      drop,
+      devicePixelRatio: window.devicePixelRatio,
+      compareTargets,
+    });
+    if (!route) return;
+
+    if (route.kind === "startCompare") {
+      const rejection = compareDropRejectionMessage(route.paths.length, languageMode);
+      if (rejection) {
+        rejectDroppedFiles(rejection);
+        return;
+      }
+      openDroppedCompareFiles([route.paths[0], route.paths[1]]);
+      return;
+    }
+
+    if (!compareSession || !compareSessionCapabilities(compareSession).replaceInput) return;
+    const rejection = paneDropRejectionMessage(
+      route.side,
+      route.paths.length,
+      languageMode,
+    );
+    if (rejection) {
+      rejectDroppedFiles(rejection);
+      return;
+    }
+    replaceDroppedCompareSide(route.side, route.paths[0]);
+  }), [busy, compareHasUnsavedChanges, compareSession, languageMode, mode]);
 
   const openFolders = () => requestLeaveActiveSession(() => run(async () => {
     const leftRoot = await chooseDirectory(appText.chooseLeftFolder);
@@ -2336,12 +3085,27 @@ export default function App() {
     saveFolderScanOptions(options);
     if (isDemoFolderRoots(folderResult.leftRoot, folderResult.rightRoot)) {
       setFolderResult(demoFolderScanResult());
+      setProgressiveFolderRows(null);
+      const token = nextFolderReviewToken.current + 1;
+      nextFolderReviewToken.current = token;
+      replaceFolderReviewScope({
+        reviewToken: `folder-review:${token}`,
+        scanGeneration: activeFolderScanId.current + 1,
+      });
+      setActiveEditorNavigationTarget(null);
       return;
     }
     startFolderScan(folderResult.leftRoot, folderResult.rightRoot, options);
   };
 
-  const openFolderEntry = (entry: FolderEntry) => run(async () => {
+  const openFolderEntry = (requestedEntry: FolderEntry) => run(async () => {
+    const currentResult = folderResultRef.current;
+    const entry = currentResult?.entries.find(
+      (candidate) => candidate.relativePath === requestedEntry.relativePath,
+    );
+    if (!entry) {
+      throw new Error(appText.folderEntryNeedsRegularFile);
+    }
     if (entry.status === "error" || entry.status === "typeMismatch") {
       throw new Error(appText.folderEntryNeedsRegularFile);
     }
@@ -2356,47 +3120,49 @@ export default function App() {
       throw new Error(appText.regularFilesOnly);
     }
 
-    if (folderResult && isDemoFolderRoots(folderResult.leftRoot, folderResult.rightRoot)) {
+    if (!currentResult || !folderReviewScope) {
+      throw new Error(appText.folderEntryNeedsRegularFile);
+    }
+    const navigationTarget = folderReviewNavigationTarget(
+      folderReviewScope,
+      currentResult,
+      entry,
+    );
+    const resolution = resolveFolderReviewNavigationTarget(
+      navigationTarget,
+      folderReviewScope,
+      currentResult,
+    );
+    if (resolution.kind !== "valid") {
+      throw new Error(appText.folderEntryNeedsRegularFile);
+    }
+
+    if (isDemoFolderRoots(currentResult.leftRoot, currentResult.rightRoot)) {
+      editorNavigationRestoreCoordinator.cancel();
+      const activeRead = activeFolderReviewTextRead.current;
+      activeFolderReviewTextRead.current = null;
+      if (activeRead) void cancelFolderReviewTextRead(activeRead.jobId).catch(() => {});
+      if (activeEditorNavigationTarget) {
+        editorNavigationCoordinator.commitCurrent("openReviewItem");
+      }
       const demoSession = demoFolderEntryCompareSession(entry);
       if (!demoSession) {
         throw new Error(appText.folderEntryNeedsRegularFile);
       }
-      setCleanCompareSession(demoSession);
+      setCleanCompareSession(demoSession, navigationTarget);
       setCompareBackTarget("folders");
       setMode("compare");
       return;
     }
 
-    if (!folderResult) {
-      throw new Error(appText.folderEntryNeedsRegularFile);
-    }
-
-    const leftPath = hasLeftFile ? entry.leftPath : null;
-    const rightPath = hasRightFile ? entry.rightPath : null;
-
-    const [left, right] = await Promise.all([
-      leftPath
-        ? readTextFile(leftPath)
-        : Promise.resolve(
-            virtualMissingFileDocument(
-              folderExpectedPath(folderResult.leftRoot, entry.relativePath),
-            ),
-          ),
-      rightPath
-        ? readTextFile(rightPath)
-        : Promise.resolve(
-            virtualMissingFileDocument(
-              folderExpectedPath(folderResult.rightRoot, entry.relativePath),
-            ),
-          ),
-    ]);
-    const session: CompareSession = { origin: "files", left, right };
-    setCleanCompareSession(session);
-    setCompareBackTarget("folders");
-    if (!compareSessionHasVirtualDocument(session)) {
-      rememberRecentSession({ kind: "compare", leftPath: left.path, rightPath: right.path });
-    }
-    setMode("compare");
+    const outcome = await openDetachedFolderReview(
+      detachedFolderReviewOpenRequest(folderReviewScope, resolution.request),
+    );
+    setMessage(
+      outcome.outcome === "created"
+        ? appText.detachedFolderReviewCreated
+        : appText.detachedFolderReviewFocused,
+    );
   });
 
   const revealFolderPath = useCallback((path: string) => {
@@ -2472,25 +3238,33 @@ export default function App() {
       return;
     }
 
-    const [base, ours, theirs] = await Promise.all([
+    const [base, ours, theirs, outputVersion] = await Promise.all([
       readTextFile(session.basePath),
       readTextFile(session.oursPath),
       readTextFile(session.theirsPath),
+      session.outputPath
+        ? statOptionalTextFileVersion(session.outputPath)
+        : Promise.resolve(null),
     ]);
     if (base.isBinary || ours.isBinary || theirs.isBinary) {
       throw new Error(appText.mergeTextOnly);
     }
 
     const merged = await mergeTexts(base.text, ours.text, theirs.text);
-    setCleanMergeSession({
-      origin: "files",
-      base,
-      ours,
-      theirs,
-      output: null,
-      result: merged.output,
-      outputPath: session.outputPath,
-    });
+    const outputBaseline = mergeOutputBaselineForRestore(session.outputPath, outputVersion);
+    setCleanMergeSession(
+      {
+        origin: "files",
+        base,
+        ours,
+        theirs,
+        output: null,
+        result: merged.output,
+        outputPath: session.outputPath,
+      },
+      outputBaseline.precondition,
+      outputBaseline.expectedAbsent,
+    );
     rememberRecentSession({
       kind: "merge",
       basePath: session.basePath,
@@ -2696,6 +3470,7 @@ export default function App() {
       true,
       precondition,
       "UTF-8",
+      mergeSession.outputPath === outputPath && mergeOutputExpectedAbsent,
     );
     const saved = mergeSaveStateAfterWrite(saveText, written);
     clearMergeRecoveryDraft(mergeSession);
@@ -2710,6 +3485,7 @@ export default function App() {
               encoding: "UTF-8",
               size: written.size,
               modifiedMs: written.modifiedMs,
+              contentHash: written.contentHash,
               decodeHadErrors: false,
             },
             result: saved.savedSnapshot,
@@ -2724,6 +3500,7 @@ export default function App() {
                 encoding: "UTF-8",
                 size: written.size,
                 modifiedMs: written.modifiedMs,
+                contentHash: written.contentHash,
                 decodeHadErrors: false,
               },
               resultDocument: {
@@ -2732,6 +3509,7 @@ export default function App() {
                 encoding: "UTF-8",
                 size: written.size,
                 modifiedMs: written.modifiedMs,
+                contentHash: written.contentHash,
                 decodeHadErrors: false,
               },
               result: saved.savedSnapshot,
@@ -2747,6 +3525,7 @@ export default function App() {
                     encoding: "UTF-8",
                     size: written.size,
                     modifiedMs: written.modifiedMs,
+                    contentHash: written.contentHash,
                     decodeHadErrors: false,
                   }
                 : null,
@@ -2757,6 +3536,7 @@ export default function App() {
     );
     setSavedMergeResult(saved.savedSnapshot);
     setMergeOutputVersion(saved.outputVersion);
+    setMergeOutputExpectedAbsent(false);
     const persistentSession = persistentMergeSessionInput({
       ...mergeSession,
       outputPath: saved.outputPath,
@@ -2767,6 +3547,7 @@ export default function App() {
     appText,
     cancelActiveGitConflictSave,
     mergeOutputVersion,
+    mergeOutputExpectedAbsent,
     mergeSession,
     languageMode,
     refreshGitRepositoryStatus,
@@ -2834,8 +3615,10 @@ export default function App() {
           outputPath: restored.path,
         };
       });
+      setMergeModelRevision((current) => current + 1);
       setSavedMergeResult(restored.text);
       setMergeOutputVersion(writePreconditionFromDocument(restored));
+      setMergeOutputExpectedAbsent(false);
       if (mergeSession) clearMergeRecoveryDraft(mergeSession);
       setMergeRecoveryDraft(null);
     }
@@ -2908,9 +3691,30 @@ export default function App() {
     openMerge,
   ]);
 
+  nativeWindowCloseRequestHandler.current = (event) => {
+    preventNativeWindowCloseWhenGuarded(event, {
+      approved: allowWindowClose.current,
+      hasUnsavedChanges: activeUnsavedMessage != null,
+      requiresApplicationExit: externalGitToolActive,
+    }, () => {
+      requestLeaveActiveSession(
+        externalGitToolActive ? exitApprovedApplication : closeApprovedNativeWindow,
+      );
+    });
+  };
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
+      if (matchesCommandShortcut("quit", event)) {
+        event.preventDefault();
+        requestApplicationExit();
+        return;
+      }
+      if (matchesCommandShortcut("settings", event)) {
+        if (handleSettingsCommand()) event.preventDefault();
+        return;
+      }
       if (matchesCommandShortcut("openGitRepository", event)) {
         event.preventDefault();
         handleShellCommand("openGitRepository");
@@ -2934,18 +3738,58 @@ export default function App() {
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [handleShellCommand]);
+  }, [handleSettingsCommand, handleShellCommand, requestApplicationExit]);
 
   useEffect(() => {
     const handleCommandEvent = (event: Event) => {
-      const commandId = commandIdFromEvent(event);
-      if (!commandId) return;
-      handleShellCommand(commandId);
+      const detail = commandDetailFromEvent(event);
+      if (!detail) return;
+      if (detail.commandId === "quit") {
+        requestApplicationExit();
+        return;
+      }
+      if (detail.commandId === "settings") {
+        handleSettingsCommand();
+        return;
+      }
+      if (detail.commandId === "navigateEditorBack" && detail.source) {
+        if (navigationInputRouter) {
+          navigationInputRouter.dispatch(detail.source, detail.monotonicEventTime);
+        } else {
+          handleEditorNavigationBack(detail.source, detail.monotonicEventTime);
+        }
+        return;
+      }
+      handleShellCommand(detail.commandId);
     };
 
     window.addEventListener(APP_COMMAND_EVENT, handleCommandEvent);
     return () => window.removeEventListener(APP_COMMAND_EVENT, handleCommandEvent);
-  }, [handleShellCommand]);
+  }, [
+    handleEditorNavigationBack,
+    handleSettingsCommand,
+    handleShellCommand,
+    navigationInputRouter,
+    requestApplicationExit,
+  ]);
+
+  useEffect(() => {
+    let active = true;
+    let unlisten: (() => void) | null = null;
+    void listenForNativeWindowCloseRequests((event) => {
+      nativeWindowCloseRequestHandler.current(event);
+    }).then((next) => {
+      if (!active) {
+        next?.();
+        return;
+      }
+      unlisten = next;
+    });
+    return () => {
+      active = false;
+      unlisten?.();
+    };
+  }, []);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -2978,6 +3822,11 @@ export default function App() {
       {busy && (
         <div className="busy-bar" role="status" aria-live="polite" aria-label={appText.busyAria} />
       )}
+      {editorNavigationStatus && (
+        <div className="editor-navigation-status" role="status" aria-live="polite">
+          {editorNavigationStatus}
+        </div>
+      )}
       {error && (
         <div className="toast error-toast">
           <strong>{appText.errorTitle}</strong>
@@ -2993,77 +3842,79 @@ export default function App() {
         </div>
       )}
       {showUnsavedDialog && (
-        <div className="modal-backdrop">
-          <section
-            className="confirm-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="unsaved-dialog-title"
-          >
-            <h2 id="unsaved-dialog-title">{activeUnsavedTitle}</h2>
-            <p>{activeUnsavedMessage}</p>
-            <div className="dialog-actions">
-              <button type="button" onClick={cancelPendingLeave}>{appText.keepEditing}</button>
-              <button type="button" className="danger-button" onClick={confirmPendingLeave}>
-                {appText.discardAndLeave}
-              </button>
-            </div>
-          </section>
-        </div>
+        <AccessibleModal
+          labelledBy="unsaved-dialog-title"
+          describedBy="unsaved-dialog-description"
+          onCancel={cancelPendingLeave}
+        >
+          <h2 id="unsaved-dialog-title">{activeUnsavedTitle}</h2>
+          <p id="unsaved-dialog-description">{activeUnsavedMessage}</p>
+          <div className="dialog-actions">
+            <button type="button" data-modal-initial-focus onClick={cancelPendingLeave}>
+              {appText.keepEditing}
+            </button>
+            <button type="button" className="danger-button" onClick={confirmPendingLeave}>
+              {appText.discardAndLeave}
+            </button>
+          </div>
+        </AccessibleModal>
       )}
       {showUnresolvedSaveDialog && (
-        <div className="modal-backdrop">
-          <section
-            className="confirm-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="unresolved-save-dialog-title"
-          >
-            <h2 id="unresolved-save-dialog-title">{appText.conflictMarkersRemain}</h2>
-            <p>{appText.unresolvedSaveMessage}</p>
-            <div className="dialog-actions">
-              <button type="button" onClick={cancelPendingSave}>{appText.keepEditing}</button>
-              <button type="button" className="danger-button" onClick={confirmPendingSave}>
-                {appText.saveAnyway}
-              </button>
-            </div>
-          </section>
-        </div>
+        <AccessibleModal
+          labelledBy="unresolved-save-dialog-title"
+          describedBy="unresolved-save-dialog-description"
+          onCancel={cancelPendingSave}
+        >
+          <h2 id="unresolved-save-dialog-title">{appText.conflictMarkersRemain}</h2>
+          <p id="unresolved-save-dialog-description">{appText.unresolvedSaveMessage}</p>
+          <div className="dialog-actions">
+            <button type="button" data-modal-initial-focus onClick={cancelPendingSave}>
+              {appText.keepEditing}
+            </button>
+            <button type="button" className="danger-button" onClick={confirmPendingSave}>
+              {appText.saveAnyway}
+            </button>
+          </div>
+        </AccessibleModal>
       )}
       {backupDialog && (
-        <div className="modal-backdrop">
-          <section
-            className="confirm-dialog backup-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="backup-dialog-title"
-          >
-            <h2 id="backup-dialog-title">{backupDialog.title}</h2>
-            <p>{backupDialog.targetPath}</p>
-            {backupDialog.backups.length === 0 ? (
-              <p>{appText.noBackups}</p>
-            ) : (
-              <ul className="backup-list">
-                {backupDialog.backups.map((backup) => (
-                  <li key={backup.path}>
-                    <div>
-                      <strong>{backup.name}</strong>
-                      <span>
-                        {formatBytes(backup.size)} · {formatBackupTime(backup.modifiedMs, languageMode)}
-                      </span>
-                    </div>
-                    <button type="button" onClick={() => restoreBackup(backup)}>
-                      {appText.restore}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <div className="dialog-actions">
-              <button type="button" onClick={() => setBackupDialog(null)}>{appText.close}</button>
-            </div>
-          </section>
-        </div>
+        <AccessibleModal
+          className="backup-dialog"
+          labelledBy="backup-dialog-title"
+          describedBy="backup-dialog-description"
+          onCancel={() => setBackupDialog(null)}
+        >
+          <h2 id="backup-dialog-title">{backupDialog.title}</h2>
+          <p id="backup-dialog-description">{backupDialog.targetPath}</p>
+          {backupDialog.backups.length === 0 ? (
+            <p>{appText.noBackups}</p>
+          ) : (
+            <ul className="backup-list">
+              {backupDialog.backups.map((backup) => (
+                <li key={backup.path}>
+                  <div>
+                    <strong>{backup.name}</strong>
+                    <span>
+                      {formatBytes(backup.size)} · {formatBackupTime(backup.modifiedMs, languageMode)}
+                    </span>
+                  </div>
+                  <button type="button" onClick={() => restoreBackup(backup)}>
+                    {appText.restore}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="dialog-actions">
+            <button
+              type="button"
+              data-modal-initial-focus
+              onClick={() => setBackupDialog(null)}
+            >
+              {appText.close}
+            </button>
+          </div>
+        </AccessibleModal>
       )}
 
       <Suspense
@@ -3081,6 +3932,7 @@ export default function App() {
             busy={busy}
             languageMode={languageMode}
             themeMode={themeMode}
+            settingsFocusRequest={settingsFocusRequest}
             recentSessions={recentSessions}
             recentSessionFailure={recentSessionFailure}
             onLanguageModeChange={setLanguageMode}
@@ -3104,6 +3956,14 @@ export default function App() {
             onDemoFolders={() => {
               requestLeaveActiveSession(() => {
                 setFolderResult(demoFolderScanResult());
+                setProgressiveFolderRows(null);
+                const token = nextFolderReviewToken.current + 1;
+                nextFolderReviewToken.current = token;
+                replaceFolderReviewScope({
+                  reviewToken: `folder-review:${token}`,
+                  scanGeneration: activeFolderScanId.current + 1,
+                });
+                setActiveEditorNavigationTarget(null);
                 setMode("folders");
               });
             }}
@@ -3231,6 +4091,7 @@ export default function App() {
             editorTheme={editorTheme}
             fileChangeNotice={compareFileChangeNotice}
             modelRevision={compareModelRevision}
+            navigation={compareEditorNavigation}
             dirtySides={compareDirtySides}
             backLabel={
               compareBackTarget === "folders"
@@ -3283,6 +4144,7 @@ export default function App() {
             busy={busy}
             languageMode={languageMode}
             scanProgress={folderScanProgress}
+            progressiveRows={progressiveFolderRows}
             onBack={backHome}
             onNewScan={openFolders}
             onRescan={rescanFolders}
@@ -3295,6 +4157,8 @@ export default function App() {
         {mode === "merge" && mergeSession && (
           <MergeView
             session={mergeSession}
+            modelRevision={mergeModelRevision}
+            navigation={mergeEditorNavigation}
             busy={busy}
             languageMode={languageMode}
             dirty={mergeHasUnsavedChanges}
@@ -3343,4 +4207,11 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function isErrorCode(error: unknown, code: string): boolean {
+  return error != null
+    && typeof error === "object"
+    && "code" in error
+    && (error as { code?: unknown }).code === code;
 }

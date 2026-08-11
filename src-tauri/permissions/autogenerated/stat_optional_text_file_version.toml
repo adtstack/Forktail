@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-stat-optional-text-file-version"
+description = "Enables the stat_optional_text_file_version command without any pre-configured scope."
+commands.allow = ["stat_optional_text_file_version"]
+
+[[permission]]
+identifier = "deny-stat-optional-text-file-version"
+description = "Denies the stat_optional_text_file_version command without any pre-configured scope."
+commands.deny = ["stat_optional_text_file_version"]

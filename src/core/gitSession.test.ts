@@ -430,6 +430,7 @@ describe("Git conflict merge session adapter", () => {
     expect(adapted.outputVersion).toEqual({
       expectedSize: 23,
       expectedModifiedMs: 1_700_000_000_000,
+      expectedContentHash: "f".repeat(64),
     });
   });
 

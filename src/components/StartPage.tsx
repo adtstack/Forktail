@@ -1,4 +1,4 @@
-import { useState, type DragEvent } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { commandAriaKeyshortcuts } from "../core/commands";
 import {
   droppedFilePaths,
@@ -16,6 +16,7 @@ interface StartPageProps {
   busy: boolean;
   languageMode: AppLanguage;
   themeMode: ThemeMode;
+  settingsFocusRequest: number;
   recentSessions: RecentSession[];
   recentSessionFailure: { session: RecentSession; message: string } | null;
   onLanguageModeChange: (languageMode: AppLanguage) => void;
@@ -34,10 +35,25 @@ interface StartPageProps {
   onRemoveRecentSession: (id: string) => void;
 }
 
+export interface StartPageSettingsDestination {
+  focus(options?: FocusOptions): void;
+  scrollIntoView(options?: ScrollIntoViewOptions): void;
+}
+
+export function focusStartPageSettingsDestination(
+  destination: StartPageSettingsDestination | null,
+): boolean {
+  if (!destination) return false;
+  destination.focus({ preventScroll: true });
+  destination.scrollIntoView({ block: "center" });
+  return true;
+}
+
 export function StartPage({
   busy,
   languageMode,
   themeMode,
+  settingsFocusRequest,
   recentSessions,
   recentSessionFailure,
   onLanguageModeChange,
@@ -56,11 +72,17 @@ export function StartPage({
   onRemoveRecentSession,
 }: StartPageProps) {
   const [dropActive, setDropActive] = useState(false);
+  const settingsDestinationRef = useRef<HTMLElement | null>(null);
   const text = START_PAGE_TEXT[languageMode];
   const themeOptions = themeOptionsForLanguage(languageMode);
   const failedRecentSessionStillVisible = recentSessionFailure
     ? recentSessions.some((session) => session.id === recentSessionFailure.session.id)
     : false;
+
+  useEffect(() => {
+    if (settingsFocusRequest <= 0) return;
+    focusStartPageSettingsDestination(settingsDestinationRef.current);
+  }, [settingsFocusRequest]);
 
   const handleDragOver = (event: DragEvent<HTMLElement>) => {
     if (busy) return;
@@ -217,36 +239,48 @@ export function StartPage({
               <button className="link-button" onClick={onDemoMerge}>{text.sampleMerge}</button>
             </section>
 
-            <section className="settings-row" aria-label={text.themeAria}>
-              <span>{text.theme}</span>
-              <div className="segmented-control" role="group" aria-label={text.chooseThemeAria}>
-                {themeOptions.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-pressed={themeMode === option.value}
-                    onClick={() => onThemeModeChange(option.value)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
+            <section
+              id="home-settings"
+              ref={settingsDestinationRef}
+              className="start-settings-destination"
+              tabIndex={-1}
+              aria-labelledby="home-settings-title"
+              aria-keyshortcuts={commandAriaKeyshortcuts("settings")}
+            >
+              <strong id="home-settings-title" className="start-settings-title">
+                {text.settings}
+              </strong>
+              <section className="settings-row" aria-label={text.themeAria}>
+                <span>{text.theme}</span>
+                <div className="segmented-control" role="group" aria-label={text.chooseThemeAria}>
+                  {themeOptions.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={themeMode === option.value}
+                      onClick={() => onThemeModeChange(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
 
-            <section className="settings-row" aria-label={text.languageAria}>
-              <span>{text.language}</span>
-              <div className="segmented-control" role="group" aria-label={text.chooseLanguageAria}>
-                {LANGUAGE_OPTIONS.map((option) => (
-                  <button
-                    key={option.value}
-                    type="button"
-                    aria-pressed={languageMode === option.value}
-                    onClick={() => onLanguageModeChange(option.value)}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
+              <section className="settings-row" aria-label={text.languageAria}>
+                <span>{text.language}</span>
+                <div className="segmented-control" role="group" aria-label={text.chooseLanguageAria}>
+                  {LANGUAGE_OPTIONS.map((option) => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      aria-pressed={languageMode === option.value}
+                      onClick={() => onLanguageModeChange(option.value)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </section>
             </section>
 
             <section className="scope-card" aria-label={text.phaseScopeAria}>

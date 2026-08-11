@@ -28,6 +28,7 @@ describe("buildMergetoolSession", () => {
     expect(built.outputVersion).toEqual({
       expectedSize: 20,
       expectedModifiedMs: 4567,
+      expectedContentHash: "result.txt-content-hash",
     });
   });
 
@@ -169,6 +170,7 @@ function document(
     hadFinalNewline: text.endsWith("\n"),
     size,
     modifiedMs,
+    contentHash: `${path.split("/").pop()}-content-hash`,
     isBinary: false,
     decodeHadErrors: false,
   };

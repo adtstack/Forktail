@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-ack-folder-scan"
+description = "Enables the ack_folder_scan command without any pre-configured scope."
+commands.allow = ["ack_folder_scan"]
+
+[[permission]]
+identifier = "deny-ack-folder-scan"
+description = "Denies the ack_folder_scan command without any pre-configured scope."
+commands.deny = ["ack_folder_scan"]

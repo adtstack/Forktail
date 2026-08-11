@@ -48,6 +48,7 @@ export function compareSessionCapabilities(
   session: Pick<CompareSession, "origin">,
 ): CompareSessionCapabilities {
   const writable = session.origin === "files";
+  const detached = session.origin === "folderReview";
 
   return {
     edit: writable,
@@ -58,7 +59,7 @@ export function compareSessionCapabilities(
     replaceInput: writable,
     swap: writable,
     persistPaths: writable,
-    exportReport: true,
+    exportReport: !detached,
   };
 }
 

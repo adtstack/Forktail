@@ -1793,6 +1793,7 @@ mod tests {
                 bytes_written: 9,
                 size: 9,
                 modified_ms: Some(1_700_000_000_000),
+                content_hash: "a".repeat(64),
             },
             action: GitConflictSaveAction::ConflictSaved,
         })
@@ -1801,6 +1802,7 @@ mod tests {
         assert_eq!(value["path"], "conflict.txt");
         assert_eq!(value["backupPath"], "conflict.txt.bak.1");
         assert_eq!(value["bytesWritten"], 9);
+        assert_eq!(value["contentHash"], "a".repeat(64));
         assert_eq!(value["action"], "CONFLICT_SAVED");
         assert!(value.get("writeResult").is_none());
     }

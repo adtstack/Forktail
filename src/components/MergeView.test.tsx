@@ -5,7 +5,13 @@ import type { MergeRecoveryDraft } from "../core/mergeRecovery";
 import type { GitConflictMergeSession, GitPreviewMergeSession, MergeSession } from "../core/models";
 import { demoMergeSession } from "../core/samples";
 import { virtualMissingFileDocument } from "../core/virtualDocument";
-import { canRunMergeViewCommand, MergeView } from "./MergeView";
+import {
+  activeMergeConflictIndexAtLine,
+  bindMergeResultNavigation,
+  canRunMergeViewCommand,
+  MergeView,
+} from "./MergeView";
+import type { EditorNavigationHandle, MonacoNavigationEditor } from "../core/monacoNavigation";
 
 vi.mock("../monaco", () => ({
   loadMonacoLanguage: () => Promise.resolve(),
@@ -222,6 +228,112 @@ describe("MergeView repository merge preview mode", () => {
     }
   });
 });
+
+describe("MergeView navigation lifecycle", () => {
+  it("registers only an editable Result and excludes read-only preview Result", () => {
+    let position = { lineNumber: 1, column: 1 };
+    const cursorListeners = new Set<() => void>();
+    const scrollListeners = new Set<() => void>();
+    const focusListeners = new Set<() => void>();
+    let model = {
+      getLineCount: () => 20,
+      validatePosition: (position: { lineNumber: number; column: number }) => position,
+    };
+    const editor: MonacoNavigationEditor = {
+      getModel: () => model,
+      getPosition: () => position,
+      getVisibleRanges: () => [{ startLineNumber: 1 }],
+      getScrollTop: () => 0,
+      getScrollLeft: () => 0,
+      getTopForLineNumber: () => 0,
+      setPosition: (next) => { position = next; },
+      setScrollPosition: () => {},
+      focus: () => {},
+      onDidChangeCursorPosition: (listener) => testMergeSubscription(cursorListeners, listener),
+      onDidScrollChange: (listener) => testMergeSubscription(scrollListeners, listener),
+      onDidFocusEditorText: (listener) => testMergeSubscription(focusListeners, listener),
+    };
+    const registered: EditorNavigationHandle[] = [];
+    const unregistered: string[] = [];
+    const committed: string[] = [];
+    const observed: string[] = [];
+    let replaying = false;
+    const navigation = {
+      isReplaying: () => replaying,
+      register: (handle: EditorNavigationHandle) => {
+        registered.push(handle);
+        return () => { unregistered.push(handle.pane); };
+      },
+      observe: (handle: EditorNavigationHandle) => { observed.push(handle.pane); },
+      commitCurrent: (reason: string) => { committed.push(reason); },
+    };
+
+    const editable = bindMergeResultNavigation({
+      editor,
+      editable: true,
+      modelRevision: 2,
+      navigation,
+      onRestored: () => {},
+    });
+    const preview = bindMergeResultNavigation({
+      editor,
+      editable: false,
+      modelRevision: 2,
+      navigation,
+      onRestored: () => {},
+    });
+
+    expect(editable).not.toBeNull();
+    expect(preview).toBeNull();
+    expect(registered.map((handle) => handle.pane)).toEqual(["mergeResult"]);
+    expect(observed).toEqual(["mergeResult"]);
+    position = { lineNumber: 2, column: 1 };
+    cursorListeners.forEach((listener) => { listener(); });
+    position = { lineNumber: 12, column: 1 };
+    cursorListeners.forEach((listener) => { listener(); });
+    editable?.commitBeforeConflict("next");
+    editable?.commitBeforeConflict("previous");
+    editable?.commitBeforeLeave();
+    expect(committed).toEqual([
+      "explicitCursorJump",
+      "nextConflict",
+      "previousConflict",
+      "leaveEditorTarget",
+    ]);
+    const observedBeforeReplay = observed.length;
+    replaying = true;
+    position = { lineNumber: 16, column: 1 };
+    cursorListeners.forEach((listener) => { listener(); });
+    replaying = false;
+    expect(observed).toHaveLength(observedBeforeReplay);
+    model = {
+      getLineCount: () => 10,
+      validatePosition: (candidate: { lineNumber: number; column: number }) => candidate,
+    };
+    expect(editable?.handle.restore({
+      pane: "mergeResult",
+      cursor: { lineNumber: 4, column: 1 },
+      viewport: { topLineNumber: 4, topLineOffsetPx: 0, scrollLeftPx: 0 },
+    })).toEqual({ kind: "staleModel" });
+    editable?.dispose();
+    expect(unregistered).toEqual(["mergeResult"]);
+    const observedCount = observed.length;
+    cursorListeners.forEach((listener) => { listener(); });
+    expect(observed).toHaveLength(observedCount);
+  });
+
+  it("derives a current conflict only when the restored cursor is inside its range", () => {
+    const conflicts = [{ startLine: 5, endLine: 11 }, { startLine: 20, endLine: 24 }];
+    expect(activeMergeConflictIndexAtLine(conflicts, 7)).toBe(0);
+    expect(activeMergeConflictIndexAtLine(conflicts, 22)).toBe(1);
+    expect(activeMergeConflictIndexAtLine(conflicts, 15)).toBe(-1);
+  });
+});
+
+function testMergeSubscription(listeners: Set<() => void>, listener: () => void) {
+  listeners.add(listener);
+  return { dispose: () => { listeners.delete(listener); } };
+}
 
 function mergetoolSession(result = demoMergeSession().result): MergeSession {
   const demo = demoMergeSession();

@@ -34,6 +34,92 @@ import {
 } from "../core/textHistory";
 import type { ConflictBlock, MergeSession } from "../core/models";
 import { isMissingFileDocument } from "../core/virtualDocument";
+import {
+  createEditorNavigationHandle,
+  type EditorNavigationBinding,
+  type EditorNavigationHandle,
+  type EditorViewSnapshot,
+  type MonacoNavigationEditor,
+  type MonacoNavigationObservationKind,
+} from "../core/monacoNavigation";
+
+export interface BindMergeResultNavigationOptions {
+  editor: MonacoNavigationEditor;
+  editable: boolean;
+  modelRevision: number;
+  navigation: EditorNavigationBinding;
+  onRestored: (snapshot: EditorViewSnapshot) => void;
+}
+
+export interface MergeResultNavigationBinding {
+  handle: EditorNavigationHandle;
+  commitBeforeConflict(direction: "next" | "previous"): void;
+  commitBeforeLeave(): void;
+  dispose(): void;
+}
+
+export function activeMergeConflictIndexAtLine(
+  conflicts: readonly Pick<ConflictBlock, "startLine" | "endLine">[],
+  lineNumber: number,
+): number {
+  return conflicts.findIndex((conflict) =>
+    lineNumber >= conflict.startLine && lineNumber <= conflict.endLine
+  );
+}
+
+export function bindMergeResultNavigation({
+  editor,
+  editable,
+  modelRevision,
+  navigation,
+  onRestored,
+}: BindMergeResultNavigationOptions): MergeResultNavigationBinding | null {
+  if (!editable) return null;
+  const model = editor.getModel();
+  if (!model) return null;
+  let handle: EditorNavigationHandle;
+  let previousCursor: EditorViewSnapshot["cursor"] | null = null;
+  const observe = (snapshot: EditorViewSnapshot, kind: MonacoNavigationObservationKind) => {
+    if (
+      kind === "cursor" && previousCursor &&
+      (Math.abs(previousCursor.lineNumber - snapshot.cursor.lineNumber) > 1 ||
+        Math.abs(previousCursor.column - snapshot.cursor.column) > 1)
+    ) {
+      navigation.commitCurrent("explicitCursorJump");
+    }
+    previousCursor = snapshot.cursor;
+    navigation.observe(handle, snapshot, kind);
+  };
+  handle = createEditorNavigationHandle({
+    editor,
+    model,
+    pane: "mergeResult",
+    modelKey: `merge-result:${modelRevision}`,
+    modelRevision,
+    isReplaying: navigation.isReplaying,
+    onObserved: observe,
+    onRestored,
+  });
+  const unregister = navigation.register(handle);
+  const initialSnapshot = handle.capture();
+  if (initialSnapshot) {
+    previousCursor = initialSnapshot.cursor;
+    navigation.observe(handle, initialSnapshot, "focus");
+  }
+  return {
+    handle,
+    commitBeforeConflict(direction) {
+      navigation.commitCurrent(direction === "next" ? "nextConflict" : "previousConflict");
+    },
+    commitBeforeLeave() {
+      navigation.commitCurrent("leaveEditorTarget");
+    },
+    dispose() {
+      unregister();
+      handle.dispose();
+    },
+  };
+}
 
 interface MergeViewProps {
   session: MergeSession;
@@ -50,6 +136,8 @@ interface MergeViewProps {
   onSave: (lineEndingMode: SaveLineEndingMode) => void;
   onSaveAs: (lineEndingMode: SaveLineEndingMode) => void;
   onShowBackups: () => void;
+  modelRevision?: number;
+  navigation?: EditorNavigationBinding;
 }
 
 interface PathCopyState {
@@ -89,6 +177,8 @@ export function MergeView({
   onSave,
   onSaveAs,
   onShowBackups,
+  modelRevision = 0,
+  navigation: editorNavigation,
 }: MergeViewProps) {
   const text = MERGE_VIEW_TEXT[languageMode];
   const [activeIndex, setActiveIndex] = useState(0);
@@ -105,6 +195,12 @@ export function MergeView({
   const theirsLabel = isGitPreview ? "RIGHT" : "THEIRS";
   const baseMissing = isMissingFileDocument(session.base);
   const resultEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
+  const resultNavigationBinding = useRef<MergeResultNavigationBinding | null>(null);
+  const restoringNavigation = useRef(false);
+  const conflictsRef = useRef(conflicts);
+  const activeIndexRef = useRef(activeIndex);
+  conflictsRef.current = conflicts;
+  activeIndexRef.current = activeIndex;
   const activeDecorationIds = useRef<string[]>([]);
   const lastSyncedResult = useRef(session.result);
   const language = useMemo(
@@ -157,6 +253,8 @@ export function MergeView({
   useEffect(() => {
     const instance = resultEditor.current;
     if (!instance) return;
+    const suppressReveal = restoringNavigation.current;
+    restoringNavigation.current = false;
 
     activeDecorationIds.current = instance.deltaDecorations(
       activeDecorationIds.current,
@@ -179,14 +277,40 @@ export function MergeView({
         : [],
     );
 
-    if (!activeConflict) return;
+    if (!activeConflict || suppressReveal) return;
     instance.revealLineInCenter(activeConflict.startLine);
     instance.setPosition({ lineNumber: activeConflict.startLine, column: 1 });
   }, [activeConflict]);
 
-  const mountResult: OnMount = (instance) => {
+  const configureResultNavigation = useCallback((instance: editor.IStandaloneCodeEditor) => {
+    resultNavigationBinding.current?.dispose();
+    resultNavigationBinding.current = editorNavigation
+      ? bindMergeResultNavigation({
+          editor: mergeNavigationEditor(instance),
+          editable: capabilities.editable && !isGitPreview,
+          modelRevision,
+          navigation: editorNavigation,
+          onRestored: (snapshot) => {
+            const index = activeMergeConflictIndexAtLine(
+              conflictsRef.current,
+              snapshot.cursor.lineNumber,
+            );
+            if (index < 0 || index === activeIndexRef.current) return;
+            restoringNavigation.current = true;
+            setActiveIndex(index);
+          },
+        })
+      : null;
+  }, [capabilities.editable, editorNavigation, isGitPreview, modelRevision]);
+
+  const mountResult: OnMount = useCallback((instance) => {
     resultEditor.current = instance;
-  };
+    configureResultNavigation(instance);
+  }, [configureResultNavigation]);
+
+  useEffect(() => {
+    if (resultEditor.current) configureResultNavigation(resultEditor.current);
+  }, [configureResultNavigation]);
 
   const commitResult = useCallback((next: string) => {
     if (!capabilities.editable) return;
@@ -216,6 +340,9 @@ export function MergeView({
     if (!activeConflict) return;
     const next = resolveConflict(resultText, activeConflict, resolution);
     const remainingConflicts = parseConflictBlocks(next).length;
+    if (mergeSettings.autoAdvanceConflict && remainingConflicts > 0) {
+      resultNavigationBinding.current?.commitBeforeConflict("next");
+    }
     commitResult(next);
     if (!mergeSettings.autoAdvanceConflict) {
       setActiveIndex((current) => Math.max(0, Math.min(current - 1, remainingConflicts - 1)));
@@ -237,11 +364,13 @@ export function MergeView({
 
   const previousConflict = useCallback(() => {
     if (conflicts.length === 0) return;
+    resultNavigationBinding.current?.commitBeforeConflict("previous");
     setActiveIndex((current) => (current - 1 + conflicts.length) % conflicts.length);
   }, [conflicts.length]);
 
   const nextConflict = useCallback(() => {
     if (conflicts.length === 0) return;
+    resultNavigationBinding.current?.commitBeforeConflict("next");
     setActiveIndex((current) => (current + 1) % conflicts.length);
   }, [conflicts.length]);
 
@@ -379,6 +508,9 @@ export function MergeView({
   }, [session.base.path, session.ours.path, session.outputPath, session.theirs.path]);
 
   useEffect(() => () => {
+    resultNavigationBinding.current?.commitBeforeLeave();
+    resultNavigationBinding.current?.dispose();
+    resultNavigationBinding.current = null;
     if (!resultEditor.current) return;
     activeDecorationIds.current = resultEditor.current.deltaDecorations(activeDecorationIds.current, []);
   }, []);
@@ -890,6 +1022,24 @@ function SourceEditor({
       />
     </div>
   );
+}
+
+function mergeNavigationEditor(instance: editor.IStandaloneCodeEditor): MonacoNavigationEditor {
+  return {
+    getModel: () => instance.getModel(),
+    getPosition: () => instance.getPosition(),
+    getVisibleRanges: () => instance.getVisibleRanges(),
+    getScrollTop: () => instance.getScrollTop(),
+    getScrollLeft: () => instance.getScrollLeft(),
+    getTopForLineNumber: (lineNumber) => instance.getTopForLineNumber(lineNumber),
+    setPosition: (position) => { instance.setPosition(position); },
+    setScrollPosition: (position) => { instance.setScrollPosition(position); },
+    focus: () => { instance.focus(); },
+    onDidChangeCursorPosition: (listener) =>
+      instance.onDidChangeCursorPosition(() => { listener(); }),
+    onDidScrollChange: (listener) => instance.onDidScrollChange(() => { listener(); }),
+    onDidFocusEditorText: (listener) => instance.onDidFocusEditorText(() => { listener(); }),
+  };
 }
 
 function conflictOperationLabel(

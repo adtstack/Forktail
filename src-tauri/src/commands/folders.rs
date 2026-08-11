@@ -1,6 +1,7 @@
 use crate::domain::models::{
-    FolderCompareMode, FolderEntry, FolderEntryStatus, FolderScanOptions, FolderScanResult,
-    FolderScanStats, FsEntryKind, FsEntryMeta,
+    FolderCompareMode, FolderEntry, FolderEntryStatus, FolderScanAck, FolderScanMessage,
+    FolderScanOptions, FolderScanResult, FolderScanStarted, FolderScanStats, FsEntryKind,
+    FsEntryMeta, StartFolderScanRequest,
 };
 use crate::error::{AppErrorCode, CommandError, CommandResult};
 use ignore::WalkBuilder;
@@ -11,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Instant, UNIX_EPOCH};
+use tauri::ipc::Channel;
 
 const QUICK_HASH_CHUNK: usize = 64 * 1024;
 const HASH_PAIR_WORKERS: usize = 2;
@@ -19,10 +21,10 @@ static CANCELLED_SCAN_IDS: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new();
 static HASH_CACHE: OnceLock<Mutex<HashMap<HashCacheKey, String>>> = OnceLock::new();
 
 #[derive(Debug, Clone)]
-struct EntryRecord {
-    path: PathBuf,
-    meta: FsEntryMeta,
-    error_message: Option<String>,
+pub(crate) struct EntryRecord {
+    pub(crate) path: PathBuf,
+    pub(crate) meta: FsEntryMeta,
+    pub(crate) error_message: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,26 +71,39 @@ pub fn scan_directories(
     options: FolderScanOptions,
     job_id: Option<u64>,
 ) -> CommandResult<FolderScanResult> {
-    let result = scan_directories_inner(left_root, right_root, options, job_id);
+    let result = scan_directories_reference(left_root, right_root, options, job_id);
     if let Some(id) = job_id {
-        cancelled_scan_ids()
-            .lock()
-            .expect("scan cancel lock")
-            .remove(&id);
+        release_scan_cancel(id);
     }
     result
 }
 
 #[tauri::command]
-pub fn cancel_folder_scan(job_id: u64) -> CommandResult<()> {
-    cancelled_scan_ids()
-        .lock()
-        .expect("scan cancel lock")
-        .insert(job_id);
-    Ok(())
+pub async fn start_folder_scan(
+    window: tauri::WebviewWindow,
+    request: StartFolderScanRequest,
+    on_event: Channel<FolderScanMessage>,
+) -> CommandResult<FolderScanStarted> {
+    crate::folder_scan::start(window.label().to_string(), request, on_event)
 }
 
-fn scan_directories_inner(
+#[tauri::command]
+pub fn ack_folder_scan(window: tauri::WebviewWindow, ack: FolderScanAck) -> CommandResult<()> {
+    crate::folder_scan::acknowledge(window.label(), ack)
+}
+
+#[tauri::command]
+pub fn cancel_folder_scan(
+    window: tauri::WebviewWindow,
+    job_id: u64,
+    scan_generation: u64,
+) -> CommandResult<()> {
+    crate::folder_scan::cancel(window.label(), job_id, scan_generation)
+}
+
+/// Kept as the deterministic one-shot oracle while the progressive pipeline is
+/// validated against the existing folder comparison semantics.
+pub(crate) fn scan_directories_reference(
     left_root: String,
     right_root: String,
     options: FolderScanOptions,
@@ -128,7 +143,7 @@ fn scan_directories_inner(
     })
 }
 
-fn validate_root(value: &str, side: &str) -> CommandResult<PathBuf> {
+pub(crate) fn validate_root(value: &str, side: &str) -> CommandResult<PathBuf> {
     let path = PathBuf::from(value);
     let metadata = fs::metadata(&path).map_err(|error| {
         CommandError::io(
@@ -151,6 +166,29 @@ fn collect_entries(
     options: &FolderScanOptions,
     job_id: Option<u64>,
 ) -> CommandResult<HashMap<String, EntryRecord>> {
+    let mut result = HashMap::new();
+    visit_entries(
+        root,
+        options,
+        || check_scan_cancelled(job_id),
+        |relative, record| {
+            result.insert(relative, record);
+            Ok(())
+        },
+    )?;
+    Ok(result)
+}
+
+pub(crate) fn visit_entries<C, F>(
+    root: &Path,
+    options: &FolderScanOptions,
+    mut check_cancelled: C,
+    mut visit: F,
+) -> CommandResult<()>
+where
+    C: FnMut() -> CommandResult<()>,
+    F: FnMut(String, EntryRecord) -> CommandResult<()>,
+{
     let mut builder = WalkBuilder::new(root);
     builder
         .standard_filters(false)
@@ -162,14 +200,16 @@ fn collect_entries(
         .git_exclude(options.respect_gitignore)
         .follow_links(options.follow_symlinks);
 
-    let mut result = HashMap::new();
+    let mut observed_count = 0usize;
     for entry_result in builder.build() {
-        check_scan_cancelled(job_id)?;
+        check_cancelled()?;
         let entry = match entry_result {
             Ok(entry) => entry,
             Err(error) => {
-                let path = walk_error_path(root, result.len());
-                insert_scan_error(&mut result, root, path, &error);
+                let path = walk_error_path(root, observed_count);
+                let (relative, record) = scan_error_record(root, path, &error);
+                visit(relative, record)?;
+                observed_count += 1;
                 continue;
             }
         };
@@ -182,7 +222,9 @@ fn collect_entries(
         let metadata = match fs::symlink_metadata(path) {
             Ok(metadata) => metadata,
             Err(error) => {
-                insert_scan_error(&mut result, root, path.to_path_buf(), &error);
+                let (relative, record) = scan_error_record(root, path.to_path_buf(), &error);
+                visit(relative, record)?;
+                observed_count += 1;
                 continue;
             }
         };
@@ -196,7 +238,7 @@ fn collect_entries(
             FsEntryKind::Other
         };
 
-        result.insert(
+        visit(
             relative,
             EntryRecord::ok(
                 path.to_path_buf(),
@@ -211,12 +253,13 @@ fn collect_entries(
                     hash: None,
                 },
             ),
-        );
+        )?;
+        observed_count += 1;
     }
-    Ok(result)
+    Ok(())
 }
 
-fn compare_entry(
+pub(crate) fn compare_entry(
     relative_path: String,
     left: Option<&EntryRecord>,
     right: Option<&EntryRecord>,
@@ -291,20 +334,28 @@ fn scan_error_message(left: Option<&EntryRecord>, right: Option<&EntryRecord>) -
     }
 }
 
+#[cfg(test)]
 fn insert_scan_error(
     result: &mut HashMap<String, EntryRecord>,
     root: &Path,
     path: PathBuf,
     error: &dyn std::fmt::Display,
 ) {
+    let (relative, record) = scan_error_record(root, path, error);
+    result.insert(relative, record);
+}
+
+fn scan_error_record(
+    root: &Path,
+    path: PathBuf,
+    error: &dyn std::fmt::Display,
+) -> (String, EntryRecord) {
     let relative = relative_path(root, &path);
-    result.insert(
-        relative,
-        EntryRecord::scan_error(
-            path,
-            format!("항목을 읽지 못했습니다. 권한 또는 링크 상태를 확인하세요. ({error})"),
-        ),
+    let record = EntryRecord::scan_error(
+        path,
+        format!("항목을 읽지 못했습니다. 권한 또는 링크 상태를 확인하세요. ({error})"),
     );
+    (relative, record)
 }
 
 fn walk_error_path(root: &Path, index: usize) -> PathBuf {
@@ -534,6 +585,20 @@ fn check_scan_cancelled(job_id: Option<u64>) -> CommandResult<()> {
     Ok(())
 }
 
+pub(crate) fn mark_scan_cancelled(job_id: u64) {
+    cancelled_scan_ids()
+        .lock()
+        .expect("scan cancel lock")
+        .insert(job_id);
+}
+
+pub(crate) fn release_scan_cancel(job_id: u64) {
+    cancelled_scan_ids()
+        .lock()
+        .expect("scan cancel lock")
+        .remove(&job_id);
+}
+
 fn cancelled_scan_ids() -> &'static Mutex<HashSet<u64>> {
     CANCELLED_SCAN_IDS.get_or_init(|| Mutex::new(HashSet::new()))
 }
@@ -551,7 +616,7 @@ fn modified_ms(metadata: &fs::Metadata) -> Option<u64> {
         .map(|duration| duration.as_millis() as u64)
 }
 
-fn update_stats(stats: &mut FolderScanStats, status: &FolderEntryStatus) {
+pub(crate) fn update_stats(stats: &mut FolderScanStats, status: &FolderEntryStatus) {
     match status {
         FolderEntryStatus::Same => stats.same += 1,
         FolderEntryStatus::Different => stats.different += 1,
@@ -734,7 +799,7 @@ mod tests {
         let left = tempfile::tempdir().expect("left dir");
         let right = tempfile::tempdir().expect("right dir");
         let job_id = 42;
-        cancel_folder_scan(job_id).expect("cancel scan");
+        mark_scan_cancelled(job_id);
 
         let error = scan_directories(
             left.path().to_string_lossy().into_owned(),

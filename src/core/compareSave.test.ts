@@ -20,10 +20,12 @@ describe("compareSavePreconditionForPath", () => {
       compareSavePreconditionForPath(session, "/repo/right.txt", {
         expectedSize: 42,
         expectedModifiedMs: 3000,
+        expectedContentHash: "saved-right-hash",
       }),
     ).toEqual({
       expectedSize: 42,
       expectedModifiedMs: 3000,
+      expectedContentHash: "saved-right-hash",
     });
   });
 
@@ -33,6 +35,7 @@ describe("compareSavePreconditionForPath", () => {
     expect(compareSavePreconditionForPath(session, "/repo/left.txt", null)).toEqual({
       expectedSize: 9,
       expectedModifiedMs: 1000,
+      expectedContentHash: "left-open-hash",
     });
     expect(compareSavePreconditionForPath(session, "/tmp/copy.txt", null)).toBeNull();
   });
@@ -47,16 +50,19 @@ describe("compareSavePreconditionForPath", () => {
         {
           expectedSize: 99,
           expectedModifiedMs: 9000,
+          expectedContentHash: "saved-left-hash",
         },
         "left",
       ),
     ).toEqual({
       expectedSize: 99,
       expectedModifiedMs: 9000,
+      expectedContentHash: "saved-left-hash",
     });
     expect(compareSavePreconditionForPath(session, "/repo/right.txt", null, "left")).toEqual({
       expectedSize: 6,
       expectedModifiedMs: 1001,
+      expectedContentHash: "right-open-hash",
     });
   });
 
@@ -81,6 +87,7 @@ describe("compareSaveStateAfterWrite", () => {
         backupPath: "C:\\out\\copy.txt.bak",
         size: 13,
         modifiedMs: 4000,
+        contentHash: "written-right-hash",
       }),
     ).toEqual({
       session: {
@@ -96,6 +103,7 @@ describe("compareSaveStateAfterWrite", () => {
           hadFinalNewline: false,
           size: 13,
           modifiedMs: 4000,
+          contentHash: "written-right-hash",
           decodeHadErrors: false,
         },
       },
@@ -103,6 +111,7 @@ describe("compareSaveStateAfterWrite", () => {
       rightVersion: {
         expectedSize: 13,
         expectedModifiedMs: 4000,
+        expectedContentHash: "written-right-hash",
       },
       message: "Saved · backup: C:\\out\\copy.txt.bak",
     });
@@ -117,6 +126,7 @@ describe("compareSaveStateAfterWrite", () => {
         backupPath: null,
         size: 9,
         modifiedMs: 5000,
+        contentHash: "written-left-hash",
       }),
     ).toEqual({
       session: {
@@ -131,6 +141,7 @@ describe("compareSaveStateAfterWrite", () => {
           hadFinalNewline: true,
           size: 9,
           modifiedMs: 5000,
+          contentHash: "written-left-hash",
           decodeHadErrors: false,
         },
         right: session.right,
@@ -139,6 +150,7 @@ describe("compareSaveStateAfterWrite", () => {
       outputVersion: {
         expectedSize: 9,
         expectedModifiedMs: 5000,
+        expectedContentHash: "written-left-hash",
       },
       message: "Saved",
     });
@@ -159,12 +171,14 @@ describe("compareSaveStateAfterWrite", () => {
         backupPath: null,
         size: 22,
         modifiedMs: 6000,
+        contentHash: "written-utf16-hash",
       }).session.right,
     ).toMatchObject({
       text: "new right\n",
       encoding: "UTF-16LE BOM",
       size: 22,
       modifiedMs: 6000,
+      contentHash: "written-utf16-hash",
       decodeHadErrors: false,
     });
   });
@@ -184,6 +198,7 @@ describe("compareSaveStateAfterWrite", () => {
         backupPath: null,
         size: 6,
         modifiedMs: 7000,
+        contentHash: "written-utf8-hash",
       }).session.right.encoding,
     ).toBe("UTF-8");
   });
@@ -291,10 +306,11 @@ describe("preservedSaveEncodingForDocument", () => {
 });
 
 describe("writePreconditionFromDocument", () => {
-  it("copies size and modified time into a write precondition", () => {
+  it("copies size, modified time, and the opened byte hash into a write precondition", () => {
     expect(writePreconditionFromDocument(document("/repo/right.txt", "right\n"))).toEqual({
       expectedSize: 6,
       expectedModifiedMs: 1001,
+      expectedContentHash: "right-open-hash",
     });
   });
 });
@@ -317,6 +333,7 @@ function document(path: string, text: string): FileDocument {
     hadFinalNewline: text.endsWith("\n"),
     size: new TextEncoder().encode(text).byteLength,
     modifiedMs: path.includes("left") ? 1000 : 1001,
+    contentHash: path.includes("left") ? "left-open-hash" : "right-open-hash",
     isBinary: false,
     decodeHadErrors: false,
   };

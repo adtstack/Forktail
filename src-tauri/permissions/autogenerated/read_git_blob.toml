@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-read-git-blob"
+description = "Enables the read_git_blob command without any pre-configured scope."
+commands.allow = ["read_git_blob"]
+
+[[permission]]
+identifier = "deny-read-git-blob"
+description = "Denies the read_git_blob command without any pre-configured scope."
+commands.deny = ["read_git_blob"]

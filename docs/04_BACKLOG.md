@@ -17,7 +17,7 @@
 
 | ID | 작업 | 수용 기준 | 의존 |
 |---|---|---|---|
-| TXT-001 | 파일 열기 오류 UX | 취소/권한/없음/대용량/binary가 서로 다른 메시지 | FND-002 |
+| TXT-001 | 파일 열기 오류 UX | 취소/권한/없음/대용량/binary가 서로 다른 메시지이며 text/version read가 symlink와 읽기 중 64 MiB 초과·path 교체를 내용/hash 반환 없이 거절 | FND-002 |
 | TXT-002 | 다음/이전 diff 탐색 | F7/Shift+F7과 버튼, 현재/전체 hunk 표시, wrap-around 옵션 | M0 |
 | TXT-003 | 공백 비교 옵션 | trim/all whitespace/case/EOL 옵션이 실제 diff에 반영 | TXT-002 |
 | TXT-004 | 마지막 개행 표현 | EOF newline 차이를 UI와 테스트에서 구분 | TXT-001 |
@@ -41,8 +41,9 @@
 | FOL-007 | 가상 스크롤 | 100k row에서 DOM row 수 제한, 키보드 이동 | FOL-006 |
 | FOL-008 | hash 병렬화 | bounded worker pool, UI responsive, cancellation 반영 | FOL-006 |
 | FOL-009 | scan cache | size+mtime key cache, 옵션 변경 시 올바른 invalidation | FOL-008 |
-| FOL-010 | 폴더 행 행동 | 일반 파일 compare(한쪽-only는 missing 가상 빈 문서), reveal/copy path, 폴더 expand/collapse | TXT-001 |
+| FOL-010 | 폴더 행 행동 | 폴더 우선 계층과 필터 문맥 유지, 항상 보이는 클릭 규칙 안내, 단일 클릭 선택, 일반 파일 더블 클릭/Enter compare(한쪽-only는 missing 가상 빈 문서), reveal/copy path, 폴더 expand/collapse | TXT-001 |
 | FOL-011 | copy/sync dry-run | 복사 계획만 생성·표시, 실제 적용은 별도 confirmation | SAV-003, FOL-010 |
+| FOL-020 | 폴더 비교 독립 검토 창 | 단일 클릭은 선택만 수행하고 regular text 더블클릭/Enter는 고정된 read-only OS 창을 열며, pair의 양쪽 no-follow/current raw snapshot all-or-nothing 검증, exact identity dedupe·8창/256MiB 한도·caller-bound ACL·종료 정리와 세 OS packaged 증적을 충족 | FOL-006, FOL-010, SEC-002 |
 
 ## Three-way merge
 
@@ -65,22 +66,23 @@
 | ID | 작업 | 수용 기준 | 의존 |
 |---|---|---|---|
 | SAV-001 | Save/Save As service | overwrite와 new file, dirty state, 사용자 취소 처리 | FND-002 |
-| SAV-002 | 외부 변경 precondition | open mtime/hash와 저장 직전 비교, overwrite/reload/save copy | SAV-001 |
+| SAV-002 | 외부 변경 precondition | open mtime/hash와 저장 직전 no-follow·64 MiB bounded snapshot을 비교하고 검증 경쟁은 `FILE_CHANGED`로 fail closed, overwrite/reload/save copy | SAV-001 |
 | SAV-003 | 플랫폼별 atomic replace | Windows ReplaceFile/Unix rename 검증, parent fsync, fault test | SAV-001 |
 | SAV-004 | encoding 보존 | UTF-8 BOM/UTF-16LE/BE round-trip, 선택적 UTF-8 변환 | SAV-003 |
 | SAV-005 | EOL 보존/변환 | original/OS/LF/CRLF 선택, mixed 입력 정책 | SAV-004 |
-| SAV-006 | backup retention | `.bak` 충돌 방지, timestamp/개수 정책, 복원 UI | SAV-003 |
+| SAV-006 | backup retention | `.bak` 충돌 방지, timestamp/개수 정책, 복원 UI, backup source no-follow·64 MiB+1 bounded stable snapshot, 실패 시 기존 history/retention 불변, 성공 후 최신 10개 | SAV-003 |
 
 ## UX, security, performance, release
 
 | ID | 작업 | 수용 기준 | 의존 |
 |---|---|---|---|
 | UX-001 | keyboard map | `docs/08_UX_SPEC.md` 단축키 구현·충돌 검사 | FND-005 |
-| UX-002 | unsaved close guard | window close/mode switch/reopen 모두 dirty 확인 | SAV-001 |
+| UX-002 | unsaved close guard | window close/mode switch/reopen과 OS application-level quit가 같은 dirty 확인을 거치고 승인된 programmatic exit는 guard loop 없이 한 번만 종료 | SAV-001 |
 | UX-003 | accessibility audit | axe + keyboard + screen reader labels + color-independent status | M3 |
 | UX-004 | theme | dark/light/system, semantic token 사용 | FND-004 |
 | UX-005 | recent sessions | path/options만 보관, missing path 처리, clear | FND-004 |
 | UX-006 | native reveal/copy path | Explorer/Finder/file manager 열기와 path copy | FND-005 |
+| UX-009 | 편집 위치 탐색 기록 | 최근 100개 text 위치를 memory-only로 보관하고 mouse Back/OS별 단축키로 pane·cursor·viewport 복원, stale target skip | FND-005, TXT-002, MRG-003 |
 | SEC-001 | CSP 고정 | Monaco local workers 유지하며 `csp: null` 제거 | M3 |
 | SEC-002 | capability 최소화 | window별 permissions 검토, unused permission 0 | SEC-001 |
 | SEC-003 | dependency audit | cargo-deny/npm audit/license allowlist CI | FND-006 |
@@ -92,6 +94,11 @@
 | REL-002 | Windows packages | NSIS/MSI 빌드·설치·제거 smoke | REL-001 |
 | REL-003 | macOS package | app/dmg, notarization 여부와 경고 문서 | REL-001 |
 | REL-004 | Linux packages | deb/AppImage, oldest supported glibc baseline | REL-001 |
+
+`UX-009`의 mounted 2-way/3-way 편집기 복원, OS별 단축키, X1 입력, native menu 상태 동기화와
+live folder cross-item 복원은 자동 계약 검증까지 구현됐다. folder reopen은 content-free scan identity와
+cancellable all-or-nothing pair-read만 사용한다. Git cross-item은 T081/T082가 남아 있으므로 별도 완료
+조건으로 유지한다. packaged hardware 검증은 사용자 소유이며 자동 검증 결과로 대체하지 않는다.
 | REL-005 | release workflow | tag 기반 3 OS artifact, checksum, draft release | REL-002~004 |
 | REL-006 | signing policy | 개인용 unsigned와 public signed 경로 분리 | REL-005 |
 | REL-007 | SBOM/NOTICE | JS/Rust 전체 dependency license와 SBOM 첨부 | SEC-003 |

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-reload-detached-folder-review"
+description = "Enables the reload_detached_folder_review command without any pre-configured scope."
+commands.allow = ["reload_detached_folder_review"]
+
+[[permission]]
+identifier = "deny-reload-detached-folder-review"
+description = "Denies the reload_detached_folder_review command without any pre-configured scope."
+commands.deny = ["reload_detached_folder_review"]

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-runtime-integration-profile"
+description = "Enables the runtime_integration_profile command without any pre-configured scope."
+commands.allow = ["runtime_integration_profile"]
+
+[[permission]]
+identifier = "deny-runtime-integration-profile"
+description = "Denies the runtime_integration_profile command without any pre-configured scope."
+commands.deny = ["runtime_integration_profile"]

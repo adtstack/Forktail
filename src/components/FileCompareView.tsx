@@ -1,6 +1,14 @@
 import { loadMonacoLanguage } from "../monaco";
 import { DiffEditor, type DiffOnMount } from "@monaco-editor/react";
-import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentProps,
+  type DragEvent,
+} from "react";
 import type { editor } from "monaco-editor";
 import {
   APP_COMMAND_EVENT,
@@ -16,11 +24,21 @@ import {
   type DiffDirection,
 } from "../core/diffNavigation";
 import {
-  prepareDiffTexts,
   type TextDiffOptions,
   type WhitespaceCompareMode,
 } from "../core/diffOptions";
+import {
+  attachExactTextDiff,
+  refreshExactTextDiff,
+  registerExactTextDiff,
+  retainExactTextDiffSourceModels,
+  unregisterExactTextDiff,
+  updateExactTextDiff,
+  type ExactTextDiffRegistration,
+  type ExactTextDiffSourceModelOwnership,
+} from "../core/exactTextDiffProvider";
 import { compareSessionCapabilities } from "../core/difftoolSession";
+import { detachedFolderReviewModelPath } from "../core/detachedFolderReview";
 import { gitSnapshotPatchAvailability } from "../core/gitSession";
 import {
   droppedFilePaths,
@@ -49,6 +67,156 @@ import {
 } from "../core/pathCopy";
 import { loadCompareViewSettings, saveCompareViewSettings, type AppLanguage } from "../core/settings";
 import { isMissingFileDocument, isVirtualFileDocument } from "../core/virtualDocument";
+import {
+  createEditorNavigationHandle,
+  isExplicitCursorJump,
+  type EditorNavigationBinding,
+  type EditorNavigationHandle,
+  type EditorViewSnapshot,
+  type MonacoNavigationEditor,
+  type MonacoNavigationObservationKind,
+} from "../core/monacoNavigation";
+
+type OwnedDiffEditorProps = ComponentProps<typeof DiffEditor> & { onMount: DiffOnMount };
+
+function OwnedDiffEditor({ onMount, ...props }: OwnedDiffEditorProps) {
+  const sourceModelOwnershipRef = useRef<ExactTextDiffSourceModelOwnership | null>(null);
+  const handleMount = useCallback<DiffOnMount>((instance, monaco) => {
+    const nextOwnership = retainExactTextDiffSourceModels(instance);
+    sourceModelOwnershipRef.current?.dispose();
+    sourceModelOwnershipRef.current = nextOwnership;
+    onMount(instance, monaco);
+  }, [onMount]);
+
+  useEffect(() => () => {
+    sourceModelOwnershipRef.current?.dispose();
+    sourceModelOwnershipRef.current = null;
+  }, []);
+
+  return (
+    <DiffEditor
+      {...props}
+      keepCurrentOriginalModel
+      keepCurrentModifiedModel
+      onMount={handleMount}
+    />
+  );
+}
+
+export interface BindFileCompareNavigationOptions {
+  originalEditor: MonacoNavigationEditor;
+  modifiedEditor: MonacoNavigationEditor;
+  modelRevision: number;
+  navigation: EditorNavigationBinding;
+  onRestored: (pane: "compareLeft" | "compareRight", snapshot: EditorViewSnapshot) => void;
+}
+
+export interface FileCompareNavigationBinding {
+  original: EditorNavigationHandle | null;
+  modified: EditorNavigationHandle | null;
+  commitBeforeDiff(direction: DiffDirection): void;
+  commitBeforeLeave(): void;
+  dispose(): void;
+}
+
+interface CompareHunkRange {
+  originalStartLineNumber: number;
+  originalEndLineNumber: number;
+  modifiedStartLineNumber: number;
+  modifiedEndLineNumber: number;
+}
+
+export function activeCompareHunkIndexAtLine(
+  changes: readonly CompareHunkRange[],
+  pane: "compareLeft" | "compareRight",
+  lineNumber: number,
+): number {
+  return changes.findIndex((change) => {
+    const start = pane === "compareLeft"
+      ? change.originalStartLineNumber
+      : change.modifiedStartLineNumber;
+    const end = pane === "compareLeft"
+      ? change.originalEndLineNumber
+      : change.modifiedEndLineNumber;
+    return lineNumber >= Math.max(1, start) && lineNumber <= Math.max(1, start, end);
+  });
+}
+
+export function bindFileCompareNavigation({
+  originalEditor,
+  modifiedEditor,
+  modelRevision,
+  navigation,
+  onRestored,
+}: BindFileCompareNavigationOptions): FileCompareNavigationBinding {
+  let activePane: "compareLeft" | "compareRight" | null = null;
+  const previousCursor = new Map<"compareLeft" | "compareRight", { lineNumber: number; column: number }>();
+
+  const bind = (
+    editorInstance: MonacoNavigationEditor,
+    pane: "compareLeft" | "compareRight",
+    modelKey: string,
+  ): { handle: EditorNavigationHandle; unregister: () => void } | null => {
+    const model = editorInstance.getModel();
+    if (!model) return null;
+    let handle: EditorNavigationHandle;
+    const observe = (snapshot: EditorViewSnapshot, kind: MonacoNavigationObservationKind) => {
+      const previous = previousCursor.get(pane);
+      if (kind === "focus" && activePane && activePane !== pane) {
+        navigation.commitCurrent("paneFocus");
+      }
+      if (kind === "cursor" && previous && isExplicitCursorJump(previous, snapshot.cursor)) {
+        navigation.commitCurrent("explicitCursorJump");
+      }
+      if (kind !== "scroll") activePane = pane;
+      previousCursor.set(pane, snapshot.cursor);
+      navigation.observe(handle, snapshot, kind);
+    };
+    handle = createEditorNavigationHandle({
+      editor: editorInstance,
+      model,
+      pane,
+      modelKey,
+      modelRevision,
+      isReplaying: navigation.isReplaying,
+      onObserved: observe,
+      onRestored: (snapshot) => { onRestored(pane, snapshot); },
+    });
+    return { handle, unregister: navigation.register(handle) };
+  };
+
+  const original = bind(originalEditor, "compareLeft", `compare-left:${modelRevision}`);
+  const modified = bind(modifiedEditor, "compareRight", `compare-right:${modelRevision}`);
+  const originalSnapshot = original?.handle.capture() ?? null;
+  const modifiedSnapshot = modified?.handle.capture() ?? null;
+  if (originalSnapshot) previousCursor.set("compareLeft", originalSnapshot.cursor);
+  if (modifiedSnapshot) previousCursor.set("compareRight", modifiedSnapshot.cursor);
+  const initial = modified && modifiedSnapshot
+    ? { handle: modified.handle, snapshot: modifiedSnapshot }
+    : original && originalSnapshot
+      ? { handle: original.handle, snapshot: originalSnapshot }
+      : null;
+  if (initial) {
+    activePane = initial.handle.pane as "compareLeft" | "compareRight";
+    navigation.observe(initial.handle, initial.snapshot, "focus");
+  }
+  return {
+    original: original?.handle ?? null,
+    modified: modified?.handle ?? null,
+    commitBeforeDiff(direction) {
+      navigation.commitCurrent(direction === "next" ? "nextDiff" : "previousDiff");
+    },
+    commitBeforeLeave() {
+      if (activePane) navigation.commitCurrent("leaveEditorTarget");
+    },
+    dispose() {
+      original?.unregister();
+      modified?.unregister();
+      original?.handle.dispose();
+      modified?.handle.dispose();
+    },
+  };
+}
 
 interface FileCompareViewProps {
   session: CompareSession;
@@ -59,6 +227,8 @@ interface FileCompareViewProps {
   modelRevision: number;
   dirtySides: Record<CompareSide, boolean>;
   backLabel?: string;
+  modelIdentity?: string;
+  persistViewSettings?: boolean;
   onBack: () => void;
   onCheckFileVersions: () => void;
   onKeepCurrentFiles: () => void;
@@ -72,6 +242,7 @@ interface FileCompareViewProps {
   onSaveSideAs: (side: CompareSide, lineEndingMode: SaveLineEndingMode) => void;
   onShowBackups: (side: CompareSide) => void;
   onSwap: () => void;
+  navigation?: EditorNavigationBinding;
 }
 
 interface PathCopyState {
@@ -94,6 +265,8 @@ export function FileCompareView({
   modelRevision,
   dirtySides,
   backLabel,
+  modelIdentity,
+  persistViewSettings,
   onBack,
   onCheckFileVersions,
   onKeepCurrentFiles,
@@ -107,11 +280,14 @@ export function FileCompareView({
   onSaveSideAs,
   onShowBackups,
   onSwap,
+  navigation: editorNavigation,
 }: FileCompareViewProps) {
   const text = FILE_COMPARE_TEXT[languageMode];
   const capabilities = compareSessionCapabilities(session);
   const difftoolSession = session.origin === "difftool";
   const gitSnapshotSession = session.origin === "git";
+  const folderReviewSession = session.origin === "folderReview";
+  const shouldPersistViewSettings = persistViewSettings ?? !folderReviewSession;
   const exportAvailable = gitSnapshotSession
     ? gitSnapshotPatchAvailability(session.snapshot).kind === "ready"
     : capabilities.exportReport;
@@ -124,12 +300,14 @@ export function FileCompareView({
   const [hunkCopyUndo, setHunkCopyUndo] = useState<HunkCopyUndoState | null>(null);
   const [dropSide, setDropSide] = useState<CompareDropSide | null>(null);
   const diffEditorRef = useRef<editor.IStandaloneDiffEditor | null>(null);
+  const exactTextDiffRegistrationRef = useRef<ExactTextDiffRegistration | null>(null);
   const lineChangesRef = useRef<editor.ILineChange[]>([]);
   const originalActiveDecorationIds = useRef<string[]>([]);
   const modifiedActiveDecorationIds = useRef<string[]>([]);
   const diffSubscriptionRef = useRef<{ dispose: () => void } | null>(null);
   const originalSubscriptionRef = useRef<{ dispose: () => void } | null>(null);
   const modifiedSubscriptionRef = useRef<{ dispose: () => void } | null>(null);
+  const editorNavigationBindingRef = useRef<FileCompareNavigationBinding | null>(null);
   const editableSideRef = useRef(editableSide);
   const onTextChangeRef = useRef(onTextChange);
   const language = useMemo(
@@ -137,14 +315,22 @@ export function FileCompareView({
     [session.left.path, session.right.path],
   );
   const [editorLanguage, setEditorLanguage] = useState(language);
-  const preparedDiffTexts = useMemo(
-    () => prepareDiffTexts(session.left.text, session.right.text, viewSettings.diffOptions),
-    [session.left.text, session.right.text, viewSettings.diffOptions],
-  );
   const isEditing = activeEditableSide !== "none";
-  const displayedDiffTexts = isEditing
-    ? { left: session.left.text, right: session.right.text }
-    : preparedDiffTexts;
+  const originalModelPath = modelPath(
+    "original",
+    session.left.path,
+    modelRevision,
+    activeEditableSide,
+    folderReviewSession ? modelIdentity : undefined,
+  );
+  const modifiedModelPath = modelPath(
+    "modified",
+    session.right.path,
+    modelRevision,
+    activeEditableSide,
+    folderReviewSession ? modelIdentity : undefined,
+  );
+  const diffEditorModelKey = `${originalModelPath.length}:${originalModelPath}${modifiedModelPath}`;
 
   const binary = session.left.isBinary || session.right.isBinary;
   const navigation = diffNavigationState(activeHunk, hunkCount);
@@ -261,6 +447,7 @@ export function FileCompareView({
     (direction: DiffDirection) => {
       const total = lineChangesRef.current.length;
       if (total === 0) return;
+      editorNavigationBindingRef.current?.commitBeforeDiff(direction);
       const nextIndex = nextDiffIndex(activeHunk, total, direction, viewSettings.wrapAround);
       revealHunk(nextIndex);
     },
@@ -398,9 +585,32 @@ export function FileCompareView({
     onDropFileOnSide(side, paths[0]);
   };
 
+  const configureEditorNavigation = useCallback((instance: editor.IStandaloneDiffEditor) => {
+    editorNavigationBindingRef.current?.dispose();
+    editorNavigationBindingRef.current = editorNavigation
+      ? bindFileCompareNavigation({
+          originalEditor: navigationEditor(instance.getOriginalEditor()),
+          modifiedEditor: navigationEditor(instance.getModifiedEditor()),
+          modelRevision,
+          navigation: editorNavigation,
+          onRestored: (pane, snapshot) => {
+            const index = activeCompareHunkIndexAtLine(
+              lineChangesRef.current,
+              pane,
+              snapshot.cursor.lineNumber,
+            );
+            if (index < 0) return;
+            updateActiveHunkDecorations(index, instance);
+            setActiveHunk(index);
+          },
+        })
+      : null;
+  }, [editorNavigation, modelRevision, updateActiveHunkDecorations]);
+
   const mountDiffEditor: DiffOnMount = useCallback(
-    (instance) => {
+    (instance, monaco) => {
       diffEditorRef.current = instance;
+      attachExactTextDiff(instance, monaco);
       diffSubscriptionRef.current?.dispose();
       diffSubscriptionRef.current = instance.onDidUpdateDiff(() => refreshDiffHunks(instance));
       originalSubscriptionRef.current?.dispose();
@@ -414,9 +624,53 @@ export function FileCompareView({
         onTextChangeRef.current("right", instance.getModifiedEditor().getValue());
       });
       refreshDiffHunks(instance);
+      configureEditorNavigation(instance);
     },
-    [refreshDiffHunks],
+    [configureEditorNavigation, refreshDiffHunks],
   );
+
+  useEffect(() => {
+    if (diffEditorRef.current) configureEditorNavigation(diffEditorRef.current);
+  }, [configureEditorNavigation]);
+
+  useEffect(() => {
+    const registration = registerExactTextDiff(
+      originalModelPath,
+      modifiedModelPath,
+      session.left.text,
+      session.right.text,
+      viewSettings.diffOptions,
+      session.left.lineEnding !== session.right.lineEnding ||
+        session.left.lineEnding === "mixed" ||
+        session.right.lineEnding === "mixed",
+    );
+    exactTextDiffRegistrationRef.current = registration;
+    if (diffEditorRef.current) refreshExactTextDiff(diffEditorRef.current);
+
+    return () => {
+      unregisterExactTextDiff(registration);
+      if (exactTextDiffRegistrationRef.current === registration) {
+        exactTextDiffRegistrationRef.current = null;
+      }
+    };
+  }, [
+    modifiedModelPath,
+    originalModelPath,
+    session.left.lineEnding,
+    session.right.lineEnding,
+  ]);
+
+  useEffect(() => {
+    const registration = exactTextDiffRegistrationRef.current;
+    if (!registration) return;
+    updateExactTextDiff(
+      registration,
+      session.left.text,
+      session.right.text,
+      viewSettings.diffOptions,
+    );
+    if (diffEditorRef.current) refreshExactTextDiff(diffEditorRef.current);
+  }, [session.left.text, session.right.text, viewSettings.diffOptions]);
 
   useEffect(() => {
     editableSideRef.current = activeEditableSide;
@@ -451,11 +705,11 @@ export function FileCompareView({
   useEffect(() => {
     setActiveHunk(0);
     refreshDiffHunks();
-  }, [displayedDiffTexts.left, displayedDiffTexts.right, refreshDiffHunks]);
+  }, [session.left.text, session.right.text, viewSettings.diffOptions, refreshDiffHunks]);
 
   useEffect(() => {
-    saveCompareViewSettings(viewSettings);
-  }, [viewSettings]);
+    if (shouldPersistViewSettings) saveCompareViewSettings(viewSettings);
+  }, [shouldPersistViewSettings, viewSettings]);
 
   useEffect(() => {
     setPathCopyState(null);
@@ -531,6 +785,9 @@ export function FileCompareView({
     diffSubscriptionRef.current?.dispose();
     originalSubscriptionRef.current?.dispose();
     modifiedSubscriptionRef.current?.dispose();
+    editorNavigationBindingRef.current?.commitBeforeLeave();
+    editorNavigationBindingRef.current?.dispose();
+    editorNavigationBindingRef.current = null;
   }, []);
 
   const copyPath = async (label: string, path: string) => {
@@ -721,6 +978,11 @@ export function FileCompareView({
         {gitSnapshotSession && (
           <span className="badge" aria-label={text.gitSnapshotSessionAria}>{text.gitSnapshot}</span>
         )}
+        {folderReviewSession && (
+          <span className="badge" aria-label={text.folderReviewSessionAria}>
+            {text.folderReview}
+          </span>
+        )}
         <span className="badge" aria-label={text.languageAria(language)}>{language}</span>
       </header>
 
@@ -890,6 +1152,11 @@ export function FileCompareView({
           {text.gitSnapshotReadOnlyNote}
         </div>
       )}
+      {folderReviewSession && (
+        <div className="metadata-warning" role="status">
+          {text.folderReviewReadOnlyNote}
+        </div>
+      )}
       {pathCopyState && (
         <div className="path-copy-status" role="status">
           <span>{pathCopyState.message}</span>
@@ -960,25 +1227,14 @@ export function FileCompareView({
           className="editor-frame"
           aria-label={text.editorAria(session.left.path, session.right.path)}
         >
-          <DiffEditor
+          <OwnedDiffEditor
+            key={diffEditorModelKey}
             height="100%"
             language={editorLanguage}
-            original={displayedDiffTexts.left}
-            modified={displayedDiffTexts.right}
-            originalModelPath={modelPath(
-              "original",
-              session.left.path,
-              modelRevision,
-              activeEditableSide,
-            )}
-            modifiedModelPath={modelPath(
-              "modified",
-              session.right.path,
-              modelRevision,
-              activeEditableSide,
-            )}
-            keepCurrentOriginalModel
-            keepCurrentModifiedModel
+            original={session.left.text}
+            modified={session.right.text}
+            originalModelPath={originalModelPath}
+            modifiedModelPath={modifiedModelPath}
             theme={editorTheme}
             onMount={mountDiffEditor}
             options={{
@@ -1061,6 +1317,7 @@ export function FileHeading({
   return (
     <div
       className={`file-heading${dropActive ? " drop-active" : ""}`}
+      data-compare-drop-side={dropSide}
       title={path}
       role="group"
       aria-disabled={!dropEnabled}
@@ -1100,10 +1357,32 @@ export function isFileCompareCommandAllowed(
 ): boolean {
   const capabilities = compareSessionCapabilities(session);
 
+  if (session.origin === "folderReview") {
+    return commandId === "previousDiff" || commandId === "nextDiff";
+  }
+
   if (commandId === "swapSides") return capabilities.swap;
   if (commandId === "save") return capabilities.save;
   if (commandId === "saveAs") return capabilities.saveAs;
   return true;
+}
+
+function navigationEditor(instance: editor.IStandaloneCodeEditor): MonacoNavigationEditor {
+  return {
+    getModel: () => instance.getModel(),
+    getPosition: () => instance.getPosition(),
+    getVisibleRanges: () => instance.getVisibleRanges(),
+    getScrollTop: () => instance.getScrollTop(),
+    getScrollLeft: () => instance.getScrollLeft(),
+    getTopForLineNumber: (lineNumber) => instance.getTopForLineNumber(lineNumber),
+    setPosition: (position) => { instance.setPosition(position); },
+    setScrollPosition: (position) => { instance.setScrollPosition(position); },
+    focus: () => { instance.focus(); },
+    onDidChangeCursorPosition: (listener) =>
+      instance.onDidChangeCursorPosition(() => { listener(); }),
+    onDidScrollChange: (listener) => instance.onDidScrollChange(() => { listener(); }),
+    onDidFocusEditorText: (listener) => instance.onDidFocusEditorText(() => { listener(); }),
+  };
 }
 
 function formatBytes(bytes: number): string {
@@ -1132,7 +1411,15 @@ function modelPath(
   path: string,
   revision: number,
   editableSide: CompareSide | "none",
+  modelIdentity?: string,
 ): string {
+  if (modelIdentity) {
+    return detachedFolderReviewModelPath(
+      modelIdentity,
+      side === "original" ? "left" : "right",
+      revision,
+    );
+  }
   const mode = editableSide === "none" ? "view" : `edit-${editableSide}`;
   return `forktail://${side}/${revision}/${mode}/${encodeURIComponent(path)}`;
 }

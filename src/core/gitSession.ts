@@ -692,6 +692,7 @@ export function adaptGitConflictSession(session: GitConflictSession): GitConflic
       : {
           expectedSize: session.result.workingTreeVersion.size,
           expectedModifiedMs: session.result.workingTreeVersion.modifiedMs,
+          expectedContentHash: session.resultFingerprint.contentHash,
         },
   };
 }

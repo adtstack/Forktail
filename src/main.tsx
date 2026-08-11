@@ -1,10 +1,25 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import App from "./App";
+import { isDetachedFolderReviewSurface } from "./core/detachedFolderReview";
 import "./styles.css";
 
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+async function mountRoot(): Promise<void> {
+  const element = document.getElementById("root");
+  if (!element) throw new Error("Forktail root element is missing.");
+  const root = createRoot(element);
+
+  if (isDetachedFolderReviewSurface(window.location.search)) {
+    const { default: DetachedFolderReviewApp } = await import("./DetachedFolderReviewApp");
+    root.render(<DetachedFolderReviewApp />);
+    return;
+  }
+
+  const { default: App } = await import("./App");
+  root.render(
+    <StrictMode>
+      <App />
+    </StrictMode>,
+  );
+}
+
+void mountRoot();

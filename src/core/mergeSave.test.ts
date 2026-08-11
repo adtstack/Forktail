@@ -3,6 +3,7 @@ import {
   canSaveMergeResult,
   gitConflictSaveRequest,
   mergeSaveEncodingWarning,
+  mergeOutputBaselineForRestore,
   mergeSavePreconditionForPath,
   mergeResultOriginalLineEnding,
   mergeSaveStateAfterWrite,
@@ -67,6 +68,7 @@ describe("mergeSaveStateAfterWrite", () => {
         backupPath: null,
         size: 7,
         modifiedMs: 1234,
+        contentHash: "written-result-hash",
       }),
     ).toEqual({
       outputPath: "/out/merged.txt",
@@ -74,6 +76,7 @@ describe("mergeSaveStateAfterWrite", () => {
       outputVersion: {
         expectedSize: 7,
         expectedModifiedMs: 1234,
+        expectedContentHash: "written-result-hash",
       },
       message: "Saved",
     });
@@ -86,6 +89,7 @@ describe("mergeSaveStateAfterWrite", () => {
         backupPath: "/out/merged.txt.bak",
         size: 7,
         modifiedMs: null,
+        contentHash: "written-result-hash",
       }).message,
     ).toBe("Saved · backup: /out/merged.txt.bak");
   });
@@ -165,10 +169,12 @@ describe("mergeSavePreconditionForPath", () => {
       mergeSavePreconditionForPath(session, "/out/merged.txt", {
         expectedSize: 22,
         expectedModifiedMs: 2000,
+        expectedContentHash: "saved-result-hash",
       }),
     ).toEqual({
       expectedSize: 22,
       expectedModifiedMs: 2000,
+      expectedContentHash: "saved-result-hash",
     });
   });
 
@@ -178,11 +184,46 @@ describe("mergeSavePreconditionForPath", () => {
     expect(mergeSavePreconditionForPath(session, "/repo/ours.txt", null)).toEqual({
       expectedSize: 9,
       expectedModifiedMs: 1001,
+      expectedContentHash: "ours-open-hash",
     });
   });
 
   it("does not guard arbitrary Save As paths without a known baseline", () => {
     expect(mergeSavePreconditionForPath(mergeSession({ outputPath: null }), "/other/out.txt", null)).toBeNull();
+  });
+});
+
+describe("mergeOutputBaselineForRestore", () => {
+  it("restores a hash-bound precondition for an existing result file", () => {
+    expect(
+      mergeOutputBaselineForRestore("/out/merged.txt", {
+        path: "/out/merged.txt",
+        size: 22,
+        modifiedMs: 2000,
+        contentHash: "restored-output-hash",
+      }),
+    ).toEqual({
+      precondition: {
+        expectedSize: 22,
+        expectedModifiedMs: 2000,
+        expectedContentHash: "restored-output-hash",
+      },
+      expectedAbsent: false,
+    });
+  });
+
+  it("guards a persisted result path that was absent when the session was restored", () => {
+    expect(mergeOutputBaselineForRestore("/out/new.txt", null)).toEqual({
+      precondition: null,
+      expectedAbsent: true,
+    });
+  });
+
+  it("does not create an absence guard when no result path is configured", () => {
+    expect(mergeOutputBaselineForRestore(null, null)).toEqual({
+      precondition: null,
+      expectedAbsent: false,
+    });
   });
 });
 
@@ -270,6 +311,7 @@ function document(path: string, size: number, modifiedMs: number): FileDocument 
     hadFinalNewline: true,
     size,
     modifiedMs,
+    contentHash: `${path.split("/").pop()?.replace(".txt", "")}-open-hash`,
     isBinary: false,
     decodeHadErrors: false,
   };

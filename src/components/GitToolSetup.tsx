@@ -6,7 +6,11 @@ import {
   type ChangeEvent,
   type RefObject,
 } from "react";
-import { gitToolExecutablePath, isTauriRuntime } from "../core/bridge";
+import {
+  isTauriRuntime,
+  runtimeIntegrationProfile,
+  type RuntimeIntegrationProfile,
+} from "../core/bridge";
 import {
   generateGitToolConfig,
   type GeneratedGitToolConfig,
@@ -32,6 +36,11 @@ const GIT_TOOL_SETUP_TEXT = {
     title: "Git tool setup",
     description: "Generate explicit tool-specific snippets, then copy them into Git config manually.",
     platform: "Platform",
+    detectedAutomatically: "Detected automatically",
+    detectingRuntime: "Detecting packaged runtime…",
+    manualRequired: "Enter the executable path manually.",
+    advancedOverride: "Advanced platform override",
+    closeAdvancedOverride: "Use detected platform",
     executablePath: "Forktail executable path",
     pathExample: (example: string) =>
       `Example only—do not copy it as-is. Verify your installation path: ${example}`,
@@ -54,6 +63,11 @@ const GIT_TOOL_SETUP_TEXT = {
     title: "Git 도구 설정",
     description: "도구별 설정 스니펫을 만든 뒤 Git config에 직접 복사하세요.",
     platform: "플랫폼",
+    detectedAutomatically: "자동으로 감지됨",
+    detectingRuntime: "패키징 실행 환경을 확인하는 중…",
+    manualRequired: "실행 파일 경로를 직접 입력하세요.",
+    advancedOverride: "고급 플랫폼 재정의",
+    closeAdvancedOverride: "감지된 플랫폼 사용",
     executablePath: "forktail 실행 파일 경로",
     pathExample: (example: string) =>
       `예시를 그대로 복사하지 말고 실제 설치 경로를 확인하세요: ${example}`,
@@ -82,15 +96,11 @@ export interface GitToolSetupModel {
 export type GitToolSetupCopyResult = "copied" | "manual";
 export type GitToolSnippetKind = "difftool" | "mergetool";
 
-export interface GitToolRuntimePlatformHint {
-  platform?: string;
-  userAgent?: string;
-}
-
 interface GitToolSetupProps {
   languageMode: AppLanguage;
   initialPlatform?: GitToolPlatform;
   initialExecutablePath?: string;
+  initialRuntimeProfile?: RuntimeIntegrationProfile;
 }
 
 export interface GitToolExecutablePathState {
@@ -116,31 +126,6 @@ export function gitToolSetupModel(
       ),
     };
   }
-}
-
-export function detectGitToolPlatform(
-  hint: GitToolRuntimePlatformHint | null = browserPlatformHint(),
-): GitToolPlatform {
-  if (!hint) return "macos";
-
-  const platform = hint.platform?.toLowerCase() ?? "";
-  const userAgent = hint.userAgent?.toLowerCase() ?? "";
-  if (platform.startsWith("win") || userAgent.includes("windows")) return "windows";
-  if (
-    platform.includes("mac") ||
-    userAgent.includes("macintosh") ||
-    userAgent.includes("mac os")
-  ) {
-    return "macos";
-  }
-  if (
-    platform.includes("linux") ||
-    userAgent.includes("linux") ||
-    userAgent.includes("x11")
-  ) {
-    return "linux";
-  }
-  return "macos";
 }
 
 export async function copyGitToolSnippet(
@@ -177,11 +162,24 @@ export function GitToolSetup({
   languageMode,
   initialPlatform,
   initialExecutablePath,
+  initialRuntimeProfile,
 }: GitToolSetupProps) {
-  const detectedInitialPlatform = initialPlatform ?? detectGitToolPlatform();
-  const [platform, setPlatform] = useState<GitToolPlatform>(detectedInitialPlatform);
+  const initialProfile = initialRuntimeProfile ?? (
+    initialPlatform
+      ? {
+          platform: initialPlatform,
+          executablePath: initialExecutablePath ?? null,
+          detection: initialExecutablePath ? "detected" as const : "manualRequired" as const,
+        }
+      : null
+  );
+  const [profile, setProfile] = useState<RuntimeIntegrationProfile | null>(initialProfile);
+  const [platform, setPlatform] = useState<GitToolPlatform>(
+    initialProfile?.platform ?? "macos",
+  );
+  const [advancedOverride, setAdvancedOverride] = useState(false);
   const [executablePathState, setExecutablePathState] = useState<GitToolExecutablePathState>({
-    value: initialExecutablePath ?? "",
+    value: initialProfile?.executablePath ?? initialExecutablePath ?? "",
     userEdited: initialExecutablePath !== undefined,
   });
   const executablePath = executablePathState.value;
@@ -189,30 +187,39 @@ export function GitToolSetup({
   const difftoolRef = useRef<HTMLTextAreaElement>(null);
   const mergetoolRef = useRef<HTMLTextAreaElement>(null);
   const text = GIT_TOOL_SETUP_TEXT[languageMode];
-  const model = useMemo(
-    () => gitToolSetupModel(platform, executablePath, languageMode),
-    [executablePath, languageMode, platform],
-  );
+  const model = useMemo(() => {
+    if (!profile) return { config: null, error: null } satisfies GitToolSetupModel;
+    return gitToolSetupModel(platform, executablePath, languageMode);
+  }, [executablePath, languageMode, platform, profile]);
 
   useEffect(() => {
-    if (!isTauriRuntime()) return;
+    if (initialRuntimeProfile || initialPlatform) return;
+    if (!isTauriRuntime()) {
+      setProfile({ platform: "macos", executablePath: null, detection: "manualRequired" });
+      return;
+    }
 
     let active = true;
-    void gitToolExecutablePath()
-      .then((detectedPath) => {
+    void runtimeIntegrationProfile()
+      .then((detectedProfile) => {
         if (!active) return;
-        setExecutablePathState((current) =>
-          applyDetectedGitToolExecutablePath(current, detectedPath)
-        );
+        setProfile(detectedProfile);
+        setPlatform(detectedProfile.platform);
+        if (detectedProfile.executablePath) {
+          setExecutablePathState((current) =>
+            applyDetectedGitToolExecutablePath(current, detectedProfile.executablePath!)
+          );
+        }
       })
       .catch(() => {
-        // The empty field and platform-specific example remain actionable fallback guidance.
+        if (!active) return;
+        setProfile({ platform: "macos", executablePath: null, detection: "manualRequired" });
       });
 
     return () => {
       active = false;
     };
-  }, []);
+  }, [initialPlatform, initialRuntimeProfile]);
 
   const changePlatform = (event: ChangeEvent<HTMLSelectElement>) => {
     const nextPlatform = event.target.value as GitToolPlatform;
@@ -220,6 +227,14 @@ export function GitToolSetup({
     setExecutablePathState({ value: "", userEdited: true });
     setCopyStatus(null);
   };
+
+  const toggleAdvancedOverride = () => {
+    setAdvancedOverride((current) => !current);
+    setCopyStatus(null);
+  };
+
+  const platformLabel = PLATFORM_OPTIONS.find(([value]) => value === platform)?.[1] ?? platform;
+  const showManualControls = profile?.detection === "manualRequired" || advancedOverride;
 
   const copySnippet = async (kind: GitToolSnippetKind) => {
     const snippet = model.config?.[kind];
@@ -247,33 +262,54 @@ export function GitToolSetup({
         <span className="git-tool-copy-only">{text.copyOnly}</span>
       </div>
 
-      <div className="git-tool-controls">
-        <label>
-          <span>{text.platform}</span>
-          <select value={platform} onChange={changePlatform}>
-            {PLATFORM_OPTIONS.map(([value, label]) => (
-              <option key={value} value={value}>{label}</option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <span>{text.executablePath}</span>
-          <input
-            type="text"
-            value={executablePath}
-            placeholder={GIT_TOOL_EXECUTABLE_PATH_EXAMPLES[platform]}
-            onChange={(event) => {
-              setExecutablePathState({ value: event.target.value, userEdited: true });
-              setCopyStatus(null);
-            }}
-            spellCheck={false}
-            autoComplete="off"
-            aria-invalid={model.error ? true : undefined}
-            aria-describedby={model.error ? "git-tool-path-error" : undefined}
-          />
-          <small>{text.pathExample(GIT_TOOL_EXECUTABLE_PATH_EXAMPLES[platform])}</small>
-        </label>
-      </div>
+      {profile ? (
+        <div className="git-tool-runtime">
+          <div className="git-tool-runtime-summary">
+            <span>{profile.detection === "detected" ? text.detectedAutomatically : text.manualRequired}</span>
+            <strong>{platformLabel}</strong>
+            {profile.detection === "detected" && profile.executablePath && (
+              <code>{profile.executablePath}</code>
+            )}
+          </div>
+          <button type="button" className="git-tool-advanced-toggle" onClick={toggleAdvancedOverride}>
+            {advancedOverride ? text.closeAdvancedOverride : text.advancedOverride}
+          </button>
+        </div>
+      ) : (
+        <p className="git-tool-runtime-status" role="status">{text.detectingRuntime}</p>
+      )}
+
+      {showManualControls && (
+        <div className="git-tool-controls">
+          {advancedOverride && (
+            <label>
+              <span>{text.platform}</span>
+              <select value={platform} onChange={changePlatform}>
+                {PLATFORM_OPTIONS.map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </label>
+          )}
+          <label>
+            <span>{text.executablePath}</span>
+            <input
+              type="text"
+              value={executablePath}
+              placeholder={GIT_TOOL_EXECUTABLE_PATH_EXAMPLES[platform]}
+              onChange={(event) => {
+                setExecutablePathState({ value: event.target.value, userEdited: true });
+                setCopyStatus(null);
+              }}
+              spellCheck={false}
+              autoComplete="off"
+              aria-invalid={model.error ? true : undefined}
+              aria-describedby={model.error ? "git-tool-path-error" : undefined}
+            />
+            <small>{text.pathExample(GIT_TOOL_EXECUTABLE_PATH_EXAMPLES[platform])}</small>
+          </label>
+        </div>
+      )}
 
       {model.error && (
         <p id="git-tool-path-error" className="git-tool-error" role="alert">
@@ -348,12 +384,4 @@ function GitToolSnippet({
       />
     </section>
   );
-}
-
-function browserPlatformHint(): GitToolRuntimePlatformHint | null {
-  if (typeof window === "undefined" || typeof navigator === "undefined") return null;
-  return {
-    platform: navigator.platform,
-    userAgent: navigator.userAgent,
-  };
 }

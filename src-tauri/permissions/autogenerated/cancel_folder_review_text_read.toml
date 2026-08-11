@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-cancel-folder-review-text-read"
+description = "Enables the cancel_folder_review_text_read command without any pre-configured scope."
+commands.allow = ["cancel_folder_review_text_read"]
+
+[[permission]]
+identifier = "deny-cancel-folder-review-text-read"
+description = "Denies the cancel_folder_review_text_read command without any pre-configured scope."
+commands.deny = ["cancel_folder_review_text_read"]

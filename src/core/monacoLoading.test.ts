@@ -11,6 +11,20 @@ const fileCompareSource = readFileSync(
 const mergeSource = readFileSync(new URL("../components/MergeView.tsx", import.meta.url), "utf8");
 
 describe("Monaco loading policy", () => {
+  it("registers editor contributions before exposing the Monaco instance to any editor", () => {
+    const editorBootstrap = monacoSource.indexOf(
+      'import "monaco-editor/esm/vs/editor/editor.all.js"',
+    );
+    const editorApi = monacoSource.indexOf(
+      'import * as monaco from "monaco-editor/esm/vs/editor/editor.api.js"',
+    );
+    const loaderConfig = monacoSource.indexOf("loader.config({ monaco })");
+
+    expect(editorBootstrap).toBeGreaterThanOrEqual(0);
+    expect(editorBootstrap).toBeLessThan(editorApi);
+    expect(editorApi).toBeLessThan(loaderConfig);
+  });
+
   it("keeps language contributions behind on-demand imports", () => {
     expect(monacoSource).toContain("export function loadMonacoLanguage");
     expect(monacoSource).toContain(
@@ -42,5 +56,12 @@ describe("Monaco loading policy", () => {
       expect(source).toContain("void loadMonacoLanguage(language).then");
       expect(source).toContain('setEditorLanguage(language === "plaintext" ? language : "plaintext")');
     }
+  });
+
+  it("routes both compare and merge editors through the shared bootstrap module", () => {
+    expect(fileCompareSource).not.toMatch(/from ["']monaco-editor\/esm\/vs\/editor\/editor\./);
+    expect(mergeSource).not.toMatch(/from ["']monaco-editor\/esm\/vs\/editor\/editor\./);
+    expect(fileCompareSource).toContain('from "../monaco"');
+    expect(mergeSource).toContain('from "../monaco"');
   });
 });

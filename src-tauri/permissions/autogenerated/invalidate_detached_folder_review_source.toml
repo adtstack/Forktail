@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-invalidate-detached-folder-review-source"
+description = "Enables the invalidate_detached_folder_review_source command without any pre-configured scope."
+commands.allow = ["invalidate_detached_folder_review_source"]
+
+[[permission]]
+identifier = "deny-invalidate-detached-folder-review-source"
+description = "Denies the invalidate_detached_folder_review_source command without any pre-configured scope."
+commands.deny = ["invalidate_detached_folder_review_source"]

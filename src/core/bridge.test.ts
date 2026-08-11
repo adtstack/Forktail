@@ -2,17 +2,35 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
+  open: vi.fn(),
+  save: vi.fn(),
 }));
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
-vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: mocks.invoke,
+  Channel: class MockChannel<T> {
+    onmessage?: (message: T) => void;
+  },
+}));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: mocks.open, save: mocks.save }));
 
 import {
+  ackFolderScan,
   closeGitRepository,
   cancelGitJob,
+  cancelFolderReviewTextRead,
+  cancelFolderScan,
+  chooseDirectory,
+  chooseSavePath,
+  chooseTextFile,
   detectGitRepository,
   exitExternalGitTool,
   gitToolExecutablePath,
+  runtimeIntegrationProfile,
+  nativeDialogDepthSnapshot,
+  setEditorNavigationBackEnabled,
+  setSettingsCommandEnabled,
+  subscribeNativeDialogDepth,
   getGitMergeBase,
   listGitChangedFiles,
   listGitConflicts,
@@ -20,18 +38,168 @@ import {
   listGitRefs,
   listGitRecentCommits,
   listGitTree,
+  loadDetachedFolderReview,
   openGitConflict,
   openGitIndexCompare,
   openGitMergePreview,
   openGitRevisionCompare,
   openGitWorkingTreeCompare,
+  openDetachedFolderReview,
+  invalidateDetachedFolderReviewSource,
+  checkDetachedFolderReviewVersions,
+  reloadDetachedFolderReview,
+  readFolderReviewTextPair,
   readGitStatus,
+  restoreTextFileBackup,
   resolveGitRevision,
   saveGitConflictResult,
+  startFolderScan,
   statOptionalTextFileVersion,
   writeTextFileAtomic,
 } from "./bridge";
 import type { GitRevisionCompareRequest } from "./gitModels";
+import type {
+  FolderReviewTextPairRequest,
+  FolderScanMessage,
+  OpenDetachedFolderReviewRequest,
+} from "./models";
+
+describe("detached folder review bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("passes the resolved descriptor only from main open/invalidation calls", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ outcome: "created", windowLabel: "folder-review-1" });
+    const request: OpenDetachedFolderReviewRequest = {
+      sourceReviewToken: "review-7",
+      scanGeneration: 3,
+      leftRoot: "/left",
+      rightRoot: "/right",
+      relativePath: "src/main.rs",
+      leftExpected: "regularFile",
+      rightExpected: "missing",
+    };
+
+    await openDetachedFolderReview(request);
+    await invalidateDetachedFolderReviewSource({
+      sourceReviewToken: request.sourceReviewToken,
+      scanGeneration: request.scanGeneration,
+    });
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "open_detached_folder_review", { request });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(
+      2,
+      "invalidate_detached_folder_review_source",
+      { request: { sourceReviewToken: "review-7", scanGeneration: 3 } },
+    );
+  });
+
+  it("keeps child commands argument-free and caller-label-bound", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await loadDetachedFolderReview();
+    await checkDetachedFolderReviewVersions();
+    await reloadDetachedFolderReview();
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "load_detached_folder_review");
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "check_detached_folder_review_versions");
+    expect(mocks.invoke).toHaveBeenNthCalledWith(3, "reload_detached_folder_review");
+  });
+});
+
+describe("progressive folder scan bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("buffers early Channel messages until the native job identity is installed", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    const message: FolderScanMessage = {
+      event: "progress",
+      jobId: 41,
+      scanGeneration: 3,
+      sequence: 1,
+      data: {
+        phase: "inventory",
+        discovered: 1,
+        finalized: 0,
+        pending: 1,
+        errors: 0,
+        hashedFiles: 0,
+        hashCandidates: null,
+      },
+    };
+    let identityInstalled = false;
+    mocks.invoke.mockImplementationOnce(async (command, args) => {
+      expect(command).toBe("start_folder_scan");
+      const channel = (args as { onEvent: { onmessage?: (value: FolderScanMessage) => void } })
+        .onEvent;
+      channel.onmessage?.(message);
+      return {
+        jobId: 41,
+        scanGeneration: 3,
+        leftRoot: "/left",
+        rightRoot: "/right",
+        optionsFingerprint: "metadata:0:0:0",
+      };
+    });
+    const received: FolderScanMessage[] = [];
+
+    await startFolderScan(
+      {
+        scanGeneration: 3,
+        leftRoot: "/left",
+        rightRoot: "/right",
+        options: {
+          compareMode: "metadata",
+          includeHidden: false,
+          respectGitignore: false,
+          followSymlinks: false,
+        },
+      },
+      (value) => {
+        expect(identityInstalled).toBe(true);
+        received.push(value);
+      },
+      () => { identityInstalled = true; },
+    );
+
+    expect(received).toEqual([message]);
+  });
+
+  it("sends cumulative acknowledgement and generation-aware cancellation", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await ackFolderScan({ jobId: 41, scanGeneration: 3, appliedThroughSequence: 7 });
+    await cancelFolderScan(41, 3);
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "ack_folder_scan", {
+      ack: { jobId: 41, scanGeneration: 3, appliedThroughSequence: 7 },
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "cancel_folder_scan", {
+      jobId: 41,
+      scanGeneration: 3,
+    });
+  });
+});
 
 describe("external Git tool lifecycle bridge", () => {
   afterEach(() => {
@@ -79,6 +247,151 @@ describe("Git tool executable path bridge", () => {
   it("does not invent an executable path in browser or SSR contexts", async () => {
     await expect(gitToolExecutablePath()).rejects.toThrow("Tauri desktop runtime");
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("loads one authoritative runtime platform and executable profile", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({
+      platform: "macos",
+      executablePath: "/Applications/forktail.app/Contents/MacOS/forktail",
+      detection: "detected",
+    });
+
+    await expect(runtimeIntegrationProfile()).resolves.toEqual({
+      platform: "macos",
+      executablePath: "/Applications/forktail.app/Contents/MacOS/forktail",
+      detection: "detected",
+    });
+    expect(mocks.invoke).toHaveBeenCalledWith("runtime_integration_profile");
+  });
+});
+
+describe("editor navigation native bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    mocks.open.mockReset();
+    mocks.save.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+    expect(nativeDialogDepthSnapshot()).toBe(0);
+  });
+
+  it("sends only a boolean native menu capability", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await setEditorNavigationBackEnabled(true);
+    await setEditorNavigationBackEnabled(false);
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "set_editor_navigation_back_enabled", {
+      enabled: true,
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "set_editor_navigation_back_enabled", {
+      enabled: false,
+    });
+  });
+
+  it("rejects setter failures so App can fail closed", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockRejectedValue(new Error("menu unavailable"));
+
+    await expect(setEditorNavigationBackEnabled(true)).rejects.toThrow("menu unavailable");
+  });
+
+  it("sends only a boolean Settings menu capability", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await setSettingsCommandEnabled(true);
+    await setSettingsCommandEnabled(false);
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "set_settings_command_enabled", {
+      enabled: true,
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "set_settings_command_enabled", {
+      enabled: false,
+    });
+  });
+
+  it("tracks nested native dialogs and recovers on cancel and rejection", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    const depthChanges: number[] = [];
+    const unsubscribe = subscribeNativeDialogDepth((depth) => { depthChanges.push(depth); });
+    let resolveOpen!: (value: string | null) => void;
+    mocks.open
+      .mockImplementationOnce(() => new Promise<string | null>((resolve) => { resolveOpen = resolve; }))
+      .mockRejectedValueOnce(new Error("chooser failed"));
+    mocks.save.mockResolvedValueOnce(null);
+
+    const first = chooseTextFile("Choose file");
+    expect(nativeDialogDepthSnapshot()).toBe(1);
+    const second = chooseSavePath(undefined, "Save file");
+    expect(nativeDialogDepthSnapshot()).toBe(2);
+    await expect(second).resolves.toBeNull();
+    expect(nativeDialogDepthSnapshot()).toBe(1);
+    resolveOpen(null);
+    await expect(first).resolves.toBeNull();
+    expect(nativeDialogDepthSnapshot()).toBe(0);
+    await expect(chooseDirectory("Choose folder")).rejects.toThrow("chooser failed");
+    expect(nativeDialogDepthSnapshot()).toBe(0);
+    unsubscribe();
+
+    expect(depthChanges).toEqual([1, 2, 1, 0, 1, 0]);
+  });
+});
+
+describe("folder review text pair bridge", () => {
+  afterEach(() => {
+    mocks.invoke.mockReset();
+    Reflect.deleteProperty(globalThis, "window");
+  });
+
+  it("passes one typed all-or-nothing pair request and a caller-owned job id", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ left: { text: "left" }, right: null });
+    const request = {
+      leftRoot: "/review/left",
+      rightRoot: "/review/right",
+      relativePath: "src/App.tsx",
+      leftExpected: "regularFile",
+      rightExpected: "missing",
+    } satisfies FolderReviewTextPairRequest;
+
+    await readFolderReviewTextPair(request, 91);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("read_folder_review_text_pair", {
+      request,
+      jobId: 91,
+    });
+  });
+
+  it("uses an idempotent cancellation command without path or content payload", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue(undefined);
+
+    await cancelFolderReviewTextRead(91);
+
+    expect(mocks.invoke).toHaveBeenCalledWith("cancel_folder_review_text_read", { jobId: 91 });
   });
 });
 
@@ -168,8 +481,51 @@ describe("guarded patch output bridge", () => {
       createBackup: true,
       expectedSize: null,
       expectedModifiedMs: null,
+      expectedContentHash: null,
       encoding: "UTF-8",
-      expectedAbsent: true,
+    });
+  });
+
+  it("passes the opened byte hash to overwrite and backup-restore preconditions", async () => {
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: { __TAURI_INTERNALS__: {} },
+    });
+    mocks.invoke.mockResolvedValue({ path: "/repo/right.txt" });
+    const precondition = {
+      expectedSize: 12,
+      expectedModifiedMs: 1_700_000_000_000,
+      expectedContentHash: "opened-content-hash",
+    };
+
+    await writeTextFileAtomic(
+      "/repo/right.txt",
+      "replacement\n",
+      true,
+      precondition,
+      "UTF-8",
+    );
+    await restoreTextFileBackup(
+      "/repo/right.txt",
+      "/repo/right.txt.bak.1",
+      precondition,
+    );
+
+    expect(mocks.invoke).toHaveBeenNthCalledWith(1, "write_text_file_atomic", {
+      path: "/repo/right.txt",
+      text: "replacement\n",
+      createBackup: true,
+      expectedSize: 12,
+      expectedModifiedMs: 1_700_000_000_000,
+      expectedContentHash: "opened-content-hash",
+      encoding: "UTF-8",
+    });
+    expect(mocks.invoke).toHaveBeenNthCalledWith(2, "restore_text_file_backup", {
+      path: "/repo/right.txt",
+      backupPath: "/repo/right.txt.bak.1",
+      expectedSize: 12,
+      expectedModifiedMs: 1_700_000_000_000,
+      expectedContentHash: "opened-content-hash",
     });
   });
 });

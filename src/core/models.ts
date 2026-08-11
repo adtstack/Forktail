@@ -18,6 +18,12 @@ export const appErrorCodes = [
   "WRITE_FAILED",
   "SCAN_FAILED",
   "MERGE_FAILED",
+  "DETACHED_WINDOW_LIMIT",
+  "DETACHED_SOURCE_BYTE_LIMIT",
+  "DETACHED_SOURCE_STALE",
+  "DETACHED_UNKNOWN_WINDOW",
+  "DETACHED_WINDOW_CREATE_FAILED",
+  "DETACHED_INVALID_STATE",
   "GIT_NOT_FOUND",
   "GIT_VERSION_UNSUPPORTED",
   "GIT_COMMAND_TIMEOUT",
@@ -61,6 +67,7 @@ export interface FileDocument {
   hadFinalNewline: boolean;
   size: number;
   modifiedMs: number | null;
+  contentHash?: string | null;
   isBinary: boolean;
   decodeHadErrors: boolean;
   virtual?:
@@ -75,6 +82,7 @@ export interface FileVersion {
   path: string;
   size: number;
   modifiedMs: number | null;
+  contentHash: string;
 }
 
 export interface FileBackup {
@@ -134,12 +142,159 @@ export interface FolderScanResult {
   durationMs: number;
 }
 
-export interface FolderScanProgress {
+export interface StartFolderScanRequest {
+  scanGeneration: number;
+  leftRoot: string;
+  rightRoot: string;
+  options: FolderScanOptions;
+}
+
+export interface FolderScanStarted {
   jobId: number;
+  scanGeneration: number;
+  leftRoot: string;
+  rightRoot: string;
+  optionsFingerprint: string;
+}
+
+export interface FolderScanAck {
+  jobId: number;
+  scanGeneration: number;
+  appliedThroughSequence: number;
+}
+
+export type PendingReason = "awaitingPeer" | "awaitingHash";
+
+export type FolderEntryResolution =
+  | { state: "pending"; reason: PendingReason }
+  | { state: "final"; status: FolderEntryStatus };
+
+export interface FolderEntryUpsert {
+  relativePath: string;
+  revision: number;
+  leftPath: string | null;
+  rightPath: string | null;
+  left: FsEntryMeta | null;
+  right: FsEntryMeta | null;
+  resolution: FolderEntryResolution;
+  message: string | null;
+}
+
+export type FolderScanPhase = "inventory" | "classify" | "hash";
+
+export interface FolderScanProgressSnapshot {
+  phase: FolderScanPhase;
+  discovered: number;
+  finalized: number;
+  pending: number;
+  errors: number;
+  hashedFiles: number;
+  hashCandidates: number | null;
+}
+
+export type FolderScanTerminal =
+  | {
+      outcome: "completed";
+      stats: FolderScanStats;
+      entryCount: number;
+      durationMs: number;
+    }
+  | {
+      outcome: "cancelled";
+      finalized: number;
+      pending: number;
+      durationMs: number;
+    }
+  | {
+      outcome: "failed";
+      code: string;
+      message: string;
+      finalized: number;
+      pending: number;
+      durationMs: number;
+    };
+
+interface FolderScanMessageIdentity {
+  jobId: number;
+  scanGeneration: number;
+  sequence: number;
+}
+
+export type FolderScanMessage =
+  | (FolderScanMessageIdentity & {
+      event: "batch";
+      data: { upserts: FolderEntryUpsert[]; estimatedBytes: number };
+    })
+  | (FolderScanMessageIdentity & {
+      event: "progress";
+      data: FolderScanProgressSnapshot;
+    })
+  | (FolderScanMessageIdentity & {
+      event: "terminal";
+      data: FolderScanTerminal;
+    });
+
+export interface FolderScanProgress {
+  jobId: number | null;
+  scanGeneration?: number;
   active: boolean;
   leftRoot: string;
   rightRoot: string;
   message: string;
+  progress?: FolderScanProgressSnapshot | null;
+  terminal?: FolderScanTerminal | null;
+}
+
+export type FolderReviewSideExpectation = "regularFile" | "missing";
+
+export interface FolderReviewTextPairRequest {
+  leftRoot: string;
+  rightRoot: string;
+  relativePath: string;
+  leftExpected: FolderReviewSideExpectation;
+  rightExpected: FolderReviewSideExpectation;
+}
+
+export interface FolderReviewTextPair {
+  left: FileDocument | null;
+  right: FileDocument | null;
+}
+
+export interface OpenDetachedFolderReviewRequest extends FolderReviewTextPairRequest {
+  sourceReviewToken: string;
+  scanGeneration: number;
+}
+
+export type DetachedFolderReviewOpenResult =
+  | { outcome: "created"; windowLabel: string }
+  | { outcome: "focused"; windowLabel: string };
+
+export interface InvalidateDetachedFolderReviewSource {
+  sourceReviewToken: string;
+  scanGeneration: number;
+}
+
+export interface DetachedFolderReviewContext {
+  fileName: string;
+  parentRelativePath: string;
+  relativePath: string;
+  leftRoot: string;
+  rightRoot: string;
+  leftMissing: boolean;
+  rightMissing: boolean;
+}
+
+export interface DetachedFolderReviewLoaded {
+  context: DetachedFolderReviewContext;
+  left: FileDocument | null;
+  right: FileDocument | null;
+  modelIdentity: string;
+}
+
+export interface DetachedFolderReviewVersionCheck {
+  leftChanged: boolean;
+  rightChanged: boolean;
+  versionKey: string;
 }
 
 export interface MergeResult {
@@ -154,6 +309,7 @@ export interface WriteResult {
   bytesWritten: number;
   size: number;
   modifiedMs: number | null;
+  contentHash: string;
 }
 
 export interface ConflictBlock {
@@ -186,7 +342,15 @@ export interface GitFileCompareSession extends CompareSessionBase {
   snapshot: GitSnapshotCompareSession;
 }
 
-export type CompareSession = FileCompareSession | DifftoolCompareSession | GitFileCompareSession;
+export interface FolderReviewCompareSession extends CompareSessionBase {
+  origin: "folderReview";
+}
+
+export type CompareSession =
+  | FileCompareSession
+  | DifftoolCompareSession
+  | GitFileCompareSession
+  | FolderReviewCompareSession;
 
 interface MergeSessionBase {
   base: FileDocument;

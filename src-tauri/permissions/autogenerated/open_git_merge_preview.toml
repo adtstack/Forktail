@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-open-git-merge-preview"
+description = "Enables the open_git_merge_preview command without any pre-configured scope."
+commands.allow = ["open_git_merge_preview"]
+
+[[permission]]
+identifier = "deny-open-git-merge-preview"
+description = "Denies the open_git_merge_preview command without any pre-configured scope."
+commands.deny = ["open_git_merge_preview"]

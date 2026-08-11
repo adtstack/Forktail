@@ -56,7 +56,7 @@ export function compareSaveStateAfterSideWrite(
   session: CompareSession,
   side: CompareSide,
   text: string,
-  written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs">,
+  written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs" | "contentHash">,
   language: AppLanguage = "en",
 ): SavedCompareSideState {
   const document = fileDocumentAfterTextWrite(session[side], text, written);
@@ -74,7 +74,7 @@ export function compareSaveStateAfterSideWrite(
 export function compareSaveStateAfterWrite(
   session: CompareSession,
   rightText: string,
-  written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs">,
+  written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs" | "contentHash">,
   language: AppLanguage = "en",
 ): SavedCompareState {
   const saved = compareSaveStateAfterSideWrite(session, "right", rightText, written, language);
@@ -144,18 +144,19 @@ export function compareSaveEncodingWarnings(
 }
 
 export function writePreconditionFromDocument(
-  document: Pick<FileDocument, "size" | "modifiedMs">,
+  document: Pick<FileDocument, "size" | "modifiedMs" | "contentHash">,
 ): WritePrecondition {
   return {
     expectedSize: document.size,
     expectedModifiedMs: document.modifiedMs,
+    expectedContentHash: document.contentHash ?? null,
   };
 }
 
 function fileDocumentAfterTextWrite(
   document: FileDocument,
   text: string,
-  written: Pick<WriteResult, "path" | "size" | "modifiedMs">,
+  written: Pick<WriteResult, "path" | "size" | "modifiedMs" | "contentHash">,
 ): FileDocument {
   return {
     ...fileDocumentWithText(document, text),
@@ -164,16 +165,18 @@ function fileDocumentAfterTextWrite(
     encoding: preservedSaveEncodingForDocument(document),
     size: written.size,
     modifiedMs: written.modifiedMs,
+    contentHash: written.contentHash,
     decodeHadErrors: false,
   };
 }
 
 function writePreconditionFromWriteResult(
-  result: Pick<WriteResult, "size" | "modifiedMs">,
+  result: Pick<WriteResult, "size" | "modifiedMs" | "contentHash">,
 ): WritePrecondition {
   return {
     expectedSize: result.size,
     expectedModifiedMs: result.modifiedMs,
+    expectedContentHash: result.contentHash,
   };
 }
 

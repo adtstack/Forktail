@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-exit-external-git-tool"
+description = "Enables the exit_external_git_tool command without any pre-configured scope."
+commands.allow = ["exit_external_git_tool"]
+
+[[permission]]
+identifier = "deny-exit-external-git-tool"
+description = "Denies the exit_external_git_tool command without any pre-configured scope."
+commands.deny = ["exit_external_git_tool"]

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -5,13 +6,19 @@ import {
   GitToolSetup,
   applyDetectedGitToolExecutablePath,
   copyGitToolSnippet,
-  detectGitToolPlatform,
   gitToolCopyStatus,
   gitToolSetupModel,
   type GitToolSetupCopyResult,
 } from "./GitToolSetup";
 
 describe("GitToolSetup", () => {
+  it("does not infer the desktop OS from browser navigator hints", () => {
+    const source = readFileSync(new URL("./GitToolSetup.tsx", import.meta.url), "utf8");
+
+    expect(source).not.toContain("navigator.platform");
+    expect(source).not.toContain("navigator.userAgent");
+  });
+
   it("shows documented paths only as non-active examples and requires a real path", () => {
     expect(GIT_TOOL_EXECUTABLE_PATH_EXAMPLES).toEqual({
       macos: "/Applications/forktail.app/Contents/MacOS/forktail",
@@ -43,10 +50,10 @@ describe("GitToolSetup", () => {
     );
 
     expect(markup).toContain("aria-label=\"Git tool setup\"");
-    expect(markup).toContain("Windows");
     expect(markup).toContain("macOS");
-    expect(markup).toContain("Linux");
-    expect(markup).toContain("Forktail executable path");
+    expect(markup).toContain("Detected automatically");
+    expect(markup).not.toContain("<select");
+    expect(markup).not.toContain("<input");
     expect(markup).toContain("Copy difftool snippet");
     expect(markup).toContain("Copy mergetool snippet");
     expect(markup).toContain("[difftool &quot;forktail&quot;]");
@@ -61,6 +68,47 @@ describe("GitToolSetup", () => {
     expect(markup).not.toContain(">Set default<");
   });
 
+  it("hides OS and path inputs when the packaged runtime is detected", () => {
+    const markup = renderToStaticMarkup(
+      <GitToolSetup
+        languageMode="en"
+        initialRuntimeProfile={{
+          platform: "macos",
+          executablePath: "/Applications/forktail.app/Contents/MacOS/forktail",
+          detection: "detected",
+        }}
+      />,
+    );
+
+    expect(markup).toContain("Detected automatically");
+    expect(markup).toContain("macOS");
+    expect(markup).toContain("/Applications/forktail.app/Contents/MacOS/forktail");
+    expect(markup).not.toContain("<select");
+    expect(markup).not.toContain("<input");
+  });
+
+  it("shows a path fallback without an OS selector or initial error flash", () => {
+    const fallbackMarkup = renderToStaticMarkup(
+      <GitToolSetup
+        languageMode="en"
+        initialRuntimeProfile={{
+          platform: "linux",
+          executablePath: null,
+          detection: "manualRequired",
+        }}
+      />,
+    );
+    const loadingMarkup = renderToStaticMarkup(<GitToolSetup languageMode="en" />);
+
+    expect(fallbackMarkup).toContain("Linux");
+    expect(fallbackMarkup).toContain("Enter the executable path manually");
+    expect(fallbackMarkup).toContain("Advanced platform override");
+    expect(fallbackMarkup).toContain("<input");
+    expect(fallbackMarkup).not.toContain("<select");
+    expect(loadingMarkup).toContain("Detecting packaged runtime");
+    expect(loadingMarkup).not.toContain('role="alert"');
+  });
+
   it("renders Korean guidance from its isolated localized text map", () => {
     const markup = renderToStaticMarkup(<GitToolSetup languageMode="ko" />);
 
@@ -68,21 +116,6 @@ describe("GitToolSetup", () => {
     expect(markup).toContain("difftool 스니펫 복사");
     expect(markup).toContain("aria-label=\"Difftool Git config 스니펫\"");
     expect(markup).toContain("forktail은 Git 설정이나 기본 도구를 변경하지 않습니다.");
-  });
-});
-
-describe("detectGitToolPlatform", () => {
-  it("maps browser platform hints to the matching setup platform", () => {
-    expect(detectGitToolPlatform({ platform: "Win32", userAgent: "" })).toBe("windows");
-    expect(detectGitToolPlatform({ platform: "MacIntel", userAgent: "" })).toBe("macos");
-    expect(detectGitToolPlatform({ platform: "Linux x86_64", userAgent: "" })).toBe("linux");
-    expect(detectGitToolPlatform({ platform: "", userAgent: "Mozilla/5.0 (X11; Linux x86_64)" }))
-      .toBe("linux");
-  });
-
-  it("uses an explicit macOS fallback when SSR or tests provide no runtime hint", () => {
-    expect(detectGitToolPlatform(null)).toBe("macos");
-    expect(detectGitToolPlatform({ platform: "unknown", userAgent: "unknown" })).toBe("macos");
   });
 });
 

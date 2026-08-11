@@ -1,3 +1,4 @@
+pub mod detached_review;
 pub mod files;
 pub mod folders;
 pub mod git;

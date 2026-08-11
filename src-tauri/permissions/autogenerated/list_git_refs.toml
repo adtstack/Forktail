@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-git-refs"
+description = "Enables the list_git_refs command without any pre-configured scope."
+commands.allow = ["list_git_refs"]
+
+[[permission]]
+identifier = "deny-list-git-refs"
+description = "Denies the list_git_refs command without any pre-configured scope."
+commands.deny = ["list_git_refs"]

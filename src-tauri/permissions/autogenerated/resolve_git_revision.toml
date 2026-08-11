@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-resolve-git-revision"
+description = "Enables the resolve_git_revision command without any pre-configured scope."
+commands.allow = ["resolve_git_revision"]
+
+[[permission]]
+identifier = "deny-resolve-git-revision"
+description = "Denies the resolve_git_revision command without any pre-configured scope."
+commands.deny = ["resolve_git_revision"]

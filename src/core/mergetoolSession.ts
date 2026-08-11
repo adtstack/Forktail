@@ -57,6 +57,7 @@ export function buildMergetoolSession(
     outputVersion: {
       expectedSize: documents.merged.size,
       expectedModifiedMs: documents.merged.modifiedMs,
+      expectedContentHash: documents.merged.contentHash ?? null,
     },
   };
 }

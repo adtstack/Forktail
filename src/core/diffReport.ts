@@ -131,7 +131,11 @@ export async function saveGitSnapshotPatchAs(
     text: patch,
     precondition: version === null
       ? null
-      : { expectedSize: version.size, expectedModifiedMs: version.modifiedMs },
+      : {
+          expectedSize: version.size,
+          expectedModifiedMs: version.modifiedMs,
+          expectedContentHash: version.contentHash,
+        },
     expectedAbsent: version === null,
   });
   return { kind: "saved", writeResult };

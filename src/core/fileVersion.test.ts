@@ -17,22 +17,34 @@ function document(path: string, size: number, modifiedMs: number | null): FileDo
     hadFinalNewline: true,
     size,
     modifiedMs,
+    contentHash: "opened-content-hash",
     isBinary: false,
     decodeHadErrors: false,
   };
 }
 
-function version(path: string, size: number, modifiedMs: number | null): FileVersion {
-  return { path, size, modifiedMs };
+function version(
+  path: string,
+  size: number,
+  modifiedMs: number | null,
+  contentHash = "opened-content-hash",
+): FileVersion {
+  return { path, size, modifiedMs, contentHash };
 }
 
 describe("fileDocumentVersionChanged", () => {
-  it("compares opened document version by size and modified time only", () => {
+  it("compares opened document version by size, modified time, and raw byte hash", () => {
     const opened = document("/work/left.txt", 10, 1000);
 
     expect(fileDocumentVersionChanged(opened, version("/work/left.txt", 10, 1000))).toBe(false);
     expect(fileDocumentVersionChanged(opened, version("/work/left.txt", 11, 1000))).toBe(true);
     expect(fileDocumentVersionChanged(opened, version("/work/left.txt", 10, 2000))).toBe(true);
+    expect(
+      fileDocumentVersionChanged(
+        opened,
+        version("/work/left.txt", 10, 1000, "same-metadata-different-bytes"),
+      ),
+    ).toBe(true);
     expect(fileDocumentVersionChanged(opened, null)).toBe(true);
   });
 
@@ -106,7 +118,10 @@ describe("compareFileChangeVersionKey", () => {
         version("/work/left.txt", 10, null),
         version("/work/right.txt", 20, 2000),
       ),
-    ).toBe("left:/work/left.txt:10:unknown|right:/work/right.txt:20:2000");
+    ).toBe(
+      "left:/work/left.txt:10:unknown:opened-content-hash|"
+      + "right:/work/right.txt:20:2000:opened-content-hash",
+    );
     expect(compareFileChangeVersionKey(null, null)).toBe("left:unavailable|right:unavailable");
   });
 });

@@ -18,4 +18,14 @@ describe("folder scan command contract", () => {
     expect(folderCommands).toContain("job_id: Option<u64>");
     expect(tauriLib).toContain("folders::cancel_folder_scan");
   });
+
+  it("registers a typed progressive start/ack/cancel command surface", () => {
+    expect(bridge).toContain("new Channel<FolderScanMessage>()");
+    expect(bridge).toContain('invoke<FolderScanStarted>("start_folder_scan"');
+    expect(bridge).toContain('invoke<void>("ack_folder_scan"');
+    expect(folderCommands).toContain("pub async fn start_folder_scan");
+    expect(folderCommands).toContain("pub fn ack_folder_scan");
+    expect(tauriLib).toContain("folders::start_folder_scan");
+    expect(tauriLib).toContain("folders::ack_folder_scan");
+  });
 });

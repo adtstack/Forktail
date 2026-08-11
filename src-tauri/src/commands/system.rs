@@ -1,14 +1,103 @@
 use crate::error::{AppErrorCode, CommandError, CommandResult};
+use serde::Serialize;
 use std::ffi::OsString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use tauri::AppHandle;
 
 #[derive(Debug, PartialEq, Eq)]
 struct RevealCommand {
     program: &'static str,
     args: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum RuntimePlatform {
+    Windows,
+    Macos,
+    Linux,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeIntegrationDetection {
+    Detected,
+    ManualRequired,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeIntegrationProfile {
+    pub platform: RuntimePlatform,
+    pub executable_path: Option<String>,
+    pub detection: RuntimeIntegrationDetection,
+}
+
+#[tauri::command]
+pub fn runtime_integration_profile() -> RuntimeIntegrationProfile {
+    runtime_integration_profile_from(
+        current_runtime_platform(),
+        cfg!(debug_assertions),
+        cfg!(target_os = "linux"),
+        std::env::var_os("APPIMAGE"),
+        std::env::current_exe(),
+    )
+}
+
+#[tauri::command]
+pub fn set_editor_navigation_back_enabled(app: AppHandle, enabled: bool) -> CommandResult<()> {
+    match crate::menu::set_editor_navigation_back_enabled(&app, enabled) {
+        Ok(true) => Ok(()),
+        Ok(false) | Err(_) => Err(CommandError::new(
+            AppErrorCode::PathConflict,
+            "편집 위치 뒤로가기 메뉴 상태를 갱신하지 못했습니다. 다시 시도하세요.",
+        )),
+    }
+}
+
+#[tauri::command]
+pub fn set_settings_command_enabled(app: AppHandle, enabled: bool) -> CommandResult<()> {
+    match crate::menu::set_settings_command_enabled(&app, enabled) {
+        Ok(true) => Ok(()),
+        Ok(false) | Err(_) => Err(CommandError::new(
+            AppErrorCode::PathConflict,
+            "설정 메뉴 상태를 갱신하지 못했습니다. 다시 시도하세요.",
+        )),
+    }
+}
+
+fn runtime_integration_profile_from(
+    platform: RuntimePlatform,
+    debug_build: bool,
+    prefer_appimage: bool,
+    appimage: Option<OsString>,
+    current_exe: io::Result<PathBuf>,
+) -> RuntimeIntegrationProfile {
+    match git_tool_executable_path_from(debug_build, prefer_appimage, appimage, current_exe) {
+        Ok(executable_path) => RuntimeIntegrationProfile {
+            platform,
+            executable_path: Some(executable_path),
+            detection: RuntimeIntegrationDetection::Detected,
+        },
+        Err(_) => RuntimeIntegrationProfile {
+            platform,
+            executable_path: None,
+            detection: RuntimeIntegrationDetection::ManualRequired,
+        },
+    }
+}
+
+const fn current_runtime_platform() -> RuntimePlatform {
+    if cfg!(target_os = "windows") {
+        RuntimePlatform::Windows
+    } else if cfg!(target_os = "macos") {
+        RuntimePlatform::Macos
+    } else {
+        RuntimePlatform::Linux
+    }
 }
 
 #[tauri::command]
@@ -144,6 +233,54 @@ mod tests {
             .expect("packaged executable path");
 
         assert_eq!(path, expected);
+    }
+
+    #[test]
+    fn returns_one_authoritative_runtime_profile_without_a_manual_os_choice() {
+        let profile = runtime_integration_profile_from(
+            RuntimePlatform::Macos,
+            false,
+            false,
+            None,
+            Ok(PathBuf::from(
+                "/Applications/forktail.app/Contents/MacOS/forktail",
+            )),
+        );
+
+        assert_eq!(profile.platform, RuntimePlatform::Macos);
+        assert_eq!(profile.detection, RuntimeIntegrationDetection::Detected);
+        assert_eq!(
+            profile.executable_path.as_deref(),
+            Some("/Applications/forktail.app/Contents/MacOS/forktail")
+        );
+        assert_eq!(
+            serde_json::to_value(profile).expect("runtime profile JSON"),
+            serde_json::json!({
+                "platform": "macos",
+                "executablePath": "/Applications/forktail.app/Contents/MacOS/forktail",
+                "detection": "detected"
+            })
+        );
+    }
+
+    #[test]
+    fn keeps_the_compile_target_and_requests_only_a_manual_path_in_dev() {
+        let profile = runtime_integration_profile_from(
+            RuntimePlatform::Linux,
+            true,
+            true,
+            None,
+            Ok(PathBuf::from("/tmp/forktail")),
+        );
+
+        assert_eq!(
+            profile,
+            RuntimeIntegrationProfile {
+                platform: RuntimePlatform::Linux,
+                executable_path: None,
+                detection: RuntimeIntegrationDetection::ManualRequired,
+            }
+        );
     }
 
     #[cfg(target_os = "linux")]

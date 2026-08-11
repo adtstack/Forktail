@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { FolderEntry, FolderEntryStatus } from "./models";
+import type { FolderEntry, FolderEntryStatus, FolderEntryUpsert } from "./models";
 import {
   DEFAULT_FOLDER_STATUS_FILTERS,
   applyCollapsedFolderEntries,
@@ -12,11 +12,17 @@ import {
   folderEntryDepth,
   folderEntryDetailRows,
   folderEntryHasChildren,
+  folderEntryName,
+  folderEntryParentPath,
   folderEntryPathActions,
   folderEntryPrimaryAction,
   folderPortablePathIdentity,
+  folderReviewNavigationTarget,
+  folderReviewReadFailureIsStale,
   folderScanOptionsWithMode,
   folderScanOptionsWithToggle,
+  canCompareProgressiveFolderRow,
+  progressiveFolderViewEntries,
   isFolderDirectoryEntry,
   isSafeFolderRelativePath,
   folderVirtualRange,
@@ -24,10 +30,56 @@ import {
   nextFolderSort,
   nextFolderSelectionIndex,
   prepareFolderEntries,
+  prepareFolderTree,
+  resolveFolderReviewNavigationTarget,
   sortFolderEntries,
   summarizeFolderSyncDryRun,
   type FolderStatusFilters,
 } from "./folderView";
+
+describe("progressive folder hierarchy", () => {
+  it("keeps pending files visible with parent context and blocks opening until final", () => {
+    const pending: FolderEntryUpsert = {
+      relativePath: "src/nested/App.tsx",
+      revision: 1,
+      leftPath: "/left/src/nested/App.tsx",
+      rightPath: null,
+      left: { kind: "file", size: 10, modifiedMs: 1, hash: null },
+      right: null,
+      resolution: { state: "pending", reason: "awaitingPeer" },
+      message: null,
+    };
+    const view = progressiveFolderViewEntries([pending]);
+    const prepared = prepareFolderTree(
+      view.entries,
+      {
+        query: "app",
+        statuses: {
+          same: false,
+          different: false,
+          leftOnly: false,
+          rightOnly: false,
+          typeMismatch: false,
+          error: false,
+        },
+      },
+      { key: "path", direction: "asc" },
+      view.pendingPaths,
+    );
+
+    expect(prepared.entries.map((item) => item.relativePath)).toEqual([
+      "src",
+      "src/nested",
+      "src/nested/App.tsx",
+    ]);
+    expect(canCompareProgressiveFolderRow(pending)).toBe(false);
+    expect(canCompareProgressiveFolderRow({
+      ...pending,
+      revision: 2,
+      resolution: { state: "final", status: "leftOnly" },
+    })).toBe(true);
+  });
+});
 
 function entry(
   relativePath: string,
@@ -159,7 +211,62 @@ describe("prepareFolderEntries", () => {
       { key: "path", direction: "asc" },
     );
 
-    expect(prepared.map((item) => item.relativePath)).toEqual(["docs/guide.md", "README.md"]);
+    expect(prepared.map((item) => item.relativePath)).toEqual([
+      "docs",
+      "docs/guide.md",
+      "README.md",
+    ]);
+  });
+
+  it("keeps filtered ancestors as context and orders folders before files at every level", () => {
+    const tree = [
+      entry("README.md", "different", 10),
+      directoryEntry("zeta"),
+      entry("zeta/last.txt", "different", 10),
+      directoryEntry("alpha"),
+      entry("alpha/root.txt", "different", 10),
+      directoryEntry("alpha/nested"),
+      entry("alpha/nested/first.txt", "different", 10),
+    ];
+
+    const prepared = prepareFolderTree(
+      tree,
+      { query: "", statuses: DEFAULT_FOLDER_STATUS_FILTERS },
+      { key: "path", direction: "asc" },
+    );
+
+    expect(prepared.entries.map((item) => item.relativePath)).toEqual([
+      "alpha",
+      "alpha/nested",
+      "alpha/nested/first.txt",
+      "alpha/root.txt",
+      "zeta",
+      "zeta/last.txt",
+      "README.md",
+    ]);
+    expect(prepared.matchedCount).toBe(4);
+    expect(prepared.contextFolderPaths).toEqual(new Set(["alpha", "alpha/nested", "zeta"]));
+  });
+
+  it("preserves the complete ancestor chain when a search matches only a nested file", () => {
+    const prepared = prepareFolderTree(
+      [
+        entry("src/components/Button.tsx", "different", 10),
+        entry("src/App.tsx", "different", 10),
+      ],
+      { query: "button", statuses: DEFAULT_FOLDER_STATUS_FILTERS },
+      { key: "path", direction: "asc" },
+    );
+
+    expect(prepared.entries.map((item) => item.relativePath)).toEqual([
+      "src",
+      "src/components",
+      "src/components/Button.tsx",
+    ]);
+    expect(prepared.matchedCount).toBe(1);
+    expect(prepared.contextFolderPaths).toEqual(new Set(["src", "src/components"]));
+    expect(prepared.entries.slice(0, 2).every(isFolderDirectoryEntry)).toBe(true);
+    expect(prepared.entries[0]).toMatchObject({ leftPath: null, rightPath: null });
   });
 });
 
@@ -264,6 +371,10 @@ describe("folder entry actions", () => {
     expect(isFolderDirectoryEntry(entry("src/App.tsx", "different", 100))).toBe(false);
     expect(folderEntryDepth(directoryEntry("src"))).toBe(0);
     expect(folderEntryDepth(entry("src/components/App.tsx", "different", 100))).toBe(2);
+    expect(folderEntryName(entry("src/components/App.tsx", "different", 100))).toBe("App.tsx");
+    expect(folderEntryParentPath(entry("src/components/App.tsx", "different", 100))).toBe(
+      "src/components",
+    );
   });
 
   it("collapses descendants below directory rows without hiding the directory itself", () => {
@@ -612,5 +723,122 @@ describe("folderVirtualRange", () => {
       afterHeight: 0,
       totalHeight: 0,
     });
+  });
+});
+
+describe("folder review navigation identity", () => {
+  const scope = { reviewToken: "folder-review-17", scanGeneration: 9 };
+
+  function resultWith(reviewEntries: FolderEntry[]) {
+    return {
+      leftRoot: "/private/left",
+      rightRoot: "/private/right",
+      entries: reviewEntries,
+      durationMs: 1,
+      stats: {
+        same: 0,
+        different: reviewEntries.length,
+        leftOnly: 0,
+        rightOnly: 0,
+        typeMismatch: 0,
+        errors: 0,
+      },
+    };
+  }
+
+  it("creates a content-free target and resolves only the exact current scan row", () => {
+    const row = entry("Source/Cafe\u0301.txt", "different", 10);
+    const result = resultWith([row]);
+    const target = folderReviewNavigationTarget(scope, result, row);
+
+    expect(target).toEqual({
+      scope: { kind: "folderReview", reviewToken: "folder-review-17", scanGeneration: 9 },
+      document: {
+        kind: "folderText",
+        relativeItemKey: "source/caf\u00e9.txt",
+        comparisonKind: "both",
+      },
+    });
+    expect(JSON.stringify(target)).not.toContain("/private/");
+    expect(JSON.stringify(target)).not.toContain("leftPath");
+
+    expect(resolveFolderReviewNavigationTarget(target, scope, result)).toEqual({
+      kind: "valid",
+      entry: row,
+      request: {
+        leftRoot: "/private/left",
+        rightRoot: "/private/right",
+        relativePath: "Source/Cafe\u0301.txt",
+        leftExpected: "regularFile",
+        rightExpected: "regularFile",
+      },
+    });
+  });
+
+  it("fails closed after rescan, deletion, kind change, or unsafe containment input", () => {
+    const row = entry("src/App.tsx", "different", 10);
+    const target = folderReviewNavigationTarget(scope, resultWith([row]), row);
+
+    expect(resolveFolderReviewNavigationTarget(
+      target,
+      { ...scope, scanGeneration: 10 },
+      resultWith([row]),
+    )).toMatchObject({ kind: "stale", reason: "scope" });
+    expect(resolveFolderReviewNavigationTarget(target, scope, resultWith([])))
+      .toMatchObject({ kind: "stale", reason: "missing" });
+    expect(resolveFolderReviewNavigationTarget(target, scope, resultWith([{
+      ...row,
+      left: { kind: "symlink", size: 0, modifiedMs: null, hash: null },
+    }]))) .toMatchObject({ kind: "stale", reason: "notText" });
+
+    const unsafe = { ...row, relativePath: "../src/App.tsx" };
+    expect(() => folderReviewNavigationTarget(scope, resultWith([unsafe]), unsafe))
+      .toThrow("safe relative path");
+  });
+
+  it("never substitutes an arbitrary row when case or NFC identities collide", () => {
+    const first = entry("Docs/Caf\u00e9.txt", "different", 10);
+    const second = entry("docs/Cafe\u0301.txt", "different", 11);
+    const result = resultWith([first, second]);
+
+    expect(() => folderReviewNavigationTarget(scope, result, first)).toThrow("unique");
+    const target = {
+      scope: { kind: "folderReview" as const, ...scope },
+      document: {
+        kind: "folderText" as const,
+        relativeItemKey: folderPortablePathIdentity(first.relativePath),
+        comparisonKind: "both" as const,
+      },
+    };
+    expect(resolveFolderReviewNavigationTarget(target, scope, result))
+      .toMatchObject({ kind: "stale", reason: "collision" });
+  });
+
+  it("preserves one-sided expectations and treats non-text/external changes as stale", () => {
+    const leftOnly: FolderEntry = {
+      ...entry("left.txt", "leftOnly", 10),
+      rightPath: null,
+      right: null,
+    };
+    const target = folderReviewNavigationTarget(scope, resultWith([leftOnly]), leftOnly);
+    expect(target.document).toMatchObject({ comparisonKind: "leftOnly" });
+    expect(resolveFolderReviewNavigationTarget(target, scope, resultWith([leftOnly])))
+      .toMatchObject({
+        kind: "valid",
+        request: { leftExpected: "regularFile", rightExpected: "missing" },
+      });
+
+    for (const code of [
+      "NOT_FOUND",
+      "TOO_LARGE",
+      "BINARY_FILE",
+      "UNSUPPORTED_ENCODING",
+      "PATH_CONFLICT",
+      "FILE_CHANGED",
+    ] as const) {
+      expect(folderReviewReadFailureIsStale({ code, message: "content-free" })).toBe(true);
+    }
+    expect(folderReviewReadFailureIsStale({ code: "PERMISSION_DENIED", message: "retry" }))
+      .toBe(false);
   });
 });

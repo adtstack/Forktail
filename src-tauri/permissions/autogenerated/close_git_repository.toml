@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-close-git-repository"
+description = "Enables the close_git_repository command without any pre-configured scope."
+commands.allow = ["close_git_repository"]
+
+[[permission]]
+identifier = "deny-close-git-repository"
+description = "Denies the close_git_repository command without any pre-configured scope."
+commands.deny = ["close_git_repository"]

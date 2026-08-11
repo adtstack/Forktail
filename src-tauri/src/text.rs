@@ -3,7 +3,6 @@ use chardetng::EncodingDetector;
 use encoding_rs::Encoding;
 
 pub const MAX_TEXT_BYTES: u64 = 64 * 1024 * 1024;
-const BINARY_PROBE_BYTES: usize = 16 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DecodedText {
@@ -22,7 +21,7 @@ pub enum DecodedTextContent {
 
 pub fn decode_text_bytes(bytes: &[u8]) -> DecodedTextContent {
     let bom = Encoding::for_bom(bytes);
-    if bom.is_none() && bytes.iter().take(BINARY_PROBE_BYTES).any(|byte| *byte == 0) {
+    if bom.is_none() && bytes.contains(&0) {
         return DecodedTextContent::Binary;
     }
 
@@ -93,5 +92,25 @@ pub fn detect_line_ending(text: &str) -> LineEnding {
         (1, _, true, _) => LineEnding::Lf,
         (1, _, _, true) => LineEnding::Cr,
         _ => LineEnding::Mixed,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DecodedTextContent, decode_text_bytes};
+
+    #[test]
+    fn rejects_bomless_nul_after_the_initial_binary_probe() {
+        let mut bytes = vec![b'a'; 16 * 1024];
+        bytes.push(0);
+
+        assert_eq!(decode_text_bytes(&bytes), DecodedTextContent::Binary);
+    }
+
+    #[test]
+    fn preserves_nul_code_units_for_bom_declared_utf16() {
+        let decoded = decode_text_bytes(&[0xFF, 0xFE, b'a', 0, b'\n', 0]);
+
+        assert!(matches!(decoded, DecodedTextContent::Text(_)));
     }
 }

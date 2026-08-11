@@ -71,6 +71,15 @@
 
 향후 복잡해지면 command 내부 로직을 `services/`와 `core/` crate로 이동한다. 초기에는 과한 추상화를 피한다.
 
+### Application 종료 경계
+
+OS application-level quit는 Tauri `ExitRequested`의 사용자 요청(`code = None`)으로 들어온다. main React
+surface가 살아 있으면 Rust가 해당 종료를 먼저 막고 quit command를 전달해, main의 공용
+`requestLeaveActiveSession`으로 전달해 dirty 확인을 수행한다. 사용자가 승인한 뒤 호출하는
+`AppHandle::exit(0)`은 programmatic 요청(`code = Some(0)`)이므로 재차 막지 않고 한 번만 종료한다. main이
+이미 사라진 마지막 창 종료는 guard를 표시할 surface가 없으므로 막지 않는다. 막힌 종료 요청에서는
+detached registry를 정리하지 않으며, 승인된 `ExitRequested` 또는 최종 `Exit`에서만 정리한다.
+
 ## 4. 주요 데이터 계약
 
 ### FileDocument
@@ -117,7 +126,10 @@ interface MergeResult {
 ```text
 사용자 dialog 선택
   → read_text_file(path)
-  → metadata/size 확인
+  → symlink를 따르지 않는 metadata/일반 파일/size 확인
+  → no-follow open과 열린 handle의 일반 파일/size 확인
+  → 최대 64 MiB + 1 byte bounded read
+  → 읽기 전후 length/mtime와 현재 path identity 재확인
   → BOM 확인
   → binary probe
   → decode
@@ -125,6 +137,15 @@ interface MergeResult {
   → FileDocument 반환
   → Monaco model 생성
 ```
+
+`FileDocument.size`와 `contentHash`는 검증된 열린 handle에서 실제로 읽은 같은 byte snapshot을 기준으로
+계산한다. 읽는 동안 크기·mtime·path identity가 달라지면 partial/stale text를 반환하지 않고
+`FILE_CHANGED`, 어느 시점이든 64 MiB를 넘으면 `TOO_LARGE`로 거절한다.
+
+`stat_text_file_version`, optional stat과 저장 전 content-hash precondition도 별도 `metadata + File::open`
+조합을 쓰지 않고 같은 안전 snapshot 경로를 사용한다. 따라서 symlink/reparse point, 64 MiB 초과·읽기 중
+성장, 같은 size/mtime의 path 교체를 hash로 승인하지 않는다. 저장 precondition snapshot을 안정적으로
+검증할 수 없는 경우에는 덮어쓰기를 진행하지 않고 `FILE_CHANGED`로 fail closed한다.
 
 ### 인코딩 정책
 
@@ -168,21 +189,72 @@ relative/path -> { absolute path, kind, size, modified time }
 
 Quick hash는 속도를 위한 확률적 비교다. 최종 확정이 필요한 사용자는 Full hash를 선택한다. UI에서 이 차이를 설명한다.
 
-### 성능 확장 경로
+### 점진 스캔과 성능 경계
 
-현재 스타터는 단일 command 응답이다. `FOL-006`에서 다음 구조로 바꾼다.
+`FOL-006R`의 기본 UI 경로는 전체 결과 DTO를 기다리지 않는다.
 
 ```text
-start_scan() -> job_id
-  Rust worker pool
-  emits scan-progress(job_id, visited, total?, entry batch)
-cancel_scan(job_id)
-finish event -> stats
+start_folder_scan(request, Channel) -> { jobId, scanGeneration, optionsFingerprint }
+  left/right inventory producer -> bounded queue (512 records)
+  exact-relative-path coordinator
+    -> pending/final upsert batch
+    -> coalesced progress
+frontend keyed accumulator -> cumulative ACK
+completed | cancelled | failed terminal summary
 ```
 
-UI는 batch를 누적하고 가상화한다.
+행 batch는 256 upsert, 직렬화 추정 256 KiB, 50ms 중 먼저 도달한 조건에서 전송한다. progress는
+최대 100ms마다 합쳐 보내며 아직 전체 항목 수를 모르는 inventory 단계에서는 백분율을 만들지 않는다.
+WebView가 적용했다고 확인하지 않은 batch는 최대 4개 및 추정 1 MiB로 제한한다. Rust worker는 이
+ACK credit, inventory queue, hash loop에서 같은 취소 token을 확인하며 창 종료도 해당 owner의 job을
+취소한다. terminal은 정확히 한 번 전송하고 전체 row 배열을 다시 싣지 않는다.
 
-현재 구현은 `scan_directories(..., jobId)`와 `cancel_folder_scan(jobId)`로 job id 기반 취소와 stale result 무시를 제공한다. Rust 스캐너와 hash 루프는 취소 registry를 주기적으로 확인하고 `CANCELLED` 오류로 중단한다. 대량 batch event와 progressive row append는 `FOL-007` 가상화와 함께 확장한다.
+프런트엔드는 `jobId + scanGeneration + optionsFingerprint`가 현재 scan과 모두 일치하는 메시지만 exact
+relative path map에 revision 순서로 적용한다. duplicate/late message는 버리고 sequence gap은 현재 결과를
+신뢰하지 않은 채 오류로 종료한다. React snapshot은 animation frame 단위로 합쳐 게시한다. 폴더 화면은
+pending 행도 상위 폴더 문맥 아래 folder-first로 보여주며 선택 identity는 배열 index가 아닌 exact path다.
+단일 클릭은 선택만 하고, 확정된 일반 파일의 더블 클릭 또는 Enter만 비교 화면을 연다.
+
+기존 `scan_directories` one-shot 구현은 최종 상태·오류·통계 parity를 검증하는 reference oracle로
+유지한다. App의 새 폴더 비교 시작 경로는 `start_folder_scan` typed Channel을 사용한다. persistent hash
+worker pool과 cache 교체는 측정 근거를 바탕으로 `FOL-008`, `FOL-009`에서 별도로 다룬다.
+
+폴더 결과에서 text 항목을 다시 여는 경로는 일반 파일 command 두 개를 병렬 호출하지 않는다.
+`read_folder_review_text_pair(request, jobId)`가 양쪽 expectation, canonical root containment,
+non-symlink regular-file, size/binary/LFS 정책을 먼저 검증한 뒤 all-or-nothing DTO를 반환한다. 각 side는
+검증 단계에서 no-follow로 연 handle과 preflight를 결속하고 그 handle에서 최대 64 MiB + 1 byte만 읽는다.
+양쪽 raw snapshot을 모두 얻은 뒤 현재 root-relative path를 다시 no-follow open/bounded read해 handle
+identity, size/mtime, exact bytes와 BLAKE3가 모두 같은 경우에만 decode한다. 따라서 한쪽 read 뒤 반대쪽을
+읽는 동안 발생한 변경과 같은 size/mtime의 torn read도 partial DTO 없이 `FILE_CHANGED`로 거절한다. 읽기는
+blocking worker에서 64 KiB chunk마다 취소를 확인하고 terminal path에서 job registry를 정리한다.
+editor history에는 root/path/content 대신 process-only review token, scan generation, normalized item key와
+side kind만 저장하며 matching Monaco mount가 cursor/viewport를 복원한 뒤에만 candidate를 소비한다.
+
+### 폴더 비교 독립 검토 창
+
+`FOL-020`은 main 폴더 결과와 파일 내용을 한 React tree에 함께 올리지 않는다. final regular-file 행을
+더블클릭하거나 `Enter`로 실행하면 main 전용 async command가 고정된
+`index.html?surface=folder-review` route의 `WebviewWindow`를 만들고, child가 표시된 뒤 자신의 label로
+caller-bound initial load를 요청한다. 단일 클릭은 선택만 바꾸며 폴더 행은 접기·펼치기만 한다.
+
+native registry는 owner, process-only token, scan generation, exact row identity, 양쪽 metadata
+expectation, load revision, retained source byte 수만 보관한다. `FileDocument`와 text는 보관하지 않는다.
+같은 live review의 같은 exact identity는 하나의 reservation으로 수렴하고 기존 창을 restore/focus한다.
+서로 다른 창은 최대 8개, 성공적으로 전달된 source snapshot 합계는 256 MiB로 제한한다. build/load 실패,
+`WindowEvent::Destroyed`, main destroy와 app exit는 reservation, cancellation, byte accounting을 정리한다.
+ready snapshot은 main navigation 뒤 유지하고, source generation invalidation은 아직 load 중인 작업만
+취소한다.
+
+child는 argument 없는 `load/check/reload` 세 command만 호출할 수 있다. root/path/token은 URL, window
+label, OS title, Monaco URI에 넣지 않으며, title은 정제된 basename과 상대 부모 문맥만 사용한다. 실제
+relative path와 좌우 root는 caller 검증 뒤 반환되는 context DTO로 child 내부 header에만 표시한다.
+Monaco model은 opaque process identity를 사용하고 settings/recent/active session을 저장하지 않는다.
+`folderReview` origin은 Save, Save As, hunk copy, swap, drop, export를 모두 금지한다.
+
+application command 전체 목록은 `build.rs`의 `AppManifest::commands`가 단일 기준이다. main capability는
+모든 reviewed app command와 dialog를, `folder-review-*` capability는 위 세 read-only command와 최소
+window/event 권한만 가진다. native menu event는 broadcast하지 않고 현재 focused WebView 하나에만
+보낸다.
 
 해시 비교는 같은 상대 경로의 좌/우 파일을 파일 쌍 단위로 병렬 계산한다. 동시 worker는 파일 쌍당 2개로 제한하며, 각 worker도 같은 job id cancellation check를 공유한다.
 
@@ -237,7 +309,12 @@ Phase 1 GUI는 Save & Close/Abort를 안정적인 exit code로 전달하지 않�
 
 repository-aware branch/commit/index 비교는 이 adapter와 별개인 Phase 1 이후 후보이며 `docs/17_GIT_INTEGRATION.md`를 따른다.
 
-Git config setup UI는 narrow Rust command로 packaged process의 absolute executable path만 받는다. macOS/Windows는 `current_exe`, Linux AppImage는 임시 mount 내부 executable 대신 `APPIMAGE` artifact path를 우선한다. dev build나 감지 실패에서는 copy 가능한 hard-coded default를 만들지 않고 사용자가 실제 absolute path를 입력하게 한다. 생성기는 snippet을 표시·복사할 뿐 `.gitconfig`를 쓰거나 default Git tool을 바꾸지 않는다.
+Git config setup UI는 narrow Rust command의 authoritative runtime DTO에서 compile-target OS와 packaged
+process의 absolute executable path를 함께 받는다. macOS/Windows는 `current_exe`, Linux AppImage는 임시
+mount 내부 executable 대신 `APPIMAGE` artifact path를 우선한다. 감지 성공 시 OS 선택과 path 입력을
+숨기고 읽기 전용 요약과 복사 동작만 제공한다. dev build나 감지 실패에서는 hard-coded active path를
+만들지 않고 path 입력 fallback을 제공하며, OS 선택은 사용자가 명시적으로 연 advanced override에만
+둔다. 생성기는 snippet을 표시·복사할 뿐 `.gitconfig`를 쓰거나 default Git tool을 바꾸지 않는다.
 
 ## 8. 저장 내구성
 
@@ -255,11 +332,30 @@ external modification check
   → fsync parent directory where supported
 ```
 
+원자적 교체 뒤 parent directory fsync가 실패하면 성공으로 숨기지 않고 `WRITE_FAILED`로 보고한다.
+이 시점에는 새 bytes가 이미 target에 있으므로 자동 rollback으로 새 데이터를 버리지 않는다. 기존 target은
+교체 전에 만든 backup으로 보존하고, UI는 파일을 다시 열어 저장 상태를 확인한 뒤 재시도하도록 안내한다.
+
 ### 백업 retention과 복원
 
 저장 대상이 이미 존재하고 `createBackup`이 켜져 있으면 같은 폴더에 `<파일명>.bak.<epoch_ms>` 형식의 백업을 만든다. 같은 millisecond 충돌은 뒤에 숫자 suffix를 붙이며, 기존 legacy `.bak`/`.bak.N` 파일도 목록에는 포함한다. 저장이 성공하면 같은 대상의 백업은 최신 10개만 유지한다.
 
+`SAV-002`/`SAV-006`의 backup source도 일반 파일 read와 같은 no-follow handle에 결속한다. 64 MiB + 1 byte
+bounded read를 두 번 수행해 pre/post metadata, handle/path identity, BLAKE3와 exact raw bytes가 모두 같은
+stable snapshot만 백업으로 확정한다. 따라서 source가 읽는 중 성장·축소되거나 같은 size/mtime으로
+재작성·교체되면 `FILE_CHANGED` 또는 `TOO_LARGE`로 저장을 중단하며 unbounded copy를 수행하지 않는다.
+
+새 backup은 atomic replace 전 확정하되 이번 저장에만 결속된 rollback guard가 identity를 보관한다.
+최종 precondition 또는 replace가 실패하면 동일 identity인 새 backup만 제거하고 기존 backup history와
+retention은 변경하지 않는다. replace가 성공한 뒤에만 새 backup을 보존하며 전체 저장 성공 경로에서만
+최신 10개 retention을 적용한다. 단, replace 뒤 parent directory fsync 실패는 이미 target bytes가 바뀐
+상태이므로 위 내구성 계약대로 pre-save backup을 보존하고 retention 삭제는 수행하지 않는다.
+
 복원은 `restore_text_file_backup(path, backupPath, precondition)` command를 사용한다. `backupPath`는 같은 폴더의 해당 대상 백업 이름이어야 하며, 복원도 임시 파일 쓰기/flush/fsync/atomic replace 경로를 사용한다. 복원 전 현재 대상 파일도 새 백업으로 남겨서 복원을 되돌릴 수 있게 한다.
+목록과 복원은 symlink를 따라가지 않고 일반 파일만 허용한다. 복원 source는 metadata와 열린 handle에서
+64 MiB 상한을 먼저 확인하고, 상한보다 1 byte까지만 읽은 뒤 current path를 다시 no-follow open해
+identity/hash/raw bytes를 재검증한다. 안정된 snapshot을 만들 수 없으면 target이나 backup history를
+변경하지 않는다.
 
 ## 9. 보안 경계
 

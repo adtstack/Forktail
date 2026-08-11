@@ -1,3 +1,5 @@
+import type { GitToolPlatform } from "./gitToolConfig";
+
 export type AppCommandId =
   | "openCompare"
   | "openFolders"
@@ -17,14 +19,32 @@ export type AppCommandId =
   | "acceptBoth"
   | "swapSides"
   | "searchPath"
-  | "settings";
+  | "navigateEditorBack"
+  | "settings"
+  | "quit";
+
+export type AppCommandSource = "keyboard" | "nativeMenu" | "mouse" | "programmaticTest";
+export type AppCommandSurface = "main" | "folderReview";
+
+export interface AppCommandEventDetail {
+  commandId: AppCommandId;
+  source?: AppCommandSource;
+  monotonicEventTime?: number;
+}
+
+export type RuntimePlatform = GitToolPlatform;
 
 export const APP_COMMAND_EVENT = "forktail-command";
 
 export interface ShellOpenCommandContext {
   mode: "home" | "compare" | "folders" | "merge" | "git";
-  compareOrigin: "files" | "difftool" | "git" | null;
+  compareOrigin: "files" | "difftool" | "git" | "folderReview" | null;
   mergeOrigin: "files" | "mergetool" | "gitConflict" | "gitPreview" | null;
+}
+
+export interface SettingsCommandPlan {
+  destination: "homeSettings";
+  requiresLeaveGuard: boolean;
 }
 
 export interface KeyboardShortcutLike {
@@ -42,6 +62,10 @@ interface ShortcutSpec {
   shift?: boolean;
   alt?: boolean;
   aria: string;
+}
+
+export interface NavigationBackShortcut extends ShortcutSpec {
+  accelerator: "Alt+Left" | "Ctrl+-";
 }
 
 interface AppCommand {
@@ -107,45 +131,107 @@ export const appCommands = {
     { key: "f", ctrl: true, aria: "Control+F" },
     { key: "f", meta: true, aria: "Meta+F" },
   ]),
+  navigateEditorBack: command("navigateEditorBack", "Previous Editor Location", []),
   settings: command("settings", "Settings", [
     { key: ",", ctrl: true, aria: "Control+," },
     { key: ",", meta: true, aria: "Meta+," },
+  ]),
+  quit: command("quit", "Quit Forktail", [
+    { key: "q", ctrl: true, aria: "Control+Q" },
+    { key: "q", meta: true, aria: "Meta+Q" },
   ]),
 } as const satisfies Record<AppCommandId, AppCommand>;
 
 const appCommandIdSet = new Set<string>(Object.keys(appCommands));
 
-export function commandAriaKeyshortcuts(commandId: AppCommandId): string {
-  return appCommands[commandId].shortcuts.map((shortcut) => shortcut.aria).join(" ");
+export function commandAriaKeyshortcuts(
+  commandId: AppCommandId,
+  platform?: RuntimePlatform,
+): string {
+  const shortcuts = commandId === "navigateEditorBack" && platform
+    ? [navigationBackShortcut(platform)]
+    : appCommands[commandId].shortcuts;
+  return shortcuts.map((shortcut) => shortcut.aria).join(" ");
 }
 
 export function isAppCommandId(value: unknown): value is AppCommandId {
   return typeof value === "string" && appCommandIdSet.has(value);
 }
 
-export function dispatchAppCommand(commandId: AppCommandId): void {
-  window.dispatchEvent(new CustomEvent(APP_COMMAND_EVENT, { detail: { commandId } }));
+export function isAppCommandAllowedForSurface(
+  surface: AppCommandSurface,
+  commandId: AppCommandId,
+): boolean {
+  if (surface === "main") return true;
+  return commandId === "previousDiff" || commandId === "nextDiff";
+}
+
+export function dispatchAppCommand(
+  commandId: AppCommandId,
+  source?: AppCommandSource,
+  monotonicEventTime?: number,
+): void {
+  const detail: AppCommandEventDetail = { commandId };
+  if (source) detail.source = source;
+  if (
+    monotonicEventTime != null &&
+    Number.isFinite(monotonicEventTime) &&
+    monotonicEventTime >= 0
+  ) {
+    detail.monotonicEventTime = monotonicEventTime;
+  }
+  window.dispatchEvent(new CustomEvent(APP_COMMAND_EVENT, { detail }));
 }
 
 export function commandIdFromEvent(event: Event): AppCommandId | null {
+  return commandDetailFromEvent(event)?.commandId ?? null;
+}
+
+export function commandDetailFromEvent(event: Event): AppCommandEventDetail | null {
   if (!(event instanceof CustomEvent)) return null;
-  const detail = event.detail as { commandId?: unknown } | null;
-  return isAppCommandId(detail?.commandId) ? detail.commandId : null;
+  const detail = event.detail as {
+    commandId?: unknown;
+    source?: unknown;
+    monotonicEventTime?: unknown;
+  } | null;
+  if (!isAppCommandId(detail?.commandId)) return null;
+  if (detail.source !== undefined && !isAppCommandSource(detail.source)) return null;
+  if (
+    detail.monotonicEventTime !== undefined &&
+    (typeof detail.monotonicEventTime !== "number" ||
+      !Number.isFinite(detail.monotonicEventTime) ||
+      detail.monotonicEventTime < 0)
+  ) return null;
+  if (detail.commandId === "navigateEditorBack" && detail.source === undefined) return null;
+  return {
+    commandId: detail.commandId,
+    ...(detail.source === undefined ? {} : { source: detail.source }),
+    ...(detail.monotonicEventTime === undefined
+      ? {}
+      : { monotonicEventTime: detail.monotonicEventTime }),
+  };
 }
 
 export function matchesCommandShortcut(
   commandId: AppCommandId,
   event: KeyboardShortcutLike,
+  platform?: RuntimePlatform,
 ): boolean {
-  return appCommands[commandId].shortcuts.some((shortcut) => shortcutMatches(shortcut, event));
+  const shortcuts = commandId === "navigateEditorBack" && platform
+    ? [navigationBackShortcut(platform)]
+    : appCommands[commandId].shortcuts;
+  return shortcuts.some((shortcut) => shortcutMatches(shortcut, event));
 }
 
-export function commandShortcutCollisions(): string[] {
+export function commandShortcutCollisions(platform?: RuntimePlatform): string[] {
   const seen = new Map<string, AppCommandId>();
   const collisions: string[] = [];
 
   for (const command of Object.values(appCommands)) {
-    for (const shortcut of command.shortcuts) {
+    const shortcuts = command.id === "navigateEditorBack" && platform
+      ? [navigationBackShortcut(platform)]
+      : command.shortcuts;
+    for (const shortcut of shortcuts) {
       const key = shortcutSignature(shortcut);
       const existing = seen.get(key);
       if (existing) {
@@ -157,6 +243,17 @@ export function commandShortcutCollisions(): string[] {
   }
 
   return collisions;
+}
+
+export function navigationBackShortcut(platform: RuntimePlatform): NavigationBackShortcut {
+  return platform === "macos"
+    ? { key: "-", ctrl: true, aria: "Control+-", accelerator: "Ctrl+-" }
+    : { key: "ArrowLeft", alt: true, aria: "Alt+ArrowLeft", accelerator: "Alt+Left" };
+}
+
+function isAppCommandSource(value: unknown): value is AppCommandSource {
+  return value === "keyboard" || value === "nativeMenu" || value === "mouse" ||
+    value === "programmaticTest";
 }
 
 export function isShellOpenCommandAllowed(
@@ -172,14 +269,28 @@ export function isShellOpenCommandAllowed(
     return false;
   }
 
-  const externalGitToolActive =
-    (context.mode === "compare" && context.compareOrigin === "difftool") ||
-    (context.mode === "merge" && context.mergeOrigin === "mergetool");
-  return !externalGitToolActive;
+  return !externalGitToolOwnsWindow(context);
+}
+
+export function settingsCommandPlan(
+  context: ShellOpenCommandContext,
+): SettingsCommandPlan | null {
+  if (externalGitToolOwnsWindow(context)) return null;
+  return {
+    destination: "homeSettings",
+    requiresLeaveGuard: context.mode !== "home",
+  };
 }
 
 function command(id: AppCommandId, label: string, shortcuts: readonly ShortcutSpec[]): AppCommand {
   return { id, label, shortcuts };
+}
+
+function externalGitToolOwnsWindow(context: ShellOpenCommandContext): boolean {
+  return (
+    (context.mode === "compare" && context.compareOrigin === "difftool")
+    || (context.mode === "merge" && context.mergeOrigin === "mergetool")
+  );
 }
 
 function shortcutMatches(shortcut: ShortcutSpec, event: KeyboardShortcutLike): boolean {

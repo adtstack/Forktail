@@ -2,7 +2,7 @@ import { hasUnresolvedConflicts } from "./conflicts";
 import { saveEncodingWarningForDocument } from "./compareSave";
 import { CORE_TEXT } from "./i18n";
 import { defaultSystemLineEnding, type SaveLineEndingMode } from "./lineEndings";
-import type { FileDocument, MergeSession, WriteResult } from "./models";
+import type { FileDocument, FileVersion, MergeSession, WriteResult } from "./models";
 import type {
   GitConflictResultFingerprint,
   GitConflictSaveRequest,
@@ -19,6 +19,7 @@ export const unresolvedSaveMessage = CORE_TEXT.en.unresolvedSaveMessage;
 export interface WritePrecondition {
   expectedSize: number;
   expectedModifiedMs: number | null;
+  expectedContentHash: string | null;
 }
 
 export interface SavedMergeState {
@@ -26,6 +27,11 @@ export interface SavedMergeState {
   savedSnapshot: string;
   outputVersion: WritePrecondition;
   message: string;
+}
+
+export interface MergeOutputBaseline {
+  precondition: WritePrecondition | null;
+  expectedAbsent: boolean;
 }
 
 interface GitConflictSaveSource {
@@ -74,7 +80,7 @@ export function canSaveMergeResult(
 
 export function mergeSaveStateAfterWrite(
   resultText: string,
-  written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs">,
+  written: Pick<WriteResult, "path" | "backupPath" | "size" | "modifiedMs" | "contentHash">,
   language: AppLanguage = "en",
 ): SavedMergeState {
   return {
@@ -129,16 +135,38 @@ export function mergeSavePreconditionForPath(
   return matchingDocument ? versionFromDocument(matchingDocument) : null;
 }
 
-function versionFromDocument(document: Pick<FileDocument, "size" | "modifiedMs">): WritePrecondition {
+export function mergeOutputBaselineForRestore(
+  outputPath: string | null,
+  outputVersion: FileVersion | null,
+): MergeOutputBaseline {
+  if (!outputPath) {
+    return { precondition: null, expectedAbsent: false };
+  }
+  if (!outputVersion) {
+    return { precondition: null, expectedAbsent: true };
+  }
   return {
-    expectedSize: document.size,
-    expectedModifiedMs: document.modifiedMs,
+    precondition: versionFromDocument(outputVersion),
+    expectedAbsent: false,
   };
 }
 
-function versionFromWriteResult(result: Pick<WriteResult, "size" | "modifiedMs">): WritePrecondition {
+function versionFromDocument(
+  document: Pick<FileDocument, "size" | "modifiedMs" | "contentHash">,
+): WritePrecondition {
+  return {
+    expectedSize: document.size,
+    expectedModifiedMs: document.modifiedMs,
+    expectedContentHash: document.contentHash ?? null,
+  };
+}
+
+function versionFromWriteResult(
+  result: Pick<WriteResult, "size" | "modifiedMs" | "contentHash">,
+): WritePrecondition {
   return {
     expectedSize: result.size,
     expectedModifiedMs: result.modifiedMs,
+    expectedContentHash: result.contentHash,
   };
 }

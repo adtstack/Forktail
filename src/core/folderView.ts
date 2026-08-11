@@ -1,14 +1,18 @@
 import { matchesCommandShortcut, type KeyboardShortcutLike } from "./commands";
 import { CORE_TEXT } from "./i18n";
 import type {
+  AppError,
   FolderCompareMode,
   FolderEntry,
+  FolderEntryUpsert,
   FolderEntryStatus,
   FolderScanOptions,
   FolderScanResult,
+  FolderReviewTextPairRequest,
   FsEntryMeta,
 } from "./models";
 import type { AppLanguage } from "./settings";
+import type { NavigationTarget } from "./editorNavigationHistory";
 
 export const FOLDER_STATUSES: FolderEntryStatus[] = [
   "different",
@@ -63,6 +67,29 @@ export interface FolderPathConflict {
   identityKey: string;
   variants: string[];
 }
+
+export interface PreparedFolderTree {
+  entries: FolderEntry[];
+  matchedCount: number;
+  contextFolderPaths: ReadonlySet<string>;
+}
+
+export interface ProgressiveFolderViewEntries {
+  entries: FolderEntry[];
+  pendingPaths: ReadonlySet<string>;
+}
+
+export interface FolderReviewScope {
+  reviewToken: string;
+  scanGeneration: number;
+}
+
+export type FolderReviewTargetResolution =
+  | { kind: "valid"; entry: FolderEntry; request: FolderReviewTextPairRequest }
+  | {
+      kind: "stale";
+      reason: "scope" | "missing" | "collision" | "unsafe" | "notText" | "kindChanged";
+    };
 
 export type FolderSyncDirection = "leftToRight" | "rightToLeft";
 export type FolderSyncDryRunAction = "copyFile" | "createDirectory" | "overwriteFile" | "blocked";
@@ -133,11 +160,12 @@ export function countFolderStatuses(entries: FolderEntry[]): Record<FolderEntryS
 export function filterFolderEntries(
   entries: FolderEntry[],
   filters: FolderFilterState,
+  pendingPaths: ReadonlySet<string> = new Set(),
 ): FolderEntry[] {
   const normalizedQuery = filters.query.trim().toLocaleLowerCase();
 
   return entries.filter((entry) => {
-    if (!filters.statuses[entry.status]) return false;
+    if (!pendingPaths.has(entry.relativePath) && !filters.statuses[entry.status]) return false;
     if (!normalizedQuery) return true;
     return entry.relativePath.toLocaleLowerCase().includes(normalizedQuery);
   });
@@ -161,7 +189,113 @@ export function prepareFolderEntries(
   filters: FolderFilterState,
   sort: FolderSortState,
 ): FolderEntry[] {
-  return sortFolderEntries(filterFolderEntries(entries, filters), sort);
+  return prepareFolderTree(entries, filters, sort).entries;
+}
+
+export function prepareFolderTree(
+  entries: FolderEntry[],
+  filters: FolderFilterState,
+  sort: FolderSortState,
+  pendingPaths: ReadonlySet<string> = new Set(),
+): PreparedFolderTree {
+  const matches = filterFolderEntries(entries, filters, pendingPaths);
+  const entriesByPath = new Map(entries.map((entry) => [entry.relativePath, entry]));
+  const matchedPaths = new Set(matches.map((entry) => entry.relativePath));
+  const includedPaths = new Set(matchedPaths);
+  const contextFolderPaths = new Set<string>();
+  const virtualFolders = new Map<string, FolderEntry>();
+
+  for (const match of matches) {
+    let parentPath = folderEntryParentPath(match);
+    while (parentPath) {
+      const parent = entriesByPath.get(parentPath);
+      if (parent && isFolderDirectoryEntry(parent)) {
+        includedPaths.add(parentPath);
+        if (!matchedPaths.has(parentPath)) contextFolderPaths.add(parentPath);
+      } else if (!parent) {
+        includedPaths.add(parentPath);
+        contextFolderPaths.add(parentPath);
+        if (!virtualFolders.has(parentPath)) {
+          virtualFolders.set(parentPath, virtualFolderEntry(parentPath));
+        }
+      }
+      parentPath = parentRelativePath(parentPath);
+    }
+  }
+
+  const includedEntries = [
+    ...entries.filter((entry) => includedPaths.has(entry.relativePath)),
+    ...virtualFolders.values(),
+  ];
+  const includedDirectoryPaths = new Set(
+    includedEntries
+      .filter(isFolderDirectoryEntry)
+      .map((entry) => entry.relativePath),
+  );
+  const childrenByParent = new Map<string, FolderEntry[]>();
+
+  for (const entry of includedEntries) {
+    const parentPath = nearestIncludedFolderPath(entry.relativePath, includedDirectoryPaths);
+    const siblings = childrenByParent.get(parentPath) ?? [];
+    siblings.push(entry);
+    childrenByParent.set(parentPath, siblings);
+  }
+
+  const orderedEntries: FolderEntry[] = [];
+  const appendChildren = (parentPath: string) => {
+    const children = sortFolderTreeSiblings(childrenByParent.get(parentPath) ?? [], sort);
+    for (const child of children) {
+      orderedEntries.push(child);
+      if (isFolderDirectoryEntry(child)) appendChildren(child.relativePath);
+    }
+  };
+  appendChildren("");
+
+  return {
+    entries: orderedEntries,
+    matchedCount: matches.length,
+    contextFolderPaths,
+  };
+}
+
+export function progressiveFolderViewEntries(
+  rows: FolderEntryUpsert[],
+): ProgressiveFolderViewEntries {
+  const pendingPaths = new Set<string>();
+  const entries = rows.map((row): FolderEntry => {
+    if (row.resolution.state === "pending") pendingPaths.add(row.relativePath);
+    return {
+      relativePath: row.relativePath,
+      leftPath: row.leftPath,
+      rightPath: row.rightPath,
+      left: row.left,
+      right: row.right,
+      status: row.resolution.state === "final"
+        ? row.resolution.status
+        : provisionalFolderStatus(row),
+      message: row.message,
+    };
+  });
+  return { entries, pendingPaths };
+}
+
+export function canCompareProgressiveFolderRow(row: FolderEntryUpsert): boolean {
+  if (row.resolution.state !== "final") return false;
+  return canCompareFolderEntry({
+    relativePath: row.relativePath,
+    leftPath: row.leftPath,
+    rightPath: row.rightPath,
+    left: row.left,
+    right: row.right,
+    status: row.resolution.status,
+    message: row.message,
+  });
+}
+
+function provisionalFolderStatus(row: FolderEntryUpsert): FolderEntryStatus {
+  if (row.left && !row.right) return "leftOnly";
+  if (row.right && !row.left) return "rightOnly";
+  return "same";
 }
 
 export function nextFolderSort(current: FolderSortState, key: FolderSortKey): FolderSortState {
@@ -227,12 +361,38 @@ export function folderEntryPrimaryAction(
   return { kind: "none" };
 }
 
+export type FolderRowGesture = "singleClick" | "doubleClick" | "enter" | "space";
+
+export interface FolderRowGesturePlan {
+  selectOnly: boolean;
+  activatePrimaryAction: boolean;
+  toggleDetails: boolean;
+}
+
+export function folderRowGesturePlan(gesture: FolderRowGesture): FolderRowGesturePlan {
+  return {
+    selectOnly: gesture === "singleClick",
+    activatePrimaryAction: gesture === "doubleClick" || gesture === "enter",
+    toggleDetails: gesture === "space",
+  };
+}
+
 export function isFolderDirectoryEntry(entry: FolderEntry): boolean {
   return entry.left?.kind === "directory" || entry.right?.kind === "directory";
 }
 
 export function folderEntryDepth(entry: Pick<FolderEntry, "relativePath">): number {
   return Math.max(0, entry.relativePath.split("/").filter(Boolean).length - 1);
+}
+
+export function folderEntryName(entry: Pick<FolderEntry, "relativePath">): string {
+  const normalized = normalizedRelativePath(entry.relativePath);
+  const separatorIndex = normalized.lastIndexOf("/");
+  return normalized.slice(separatorIndex + 1) || entry.relativePath;
+}
+
+export function folderEntryParentPath(entry: Pick<FolderEntry, "relativePath">): string {
+  return parentRelativePath(normalizedRelativePath(entry.relativePath));
 }
 
 export function folderEntryHasChildren(entry: FolderEntry, entries: FolderEntry[]): boolean {
@@ -247,10 +407,15 @@ export function applyCollapsedFolderEntries(
 ): FolderEntry[] {
   if (collapsedPaths.size === 0) return entries;
 
+  const normalizedCollapsedPaths = new Set(
+    Array.from(collapsedPaths, (path) => normalizedRelativePath(path)),
+  );
+
   return entries.filter((entry) => {
-    for (const collapsedPath of collapsedPaths) {
-      const prefix = `${collapsedPath.replace(/\/+$/, "")}/`;
-      if (entry.relativePath.startsWith(prefix)) return false;
+    let parentPath = folderEntryParentPath(entry);
+    while (parentPath) {
+      if (normalizedCollapsedPaths.has(parentPath)) return false;
+      parentPath = parentRelativePath(parentPath);
     }
     return true;
   });
@@ -295,6 +460,103 @@ export function isSafeFolderRelativePath(relativePath: string): boolean {
   return normalized.split("/").every((segment) => {
     return segment.length > 0 && segment !== "." && segment !== "..";
   });
+}
+
+export function folderReviewNavigationTarget(
+  scope: FolderReviewScope,
+  result: FolderScanResult,
+  entry: FolderEntry,
+): NavigationTarget {
+  if (!scope.reviewToken || !Number.isSafeInteger(scope.scanGeneration) || scope.scanGeneration < 0) {
+    throw new Error("Folder review scope must have a valid token and scan generation.");
+  }
+  if (!isSafeFolderRelativePath(entry.relativePath)) {
+    throw new Error("Folder review rows require a safe relative path.");
+  }
+  const relativeItemKey = folderPortablePathIdentity(entry.relativePath);
+  const matches = result.entries.filter(
+    (candidate) => folderPortablePathIdentity(candidate.relativePath) === relativeItemKey,
+  );
+  if (matches.length !== 1 || matches[0] !== entry) {
+    throw new Error("Folder review row identity must be unique in the current scan.");
+  }
+  const comparisonKind = folderReviewComparisonKind(entry);
+  if (!comparisonKind) {
+    throw new Error("Folder review rows must resolve to regular text-file expectations.");
+  }
+
+  return {
+    scope: { kind: "folderReview", ...scope },
+    document: { kind: "folderText", relativeItemKey, comparisonKind },
+  };
+}
+
+export function resolveFolderReviewNavigationTarget(
+  target: NavigationTarget,
+  scope: FolderReviewScope,
+  result: FolderScanResult,
+): FolderReviewTargetResolution {
+  if (
+    target.scope.kind !== "folderReview"
+    || target.document.kind !== "folderText"
+    || target.scope.reviewToken !== scope.reviewToken
+    || target.scope.scanGeneration !== scope.scanGeneration
+  ) {
+    return { kind: "stale", reason: "scope" };
+  }
+  const document = target.document;
+
+  const matches = result.entries.filter(
+    (entry) => folderPortablePathIdentity(entry.relativePath) === document.relativeItemKey,
+  );
+  if (matches.length === 0) return { kind: "stale", reason: "missing" };
+  if (matches.length !== 1) return { kind: "stale", reason: "collision" };
+  const entry = matches[0];
+  if (!entry || !isSafeFolderRelativePath(entry.relativePath)) {
+    return { kind: "stale", reason: "unsafe" };
+  }
+  const comparisonKind = folderReviewComparisonKind(entry);
+  if (!comparisonKind) return { kind: "stale", reason: "notText" };
+  if (comparisonKind !== document.comparisonKind) {
+    return { kind: "stale", reason: "kindChanged" };
+  }
+
+  return {
+    kind: "valid",
+    entry,
+    request: {
+      leftRoot: result.leftRoot,
+      rightRoot: result.rightRoot,
+      relativePath: entry.relativePath,
+      leftExpected: entry.left?.kind === "file" ? "regularFile" : "missing",
+      rightExpected: entry.right?.kind === "file" ? "regularFile" : "missing",
+    },
+  };
+}
+
+export function folderReviewReadFailureIsStale(error: unknown): boolean {
+  if (!error || typeof error !== "object" || !("code" in error)) return false;
+  const code = (error as Pick<AppError, "code">).code;
+  return code === "NOT_FOUND"
+    || code === "TOO_LARGE"
+    || code === "BINARY_FILE"
+    || code === "UNSUPPORTED_ENCODING"
+    || code === "PATH_CONFLICT"
+    || code === "FILE_CHANGED";
+}
+
+function folderReviewComparisonKind(
+  entry: FolderEntry,
+): "both" | "leftOnly" | "rightOnly" | null {
+  if (entry.status === "error" || entry.status === "typeMismatch") return null;
+  const leftFile = entry.left?.kind === "file";
+  const rightFile = entry.right?.kind === "file";
+  const leftMissing = entry.left == null;
+  const rightMissing = entry.right == null;
+  if (leftFile && rightFile) return "both";
+  if (leftFile && rightMissing) return "leftOnly";
+  if (rightFile && leftMissing) return "rightOnly";
+  return null;
 }
 
 export function buildFolderSyncDryRunPlan(
@@ -557,6 +819,63 @@ export function folderEntryModifiedMs(entry: FolderEntry): number | null {
     (time): time is number => time != null,
   );
   return times.length === 0 ? null : Math.max(...times);
+}
+
+function nearestIncludedFolderPath(
+  relativePath: string,
+  includedDirectoryPaths: ReadonlySet<string>,
+): string {
+  let parentPath = parentRelativePath(relativePath);
+  while (parentPath) {
+    if (includedDirectoryPaths.has(parentPath)) return parentPath;
+    parentPath = parentRelativePath(parentPath);
+  }
+  return "";
+}
+
+function virtualFolderEntry(relativePath: string): FolderEntry {
+  const directoryMeta: FsEntryMeta = {
+    kind: "directory",
+    size: 0,
+    modifiedMs: null,
+    hash: null,
+  };
+  return {
+    relativePath,
+    leftPath: null,
+    rightPath: null,
+    left: directoryMeta,
+    right: { ...directoryMeta },
+    status: "same",
+    message: null,
+  };
+}
+
+function sortFolderTreeSiblings(
+  entries: FolderEntry[],
+  sort: FolderSortState,
+): FolderEntry[] {
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((left, right) => {
+      const leftIsDirectory = isFolderDirectoryEntry(left.entry);
+      const rightIsDirectory = isFolderDirectoryEntry(right.entry);
+      if (leftIsDirectory !== rightIsDirectory) return leftIsDirectory ? -1 : 1;
+
+      const compared = compareFolderEntries(left.entry, right.entry, sort);
+      return compared === 0 ? left.index - right.index : compared;
+    })
+    .map(({ entry }) => entry);
+}
+
+function normalizedRelativePath(relativePath: string): string {
+  return relativePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
+function parentRelativePath(relativePath: string): string {
+  const normalized = normalizedRelativePath(relativePath);
+  const separatorIndex = normalized.lastIndexOf("/");
+  return separatorIndex < 0 ? "" : normalized.slice(0, separatorIndex);
 }
 
 function compareFolderEntries(left: FolderEntry, right: FolderEntry, sort: FolderSortState): number {

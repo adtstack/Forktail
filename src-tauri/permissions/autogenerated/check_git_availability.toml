@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-check-git-availability"
+description = "Enables the check_git_availability command without any pre-configured scope."
+commands.allow = ["check_git_availability"]
+
+[[permission]]
+identifier = "deny-check-git-availability"
+description = "Denies the check_git_availability command without any pre-configured scope."
+commands.deny = ["check_git_availability"]

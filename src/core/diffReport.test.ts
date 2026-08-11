@@ -212,12 +212,17 @@ rename to src/new name.txt
         path: "/exports/change.patch",
         size: 12,
         modifiedMs: 1_700_000_000_000,
+        contentHash: "existing-output-hash",
       }),
       writeOutput: async (request) => {
         expect(request).toMatchObject({
           path: "/exports/change.patch",
           expectedAbsent: false,
-          precondition: { expectedSize: 12, expectedModifiedMs: 1_700_000_000_000 },
+          precondition: {
+            expectedSize: 12,
+            expectedModifiedMs: 1_700_000_000_000,
+            expectedContentHash: "existing-output-hash",
+          },
         });
         throw new Error("injected output fault");
       },

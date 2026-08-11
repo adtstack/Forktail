@@ -12,11 +12,11 @@ describe("droppedFilePaths", () => {
       droppedFilePaths({
         files: {
           0: { path: "/left.txt" },
-          1: { path: "/right.txt" },
+          1: { path: " /right.txt " },
           length: 2,
         },
       }),
-    ).toEqual(["/left.txt", "/right.txt"]);
+    ).toEqual(["/left.txt", " /right.txt "]);
   });
 
   it("falls back to file URI lists", () => {

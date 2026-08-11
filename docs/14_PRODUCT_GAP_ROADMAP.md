@@ -2,6 +2,8 @@
 
 이 문서는 `forktail`을 실제 일상 도구로 만들기 위해 Phase 1 이후 또는 Phase 1 말미에 검토할 기능 후보를 정리한다. 기존 `docs/04_BACKLOG.md`는 현재 확정된 issue-sized backlog이고, 이 문서는 그 다음에 무엇을 추가할지 고르는 후보 목록이다.
 
+이 문서에 후보를 등록한 것만으로 구현되거나 출시가 약속되는 것은 아니다. 후보는 `docs/04_BACKLOG.md` 승격, 개별 spec/plan/tasks 작성, 구현, 세 OS 검증을 거쳐야 제품 기능이 된다. 상용 경쟁 관점의 순서는 `docs/15_COMMERCIAL_COMPETITIVE_ROADMAP.md`에서 관리한다.
+
 AI 기능은 이 문서의 범위에서 제외한다. 네트워크 업로드, 계정, 원격 저장소 동기화, telemetry도 기본 범위에 넣지 않는다.
 
 ## 1. 목적
@@ -36,10 +38,16 @@ AI 기능은 이 문서의 범위에서 제외한다. 네트워크 업로드, �
 
 - 여러 비교를 동시에 열 수 없다.
 - clipboard text compare, paste compare, 임시 텍스트 비교가 없다.
+- 비교 규칙을 이름 붙여 재사용하는 profile과 활성 규칙을 한눈에 확인하는 흐름이 없다.
+- 긴 unchanged 구간을 접어 변경 문맥만 빠르게 읽는 흐름이 없다.
 - regex ignore, generated header ignore, timestamp ignore 같은 규칙 기반 비교가 없다.
 - moved block 감지, manual alignment, sync point가 없다.
 - 폴더 include/exclude profile과 report export가 없다.
+- 폴더 비교의 source 경로는 progressive scan으로 전환됐지만 세 OS packaged/WebView 장기 실행 증적은 아직 부족하다.
 - conflict marker가 이미 들어간 단일 파일을 바로 해결하는 흐름이 없다.
+- 일부 메뉴·Search·Settings는 현재 mode의 실제 handler/capability와 완전히 일치하지 않는다.
+- packaged runtime이 OS와 실행 경로를 아는 경우에도 integration 화면이 OS/path 입력을 먼저 노출한다.
+- 검토한 항목과 아직 보지 않은 항목을 이어서 처리하는 review queue가 없다.
 - 대용량 로그/덤프는 64 MiB 제한으로 명확히 거절하지만, partial preview나 streaming diff 설계는 아직 없다.
 
 ## 3. 추천 개발 순서
@@ -47,13 +55,16 @@ AI 기능은 이 문서의 범위에서 제외한다. 네트워크 업로드, �
 아래 순서는 "좋아 보이는 기능"보다 "실사용자가 파일을 잃지 않고 매일 쓸 수 있는 순서"를 우선한다.
 
 ```text
-RTM-001 → RTM-002 → SAV-007 → SAV-008 → ENC-001
-→ SEC-005 → TXT-011 → TXT-012
-→ TXT-013 → FOL-012 → FOL-013 → FOL-015 → RPT-002
-→ MRG-012 → MRG-013 → INT-001 → PERF-004 → PERF-005
+T076/FND-006 CI 복구 → FOL-006R → RTM-001 → RTM-002
+→ SAV-007 → SAV-008 → ENC-001 → SEC-005 → REL-010
+→ FND-005R → UX-010/T084 → UX-009
+→ TXT-011 → TXT-012 → PRF-001 → TXT-016
+→ FOL-012 → FOL-014 → RPT-002 → FOL-015 → FOL-016
+→ MRG-012 → MRG-013 → MRG-015
+→ FOL-018 → FOL-019 → REV-001 → RPT-003
 ```
 
-첫 5개는 기능 추가보다 신뢰 확보에 가깝다. 이 단계가 끝나기 전에는 큰 기능을 추가하지 않는 편이 좋다. Git 관련 통합은 개발자 편의 기능으로 분리하고, 로컬 파일 비교 도구의 기본 신뢰성과 혼동하지 않는다.
+`REL-010`까지는 기능 추가보다 신뢰와 노출 범위 확정에 가깝다. 이 단계가 끝나기 전에는 큰 기능을 추가하지 않는 편이 좋다. Git 관련 통합은 세 OS packaged 증적이 끝날 때까지 개발자 편의/Experimental 기능으로 분리하고, 로컬 파일 비교 도구의 기본 신뢰성과 혼동하지 않는다.
 
 ## 4. Beta 신뢰도 이슈
 
@@ -188,6 +199,68 @@ cargo test
 - high/critical advisory는 triage 없이 release 불가다.
 - license exception은 문서화한다.
 
+### FOL-006R. 실제 progressive folder scan
+
+사용자 가치:
+
+- 큰 폴더에서 전체 스캔이 끝날 때까지 빈 화면을 기다리지 않고 도착한 결과부터 검토한다.
+- 취소하거나 새 비교를 시작했을 때 이전 작업 결과가 현재 화면에 섞이지 않는다.
+
+범위:
+
+- scan 시작 command는 job identity를 먼저 반환하고 Rust가 bounded batch와 progress를 순서대로 보낸다.
+- 마지막 응답은 전체 row 배열이 아니라 완료/취소/error summary만 전달한다.
+- UI는 현재 root/options/generation/job identity가 모두 일치하는 batch만 반영한다.
+- producer와 UI 사이에 bounded queue/backpressure를 두고 느린 consumer가 무제한 memory 증가를 만들지 않게 한다.
+
+수용 기준:
+
+- generated 10k/100k fixture에서 전체 완료 전 첫 batch가 보이고 row가 점진적으로 증가한다.
+- cancel 요청은 1초 안에 확인되며 그 뒤 취소된 job의 row가 현재 결과에 추가되지 않는다.
+- 새 scan을 연속 시작해도 stale batch가 0건이고 최종 count가 fixture와 일치한다.
+- permission error 하나와 hash error 하나가 정상 row와 함께 격리되어 표시된다.
+
+필요 테스트:
+
+- delayed fake scanner의 batch ordering, duplicate/late event, cancel race.
+- generated 10k/100k directory benchmark와 memory ceiling.
+- component unmount와 option/root 변경 중 stale result 회귀.
+
+구현 증적 (2026-08-07):
+
+- App 기본 폴더 비교 경로를 typed Channel, keyed accumulator, cumulative ACK, generation-aware cancel로 전환했다.
+- metadata/quick/full parity, pending/final lifecycle, sequence/owner/generation, inventory/hash/ACK 취소를 자동 테스트한다.
+- Apple M2 Pro 16GiB release metadata fixture 5회에서 10k terminal p95 46ms, 100k terminal p95
+  413ms, 첫 200행 p95 1ms, 100k peak RSS 증가 96.4MiB, 취소 p95 1ms 미만을 기록했다.
+- macOS/Windows/Linux packaged Channel scheduling과 100k WebView main-thread long-task 검증은 아직 실행하지
+  않았으므로 제품 완료 또는 세 OS 통과로 표시하지 않는다.
+
+### REL-010. Beta capability exposure gate
+
+사용자 가치:
+
+- 메뉴에 보이는 기능이 실제 지원 OS와 설치 패키지에서 검증된 기능인지 명확히 알 수 있다.
+
+범위:
+
+- 사용자에게 노출되는 capability를 `stable`, `beta`, `experimental`, `hidden` 중 하나로 분류하는 단일 manifest를 둔다.
+- source test 통과와 packaged evidence 완료를 서로 다른 상태로 추적한다.
+- Git repository 기능은 `T009`, `T077`~`T085`가 끝나기 전까지 stable로 표시하지 않는다.
+- UI, README, release note, command registry가 같은 상태를 사용한다.
+
+수용 기준:
+
+- stable capability는 지원한다고 표시한 모든 OS의 packaged evidence link를 가진다.
+- 미검증 capability는 숨기거나 명확한 Experimental label과 제한을 표시한다.
+- 비활성/숨김 command는 native menu, shortcut, command palette에서 우회 실행할 수 없다.
+- CI required job이 실패한 build는 beta artifact로 승격되지 않는다.
+
+필요 테스트:
+
+- capability manifest schema와 mode/OS matrix contract.
+- UI/menu/shortcut exposure parity.
+- release checklist가 evidence 없는 stable 항목을 거절하는 test 또는 verifier.
+
 ## 5. 2-way 비교 기능 후보
 
 ### TXT-011. 멀티 세션 탭
@@ -312,6 +385,32 @@ cargo test
 - exact moved block.
 - similar but not identical block.
 - 큰 파일에서 hint 계산 timeout.
+
+### TXT-016. Unchanged 구간 접기
+
+사용자 가치:
+
+- 긴 파일에서 변경이 없는 수백 줄을 건너뛰고 실제 변경과 주변 문맥에 집중한다.
+
+범위:
+
+- 일정 길이 이상의 unchanged region을 양쪽에서 같은 범위로 접고 앞뒤 context line을 남긴다.
+- 접기는 Monaco view state에만 영향을 주며 model text, diff 결과, 저장 byte를 바꾸지 않는다.
+- 다음/이전 diff, Find, Go to line, cursor history 복원 대상이 접힌 구간이면 필요한 범위만 자동으로 펼친다.
+- 현재 세션에서 전체 펼치기/다시 접기를 제공한다.
+
+수용 기준:
+
+- 접기 전후 hunk count, dirty state, undo/redo, save 결과가 동일하다.
+- F7/Shift+F7과 검색 결과 이동이 숨은 target을 정확히 reveal한다.
+- 좌우 fold range가 어긋나도 잘못된 line을 같은 문맥으로 표시하지 않는다.
+- keyboard-only와 200% 확대에서 접힘 표시를 열고 닫을 수 있다.
+
+필요 테스트:
+
+- 긴 unchanged prefix/middle/suffix와 no-final-newline fixture.
+- find/navigation/cursor-history reveal 회귀.
+- edit로 fold boundary가 바뀌는 경우의 recompute와 stale range 폐기.
 
 ## 6. 폴더 비교와 동기화 후보
 
@@ -460,6 +559,120 @@ cargo test
 - CRLF/LF fixture.
 - trailing whitespace fixture.
 - binary rejection fixture.
+
+### FOL-018. Deterministic 3-way folder compare
+
+사용자 가치:
+
+- 공통 기준 폴더와 두 변경본을 함께 비교해 한쪽만 바뀐 파일과 양쪽이 다르게 바뀐 충돌 후보를 구분한다.
+
+범위:
+
+- BASE/OURS/THEIRS 세 root를 같은 path, normalization, metadata/hash 정책으로 재귀 비교한다.
+- `Same`, `OursChanged`, `TheirsChanged`, `BothChangedSameWay`, `BothChangedDifferently`,
+  one-side/base-only, type mismatch, error 상태를 결정론적으로 분류한다.
+- `OursChanged`는 `OURS != BASE && THEIRS == BASE`, `TheirsChanged`는 그 반대,
+  `BothChangedSameWay`는 `OURS == THEIRS && OURS != BASE`로 계약한다.
+- 충돌 후보 text row는 기존 3-way merge 화면으로 명시적으로 열 수 있게 한다.
+- 이 이슈는 비교와 검토만 다루며 폴더 자동 병합/일괄 쓰기는 하지 않는다.
+
+수용 기준:
+
+- 상태 filter와 count가 three-root fixture의 expected classification과 일치한다.
+- 세 root에 동일한 compare mode/profile이 적용되고 다른 mode를 섞을 수 없다.
+- scan cancel/progress/stale-generation 처리가 `FOL-006R`과 동일하다.
+- 한쪽 누락 text와 binary/symlink/type mismatch가 잘못된 빈 텍스트로 디코딩되지 않는다.
+- 세 root의 중첩, case/Unicode normalization collision, root escape를 차단하거나 명시적으로 표시한다.
+
+필요 테스트:
+
+- non-overlapping change, same-way change, different change, add/delete/type-change fixture.
+- quick/full/normalized hash mode 일관성.
+- Unicode/case collision과 nested-root fixture.
+- 3-way text drilldown, cancel latency, stale batch 회귀.
+
+의존:
+
+- `FOL-006R`, `FOL-012`, 기존 3-way merge 안전 저장 계약.
+
+### FOL-019. 선택 파일 inline preview
+
+사용자 가치:
+
+- 폴더 목록을 떠나지 않고 선택한 행의 실제 text 차이를 빠르게 훑고 다음 파일로 이동한다.
+
+범위:
+
+- 선택한 regular text row를 read-only compact diff preview로 연다.
+- preview는 기존 좁은 Rust file/blob reader와 binary/size/encoding 판정을 재사용한다.
+- keyboard로 이전/다음 visible row를 이동하고 필요할 때 전체 2-way/3-way 화면을 연다.
+- selection이 바뀌면 이전 load를 취소하거나 generation identity로 stale 결과를 버린다.
+
+수용 기준:
+
+- 빠르게 selection을 바꿔도 마지막 선택 row 외의 preview가 표시되지 않는다.
+- missing side, binary, symlink, permission error는 행동 가능한 placeholder를 보이고 text로 강제 디코딩하지 않는다.
+- preview에서는 편집, hunk apply, 저장이 불가능하다.
+- 100k row virtual list의 scroll/focus와 preview open이 서로 selection을 잃게 하지 않는다.
+
+필요 테스트:
+
+- delayed response/stale selection component test.
+- missing/binary/symlink/error fixture.
+- keyboard-only와 200% 확대 smoke.
+
+### FOL-020. 폴더 비교 독립 검토 창
+
+상태: `docs/04_BACKLOG.md`에 승격됨. Source 구현은 진행됐으며 convergence와 세 OS packaged 증적이
+끝나기 전에는 stable/beta 완료로 표시하지 않는다.
+
+사용자 가치:
+
+- 폴더 결과를 한 번 클릭하면 선택만 하고, 일반 파일을 더블클릭하거나 `Enter`로 열면 실제 별도 창에서
+  비교해 목록과 파일 내용을 동시에 검토한다.
+- 같은 이름의 파일이 여러 폴더에 있어도 창 상단의 폴더·상대 경로·좌우 루트 문맥으로 대상을 구분한다.
+
+범위:
+
+- 폴더 행은 접기·펼치기만 하고, final regular text 행은 기존 안전한 pair reader를 거쳐 read-only 독립
+  창으로 연다. 한쪽-only는 missing 가상 문서를 사용한다.
+- 목록 위에 단일 클릭 선택, 더블클릭/`Enter` 활성화, `Space` 세부 정보 규칙을 항상 보이는 안내로
+  표시하고 결과 table의 설명과 연결한다.
+- 같은 live review의 같은 exact row identity는 중복 창 대신 기존 창을 복원·focus한다.
+- 창별 document/navigation/error/external-change 상태를 격리하고 최대 8개·source snapshot 합계 256MiB까지만
+  동시에 유지한다.
+- 원래 폴더 화면 navigation 뒤에도 열린 snapshot은 유지하되 창 닫기와 app 종료 때 process-only session을
+  정리한다.
+
+수용 기준:
+
+- 단일 클릭 100회에서 창 생성과 파일 read는 0건이고, double-click/Enter는 별도 OS 창 하나만 연다.
+- 영어·한국어 화면 모두 단일/더블 클릭 규칙이 tooltip이나 하단 상태에 의존하지 않고 목록 위에 보인다.
+- 같은 행 100회 재실행에서 중복 창은 0개이며 기존 창이 복원·활성화된다.
+- 새 창은 300ms 안에 shell을 표시하고 1MiB 이하 text pair는 1초 안에 compare 또는 행동 가능한 오류를
+  표시한다.
+- binary/LFS/oversized/symlink/containment/expected-side/stale fixture를 text로 강제해서 연 사례가 0건이다.
+- macOS/Windows/Linux packaged build에서 create/focus/minimize/resize/close/app-exit lifecycle을 검증한다.
+
+필요 테스트:
+
+- exact row/generation dedupe registry와 8-window/256MiB cap pure test.
+- all-or-nothing token resolution, open/rescan/close/app-exit race, orphan cleanup test.
+- main/detached window capability 분리와 URL/title/storage privacy sentinel.
+- same-basename nested paths, one-sided missing, external change component test.
+
+구현 증적 (2026-08-09):
+
+- 단일 클릭은 선택만 유지하고 final regular-file 더블클릭/`Enter`는 고정된 child surface의 read-only
+  OS 창을 열도록 main folder flow를 연결했다.
+- 단일 클릭, 더블클릭/`Enter`, `Space`의 역할을 영어·한국어 상시 안내로 표시하고 결과 table의
+  `aria-describedby`에 연결했다.
+- AppManifest 기준 main/detached ACL, caller-bound child command, descriptor-only registry, concurrent
+  dedupe, 8-window/256 MiB 제한, all-or-nothing initial load/reload와 destroy/exit 정리를 구현했다.
+- child는 상대 경로·좌우 root·missing 문맥을 header에 표시하되 URL/label/model/storage에는 경로·token·
+  content를 남기지 않고, focused native menu와 외부 변경 reload/keep 상태를 창별로 격리한다.
+- contract/component/Rust 테스트 증적과 세 OS packaged lifecycle·300ms/1초 성능 증적은 구분한다.
+  packaged macOS/Windows/Linux와 성능 측정은 아직 실행하지 않았으므로 stable 완료로 표시하지 않는다.
 
 ## 7. 3-way merge와 Git 후보
 
@@ -616,6 +829,32 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 
 - apply partial failure report.
 - dry-run report.
+
+### RPT-003. 비교 근거(provenance) report
+
+사용자 가치:
+
+- 왜 항목이 `same`, `different`, `ignored`, `conflict candidate`로 분류됐는지 나중에 재현하고 설명할 수 있다.
+
+범위:
+
+- compare mode, profile id/version, ignore/filter rule id, encoding/EOL policy, hash algorithm과 입력 identity를 schema로 남긴다.
+- 파일 내용, diff snippet, clipboard text, Git blob content는 포함하지 않는다.
+- path 포함 여부와 상대/절대 표시는 export 시 사용자가 선택하며 기본은 root-relative다.
+- volatile timestamp를 제외한 canonical payload digest를 제공한다.
+
+수용 기준:
+
+- 같은 입력 identity와 같은 profile로 만든 canonical payload/digest가 동일하다.
+- profile 또는 compare mode가 바뀌면 그 차이가 report에 명시된다.
+- ignored result도 어떤 규칙이 적용됐는지 확인할 수 있다.
+- preview에서 export될 필드를 검토하고 취소할 수 있다.
+
+필요 테스트:
+
+- canonical JSON/schema snapshot과 deterministic digest.
+- no content/snippet/absolute-home-path privacy sentinel.
+- profile/version/mode 변경 fixture.
 
 ## 9. 인코딩과 형식 인식 후보
 
@@ -799,8 +1038,9 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 
 범위:
 
-- 앱 안에서 Windows/macOS/Linux의 absolute executable path를 입력받아 difftool/mergetool snippet을 확인하고 복사할 수 있게 한다.
-- packaged runtime은 실제 current executable을 제안한다. Linux AppImage는 임시 mount 내부 binary가 아니라 `APPIMAGE`의 stable artifact path를 사용하며, 감지 실패 시 빈 입력과 OS별 형태 예시만 보여준다.
+- packaged runtime이 반환한 OS와 actual executable path를 authoritative DTO로 사용해 difftool/mergetool snippet을 바로 확인하고 복사하게 한다.
+- 감지 성공 시 OS 선택과 path 입력을 숨기고 읽기 전용 요약만 보인다. 감지 실패/dev 환경에서는 manual fallback을, 사용자가 명시적으로 연 경우에만 advanced override를 제공한다.
+- Linux AppImage는 임시 mount 내부 binary가 아니라 `APPIMAGE`의 stable artifact path를 사용한다.
 - 실제 `.gitconfig` 자동 수정은 첫 버전에서 제외한다.
 - difftool은 `$LOCAL`/`$REMOTE`, mergetool은 `$BASE`/`$LOCAL`/`$REMOTE`/`$MERGED`를 사용한다.
 - added/deleted difftool side의 `/dev/null`은 빈 positional argument로 정규화한다. mergetool은 stage 1이 없어도 Git이 0-byte BASE 임시파일을 만들 수 있으므로 `base_present=false`일 때만 빈 Base slot으로 바꾸고, 실제 empty stage 1은 path를 보존한다.
@@ -809,7 +1049,8 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 
 수용 기준:
 
-- OS별 executable path 예시가 정확하다.
+- 감지 성공한 packaged app은 초기 오류 flash 없이 OS/path 입력을 요구하지 않는다.
+- manual fallback의 OS별 executable path 예시가 정확하고 잘못된 absolute executable은 거절한다.
 - difftool과 mergetool 설정을 구분한다.
 - 현재 GUI lifecycle에서는 `trustExitCode = false`가 필요한 이유를 짧게 설명한다.
 - generated config text가 shell로 평가된다는 점을 반영해 OS별 path 공백/quote snapshot을 검증한다.
@@ -819,6 +1060,8 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 필요 테스트:
 
 - generated config text snapshot.
+- runtime detection success/failure/dev/advanced override component contract.
+- Windows/macOS/Linux DTO와 UI field visibility matrix.
 
 ### INT-003. File association policy
 
@@ -837,6 +1080,58 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 - association 제거 방법을 문서화한다.
 
 ## 12. 제품 품질 후보
+
+### FND-005R. 상황별 native command parity
+
+사용자 가치:
+
+- 보이는 메뉴와 단축키를 눌렀을 때 현재 화면에 맞는 동작이 실행되고, 동작할 수 없는 명령은 미리 비활성화된다.
+
+범위:
+
+- 하나의 typed command registry와 capability selector가 native menu, shortcut, toolbar, command palette를 구동한다.
+- 2-way/folder/merge/Git/Home/Settings mode별 command target과 disabled reason을 정의한다.
+- Search와 Settings처럼 표시돼 있으나 handler가 없거나 일부 mode에서 no-op인 명령은 실제 handler를 연결하거나 노출하지 않는다.
+- Save/Undo/Redo/Back은 active target과 dirty/history state가 있을 때만 실행한다.
+
+수용 기준:
+
+- enabled로 보이는 모든 command는 현재 mode에 정확히 하나의 handler와 target을 가진다.
+- keyboard, native menu, toolbar, palette가 같은 handler id와 enable state를 사용한다.
+- focus가 editor/input/list일 때 shortcut collision과 기본 text editing 우선순위가 문서화되고 테스트된다.
+- no-op command와 dirty guard 우회가 0건이다.
+
+필요 테스트:
+
+- mode × focus × capability command matrix.
+- menu/shortcut/button/palette registry parity verifier.
+- Search focus, Settings open, Save/Undo/Back target 회귀.
+
+### PRF-001. 이름 있는 비교 profile
+
+사용자 가치:
+
+- 매번 whitespace, EOL, case, ignore rule, folder filter를 다시 맞추지 않고 목적별 규칙을 재사용한다.
+
+범위:
+
+- built-in profile과 사용자 profile을 제공하고 duplicate/rename/delete/import/export를 지원한다.
+- 2-way 옵션, `TXT-013` 규칙, `FOL-012` filter, hash/normalization mode를 versioned schema로 묶는다.
+- profile에는 file content, clipboard text, diff result, absolute recent path를 저장하지 않는다.
+- 현재 적용 profile과 session에서 임시로 달라진 옵션을 항상 표시한다.
+
+수용 기준:
+
+- profile 전환 시 affected view가 예측 가능한 한 번의 recompute/rescan을 수행한다.
+- malformed/unknown-version profile은 기본값으로 조용히 덮지 않고 import 실패와 원인을 보여준다.
+- report에는 profile id/version과 session override가 기록된다.
+- profile 삭제가 열린 session의 effective option을 바꾸지 않는다.
+
+필요 테스트:
+
+- schema migration/import/export round-trip.
+- content/path privacy sentinel.
+- profile switch와 session override/recompute 회귀.
 
 ### UX-007. Command palette
 
@@ -877,6 +1172,120 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 - sample session은 recent user session과 구분된다.
 - sample에서 Save는 Save As만 허용한다.
 
+### UX-009. 편집 위치 탐색 기록
+
+사용자 가치:
+
+- 긴 diff와 merge conflict를 검토하다가 직전에 보던 pane과 line을 다시 찾는 시간을 줄인다.
+- mouse side button과 keyboard에서 동일한 `이전 편집 위치` 경험을 제공한다.
+
+범위:
+
+- 현재 앱 실행 동안 text editor의 session identity, pane, cursor line/column, viewport anchor만 최근
+  100개까지 memory에 보관한다.
+- 다음/이전 diff·conflict, pane 전환, 검색 결과, 다른 live review 항목을 열기 직전 위치를 기록한다.
+- hardware mouse Back, Windows/Linux `Alt+Left`, macOS `Ctrl+-`를 같은 command handler에 연결한다.
+- 기존 Home/folder/Git 화면 복귀용 Back과 편집 위치 Back을 분리한다.
+- 파일 내용, 주변 text, diff/merge result, Git 임시 path는 기록하거나 영속화하지 않는다.
+
+수용 기준:
+
+- A→B→C 위치를 방문한 뒤 Back을 반복하면 C→B→A 순서로 pane, cursor, viewport, focus가 복원된다.
+- 복원은 text, dirty 상태, undo/redo history를 바꾸지 않는다.
+- 동일·근접 cursor 이동은 합치고, 101번째 고유 위치에서 가장 오래된 위치만 제거한다.
+- reload/generation 변경, 삭제, binary/symlink/submodule 등 stale/non-text target은 잘못된 파일로
+  대체하지 않고 안전하게 건너뛴다.
+- history가 비었을 때 mouse Back은 화면을 닫거나 dirty guard를 우회하지 않는다.
+- 앱 종료 후 persistent storage, cache, log에 cursor history나 사용자 content가 남지 않는다.
+
+필요 테스트:
+
+- bounded pure history의 dedupe/coalesce, stale skip, replay suppression, 100개 eviction.
+- 2-way left/right와 merge Result의 cursor/viewport 복원, F7/F8 이동 origin 기록.
+- command registry/native menu shortcut parity와 collision 검사.
+- Windows/macOS/Linux packaged app에서 실제 hardware mouse Back 전달 smoke.
+
+후속 범위:
+
+- history forward, app 재시작 간 위치 복원, arbitrary closed-file reopen은 별도 opt-in 이슈로 둔다.
+
+### UX-010. Settings & Integrations 화면
+
+사용자 가치:
+
+- 시작 화면의 작업 선택과 앱 설정을 분리하고, 현재 적용 중인 비교/폴더/병합/통합 설정을 한곳에서 확인한다.
+
+범위:
+
+- General, Compare, Folder, Merge, Integrations, Privacy/About section을 가진 실제 Settings route를 제공한다.
+- OS/runtime처럼 앱이 신뢰할 수 있게 아는 값은 읽기 전용으로 표시하고 중복 선택을 요구하지 않는다.
+- Git tool의 OS/path manual input은 `INT-002`/`T084`의 감지 실패 fallback 또는 명시적 advanced override에만 둔다.
+- 저장되는 setting schema와 reset/default, session-only override를 구분한다.
+
+수용 기준:
+
+- native Settings command와 shortcut이 같은 route를 열고 두 번째 실행은 중복 화면을 만들지 않는다.
+- 감지 성공 시 OS 선택/path 입력이 없고 실패 시에만 행동 가능한 fallback이 보인다.
+- setting 변경이 즉시 적용되는지 다음 session부터 적용되는지 각 control에서 알 수 있다.
+- settings storage에 file content, clipboard text, diff/merge result, Git temporary path가 남지 않는다.
+
+필요 테스트:
+
+- settings route와 native command parity.
+- runtime detection success/failure/dev/advanced override visibility.
+- schema migration/reset와 privacy sentinel.
+
+### UX-011. 편집 위치 앞으로 이동
+
+사용자 가치:
+
+- 이전 위치로 돌아간 뒤 다시 원래 검토 위치로 되돌아가며 탐색 흐름을 잃지 않는다.
+
+범위:
+
+- `UX-009`의 동일 memory-only history에서 forward stack과 mouse Forward command를 제공한다.
+- 새 사용자 이동이 발생하면 일반적인 navigation history처럼 현재 forward branch를 폐기한다.
+- keyboard binding은 OS별 기존 명령과 충돌하지 않는지 `FND-005R` keyboard map에서 확정한다.
+- 앱 재시작 복원과 닫힌 파일 자동 reopen은 포함하지 않는다.
+
+수용 기준:
+
+- A→B→C에서 Back 두 번, Forward 두 번을 실행하면 A→B→C가 cursor/viewport/focus와 함께 복원된다.
+- Back 후 새 D로 이동하면 이전 B/C forward branch를 실행할 수 없다.
+- stale/non-text target은 Back과 같은 정책으로 건너뛰고 dirty/undo state를 바꾸지 않는다.
+- history가 비면 mouse Forward가 화면 navigation이나 dirty guard를 우회하지 않는다.
+
+필요 테스트:
+
+- branch invalidation, stale skip, replay suppression pure history test.
+- mouse Forward와 keyboard command packaged smoke.
+
+### REV-001. 검토 queue와 viewed 상태
+
+사용자 가치:
+
+- 폴더/Git 변경 목록에서 아직 검토하지 않은 항목을 알고 다음 미검토 항목으로 빠르게 이동한다.
+
+범위:
+
+- folder row와 Git changed-file identity에 `unreviewed`, `in_review`, `reviewed` session state를 둔다.
+- 사용자가 명시적으로 Mark reviewed/unreviewed하고 Next unreviewed command로 이동한다.
+- filter/sort가 바뀌어도 identity 기준 상태를 유지하되 rescan/repository generation이 바뀌면 stale 상태를 분리한다.
+- 첫 버전은 memory-only이며 파일 내용, snippet, blob id를 persistent storage에 남기지 않는다.
+
+수용 기준:
+
+- visible/total reviewed count와 next-unreviewed 대상이 filter 정책과 일치한다.
+- 단순히 파일을 열었다는 이유만으로 자동 reviewed 처리하지 않는다.
+- rename/delete/rescan/revision change에서 다른 항목에 reviewed 상태를 잘못 이식하지 않는다.
+- keyboard-only로 mark와 next command를 실행할 수 있다.
+
+필요 테스트:
+
+- stable identity/revision generation reducer test.
+- filter/sort/rescan/rename/delete stale-state fixture.
+- folder/Git command parity와 200% 확대 smoke.
+
 ### OBS-001. Local diagnostic bundle
 
 사용자 가치:
@@ -911,7 +1320,7 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 - SFTP/FTP/WebDAV/cloud remote compare.
 - 데이터베이스 schema/data compare.
 - 플러그인 시스템.
-- 자동 updater.
+- 서명·checksum·rollback 검증 없이 artifact를 자동 적용하는 updater.
 
 이 기능들은 제품 매력은 크지만, 저장 안전성, 보안 경계, 배포 정책, dependency surface가 크게 달라진다. 현재 목표인 로컬 텍스트 비교와 3-way 병합이 안정화된 뒤 결정한다.
 
@@ -942,10 +1351,10 @@ branch/commit/index snapshot을 앱에서 직접 읽는 더 큰 Git 후보는 `d
 
 바로 개발할 후보:
 
-1. `RTM-001` 실제 Tauri runtime smoke 자동화.
-2. `RTM-002` packaged WebView smoke.
-3. `SAV-007` Windows atomic replace 검증.
-4. `SAV-008` 저장 precondition 강화.
-5. `ENC-001` legacy encoding save policy 조사와 fixture.
+1. `T076/FND-006` 현재 required CI를 복구한다.
+2. `FOL-006R` 실제 progressive scan과 cancel/stale-result 계약을 닫는다.
+3. `RTM-001`, `RTM-002`, `SAV-007`, `SAV-008`, `ENC-001`, `SEC-005`의 OS/저장/release 증적을 끝낸다.
+4. `REL-010`에서 Git을 포함한 미검증 capability의 beta 노출 범위를 확정한다.
+5. `FND-005R`, `UX-010/T084`, `UX-009`로 command/settings/navigation의 끊김을 먼저 없앤다.
 
-이 5개가 끝나면 기능 개발 속도를 올려도 된다. 그 전에는 새 기능보다 "실제로 저장해도 안전한가"를 먼저 닫는다.
+그다음 `TXT-011`, `TXT-012`, `PRF-001`, `TXT-016`, `FOL-014`, `RPT-002`를 상용 일상 workflow 묶음으로 승격한다. `FOL-015/016`처럼 파일을 쓰는 기능은 report/dry-run과 rollback 계약이 준비된 뒤에만 진행한다.

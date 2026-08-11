@@ -1,15 +1,27 @@
-import { invoke } from "@tauri-apps/api/core";
+import { Channel, invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import type {
   FileDocument,
   FileBackup,
   FileVersion,
+  FolderScanAck,
+  FolderScanMessage,
   FolderScanOptions,
   FolderScanResult,
+  FolderScanStarted,
+  FolderReviewTextPair,
+  FolderReviewTextPairRequest,
+  DetachedFolderReviewLoaded,
+  DetachedFolderReviewOpenResult,
+  DetachedFolderReviewVersionCheck,
+  InvalidateDetachedFolderReviewSource,
+  OpenDetachedFolderReviewRequest,
   MergeResult,
+  StartFolderScanRequest,
   WriteResult,
 } from "./models";
 import type { WritePrecondition } from "./mergeSave";
+import type { GitToolPlatform } from "./gitToolConfig";
 import type {
   GitCompareSession,
   GitConflictList,
@@ -46,6 +58,9 @@ declare global {
   }
 }
 
+let nativeDialogDepth = 0;
+const nativeDialogDepthListeners = new Set<(depth: number) => void>();
+
 export function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
@@ -58,11 +73,11 @@ function requireTauri(): void {
 
 export async function chooseTextFile(title: string): Promise<string | null> {
   requireTauri();
-  const selected = await open({
-    title,
-    multiple: false,
-    directory: false,
-  });
+  const selected = await withNativeDialog(() => open({
+      title,
+      multiple: false,
+      directory: false,
+    }));
   return typeof selected === "string" ? selected : null;
 }
 
@@ -73,11 +88,11 @@ export async function exitExternalGitTool(): Promise<void> {
 
 export async function chooseDirectory(title: string): Promise<string | null> {
   requireTauri();
-  const selected = await open({
-    title,
-    multiple: false,
-    directory: true,
-  });
+  const selected = await withNativeDialog(() => open({
+      title,
+      multiple: false,
+      directory: true,
+    }));
   return typeof selected === "string" ? selected : null;
 }
 
@@ -86,15 +101,81 @@ export async function chooseSavePath(
   title = "Save File",
 ): Promise<string | null> {
   requireTauri();
-  return save({
-    title,
-    defaultPath,
-  });
+  return withNativeDialog(() => save({
+      title,
+      defaultPath,
+    }));
+}
+
+export function nativeDialogDepthSnapshot(): number {
+  return nativeDialogDepth;
+}
+
+export function subscribeNativeDialogDepth(listener: (depth: number) => void): () => void {
+  nativeDialogDepthListeners.add(listener);
+  return () => { nativeDialogDepthListeners.delete(listener); };
+}
+
+async function withNativeDialog<T>(operation: () => Promise<T>): Promise<T> {
+  nativeDialogDepth += 1;
+  notifyNativeDialogDepth();
+  try {
+    return await operation();
+  } finally {
+    nativeDialogDepth = Math.max(0, nativeDialogDepth - 1);
+    notifyNativeDialogDepth();
+  }
+}
+
+function notifyNativeDialogDepth(): void {
+  for (const listener of nativeDialogDepthListeners) listener(nativeDialogDepth);
 }
 
 export async function readTextFile(path: string): Promise<FileDocument> {
   requireTauri();
   return invoke<FileDocument>("read_text_file", { path });
+}
+
+export async function readFolderReviewTextPair(
+  request: FolderReviewTextPairRequest,
+  jobId: number,
+): Promise<FolderReviewTextPair> {
+  requireTauri();
+  return invoke<FolderReviewTextPair>("read_folder_review_text_pair", { request, jobId });
+}
+
+export async function cancelFolderReviewTextRead(jobId: number): Promise<void> {
+  requireTauri();
+  return invoke<void>("cancel_folder_review_text_read", { jobId });
+}
+
+export async function openDetachedFolderReview(
+  request: OpenDetachedFolderReviewRequest,
+): Promise<DetachedFolderReviewOpenResult> {
+  requireTauri();
+  return invoke<DetachedFolderReviewOpenResult>("open_detached_folder_review", { request });
+}
+
+export async function invalidateDetachedFolderReviewSource(
+  request: InvalidateDetachedFolderReviewSource,
+): Promise<void> {
+  requireTauri();
+  await invoke<void>("invalidate_detached_folder_review_source", { request });
+}
+
+export async function loadDetachedFolderReview(): Promise<DetachedFolderReviewLoaded> {
+  requireTauri();
+  return invoke<DetachedFolderReviewLoaded>("load_detached_folder_review");
+}
+
+export async function checkDetachedFolderReviewVersions(): Promise<DetachedFolderReviewVersionCheck> {
+  requireTauri();
+  return invoke<DetachedFolderReviewVersionCheck>("check_detached_folder_review_versions");
+}
+
+export async function reloadDetachedFolderReview(): Promise<DetachedFolderReviewLoaded> {
+  requireTauri();
+  return invoke<DetachedFolderReviewLoaded>("reload_detached_folder_review");
 }
 
 export async function openGitRevisionCompare(
@@ -344,6 +425,7 @@ export async function restoreTextFileBackup(
     backupPath,
     expectedSize: precondition?.expectedSize ?? null,
     expectedModifiedMs: precondition?.expectedModifiedMs ?? null,
+    expectedContentHash: precondition?.expectedContentHash ?? null,
   });
 }
 
@@ -362,9 +444,38 @@ export async function scanDirectories(
   });
 }
 
-export async function cancelFolderScan(jobId: number): Promise<void> {
+export async function startFolderScan(
+  request: StartFolderScanRequest,
+  onMessage: (message: FolderScanMessage) => void,
+  onStarted?: (started: FolderScanStarted) => void,
+): Promise<FolderScanStarted> {
   requireTauri();
-  return invoke<void>("cancel_folder_scan", { jobId });
+  const onEvent = new Channel<FolderScanMessage>();
+  const pending: FolderScanMessage[] = [];
+  let ready = false;
+  onEvent.onmessage = (message) => {
+    if (ready) {
+      onMessage(message);
+    } else {
+      pending.push(message);
+    }
+  };
+
+  const started = await invoke<FolderScanStarted>("start_folder_scan", { request, onEvent });
+  onStarted?.(started);
+  ready = true;
+  for (const message of pending) onMessage(message);
+  return started;
+}
+
+export async function ackFolderScan(ack: FolderScanAck): Promise<void> {
+  requireTauri();
+  return invoke<void>("ack_folder_scan", { ack });
+}
+
+export async function cancelFolderScan(jobId: number, scanGeneration: number): Promise<void> {
+  requireTauri();
+  return invoke<void>("cancel_folder_scan", { jobId, scanGeneration });
 }
 
 export async function mergeTexts(base: string, ours: string, theirs: string): Promise<MergeResult> {
@@ -380,6 +491,27 @@ export async function startupArgs(): Promise<string[]> {
 export async function gitToolExecutablePath(): Promise<string> {
   requireTauri();
   return invoke<string>("git_tool_executable_path");
+}
+
+export interface RuntimeIntegrationProfile {
+  platform: GitToolPlatform;
+  executablePath: string | null;
+  detection: "detected" | "manualRequired";
+}
+
+export async function runtimeIntegrationProfile(): Promise<RuntimeIntegrationProfile> {
+  requireTauri();
+  return invoke<RuntimeIntegrationProfile>("runtime_integration_profile");
+}
+
+export async function setEditorNavigationBackEnabled(enabled: boolean): Promise<void> {
+  requireTauri();
+  return invoke<void>("set_editor_navigation_back_enabled", { enabled });
+}
+
+export async function setSettingsCommandEnabled(enabled: boolean): Promise<void> {
+  requireTauri();
+  return invoke<void>("set_settings_command_enabled", { enabled });
 }
 
 export async function revealPath(path: string): Promise<void> {
@@ -404,8 +536,8 @@ export async function writeTextFileAtomic(
       createBackup,
       expectedSize: precondition?.expectedSize ?? null,
       expectedModifiedMs: precondition?.expectedModifiedMs ?? null,
+      expectedContentHash: precondition?.expectedContentHash ?? null,
       encoding,
-      ...(expectedAbsent ? { expectedAbsent: true } : {}),
     },
   );
 }

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-git-recent-commits"
+description = "Enables the list_git_recent_commits command without any pre-configured scope."
+commands.allow = ["list_git_recent_commits"]
+
+[[permission]]
+identifier = "deny-list-git-recent-commits"
+description = "Denies the list_git_recent_commits command without any pre-configured scope."
+commands.deny = ["list_git_recent_commits"]

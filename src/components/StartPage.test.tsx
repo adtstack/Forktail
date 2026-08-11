@@ -1,12 +1,12 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_FOLDER_SCAN_OPTIONS,
   type AppLanguage,
   type RecentSession,
   type ThemeMode,
 } from "../core/settings";
-import { StartPage } from "./StartPage";
+import { focusStartPageSettingsDestination, StartPage } from "./StartPage";
 
 const compareRecentSession: RecentSession = {
   id: "compare:/missing/left.txt\n/missing/right.txt",
@@ -41,6 +41,7 @@ function renderStartPage({
       busy={false}
       languageMode={languageMode}
       themeMode={themeMode}
+      settingsFocusRequest={0}
       recentSessions={recentSessions}
       recentSessionFailure={recentSessionFailure}
       onLanguageModeChange={() => {}}
@@ -79,6 +80,28 @@ describe("StartPage", () => {
     expect(markup).toContain("English");
     expect(markup).toContain("한국어");
     expect(markup).toContain("aria-pressed=\"true\">English");
+  });
+
+  it("exposes one labelled and focusable Settings destination", () => {
+    const markup = renderStartPage();
+
+    expect(markup.match(/id="home-settings"/g)).toHaveLength(1);
+    expect(markup).toContain('aria-labelledby="home-settings-title"');
+    expect(markup).toContain('tabindex="-1"');
+    expect(markup).toContain('aria-keyshortcuts="Control+, Meta+,"');
+    expect(markup).toMatch(/id="home-settings-title"[^>]*>Settings/);
+  });
+
+  it("focuses and scrolls the existing destination without creating another screen", () => {
+    const destination = {
+      focus: vi.fn(),
+      scrollIntoView: vi.fn(),
+    };
+
+    expect(focusStartPageSettingsDestination(destination)).toBe(true);
+    expect(destination.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(destination.scrollIntoView).toHaveBeenCalledWith({ block: "center" });
+    expect(focusStartPageSettingsDestination(null)).toBe(false);
   });
 
   it("renders Korean labels when the saved language is Korean", () => {
