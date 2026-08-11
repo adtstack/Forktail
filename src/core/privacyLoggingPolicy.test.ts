@@ -1,7 +1,8 @@
 /// <reference types="node" />
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { extname, join } from "node:path";
+import { extname, join, relative, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import packageJson from "../../package.json";
 import cargoManifest from "../../src-tauri/Cargo.toml?raw";
@@ -16,6 +17,7 @@ const runtimeSourceRoots = [
   new URL("../../src-tauri/src/", import.meta.url),
 ];
 const runtimeExtensions = new Set([".ts", ".tsx", ".rs"]);
+const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
 const settingsSource = readFileSync(new URL("./settings.ts", import.meta.url), "utf8");
 const mergeRecoverySource = readFileSync(
   new URL("./mergeRecovery.ts", import.meta.url),
@@ -156,7 +158,7 @@ function runtimeSourceFiles(): string[] {
 }
 
 function collectFiles(root: URL): string[] {
-  return collectFilesFromPath(root.pathname);
+  return collectFilesFromPath(fileURLToPath(root));
 }
 
 function collectFilesFromPath(rootPath: string): string[] {
@@ -173,7 +175,5 @@ function collectFilesFromPath(rootPath: string): string[] {
 }
 
 function relativePolicyPath(file: string): string {
-  const marker = "/forktail/";
-  const index = file.indexOf(marker);
-  return index === -1 ? file : file.slice(index + marker.length);
+  return relative(projectRoot, file).split(sep).join("/");
 }

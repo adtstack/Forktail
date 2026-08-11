@@ -403,7 +403,7 @@ pub fn cancel_folder_review_text_read(job_id: u64) -> CommandResult<()> {
 }
 
 pub(crate) enum ValidatedFolderReviewSide {
-    Regular { opened: StableOpenedFile },
+    Regular { opened: Box<StableOpenedFile> },
     Missing,
 }
 
@@ -708,7 +708,9 @@ fn validate_folder_review_side(
             if !stable_metadata_matches(&metadata, &opened.metadata) {
                 return Err(folder_review_side_changed());
             }
-            Ok(ValidatedFolderReviewSide::Regular { opened })
+            Ok(ValidatedFolderReviewSide::Regular {
+                opened: Box::new(opened),
+            })
         }
     }
 }
@@ -778,7 +780,7 @@ fn read_validated_folder_review_side_snapshot(
     };
     let mut check_cancelled = || check_folder_review_read_cancelled(cancelled);
     let snapshot = read_opened_stable_file_with_hook(
-        opened,
+        *opened,
         MAX_TEXT_FILE_BYTES,
         &mut check_cancelled,
         &mut |step| on_step(pair_side, step),
@@ -799,7 +801,7 @@ fn verify_folder_review_side_snapshot(
         (ValidatedFolderReviewSide::Regular { opened }, Some(delivered)) => {
             let mut check_cancelled = || check_folder_review_read_cancelled(cancelled);
             let current = read_opened_stable_file_with_hook(
-                opened,
+                *opened,
                 MAX_TEXT_FILE_BYTES,
                 &mut check_cancelled,
                 &mut |step| on_step(pair_side, step),
@@ -1402,7 +1404,7 @@ fn target_exists_and_is_readonly(target: &Path) -> bool {
     // SAFETY: GetFileAttributesW reads file metadata. The wide string is a
     // valid null-terminated UTF-16 path built from the target Path.
     let attrs = unsafe { GetFileAttributesW(windows::core::PCWSTR(wide.as_ptr())) };
-    if attrs == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES.0 {
+    if attrs == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES {
         return false;
     }
     (attrs & FILE_ATTRIBUTE_READONLY.0) != 0
@@ -1421,7 +1423,7 @@ fn clear_readonly_attribute(target: &Path) -> Option<u32> {
     // SAFETY: GetFileAttributesW / SetFileAttributesW read/modify file
     // metadata only; no memory aliasing concerns. The path is null-terminated.
     let current = unsafe { GetFileAttributesW(ptr) };
-    if current == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES.0 {
+    if current == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES {
         return Some(0);
     }
     let cleared = current & !FILE_ATTRIBUTE_READONLY.0;
@@ -1447,7 +1449,7 @@ fn set_readonly_attribute(target: &Path) -> Option<u32> {
     let ptr = windows::core::PCWSTR(wide.as_ptr());
     // SAFETY: same rationale as clear_readonly_attribute.
     let current = unsafe { GetFileAttributesW(ptr) };
-    if current == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES.0 {
+    if current == windows::Win32::Storage::FileSystem::INVALID_FILE_ATTRIBUTES {
         return Some(0);
     }
     let with_readonly = current | FILE_ATTRIBUTE_READONLY.0;

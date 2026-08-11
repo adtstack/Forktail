@@ -1,2 +1,5 @@
 # Preserve fixture bytes where line endings are part of the test case.
 fixtures/three-way/cases/crlf-non-overlap/*.txt -text
+
+# Node/Vitest source must not be rewritten to CRLF on Windows runners.
+*.mjs text eol=lf

@@ -446,7 +446,7 @@ mod tests {
     fn preserves_unmerged_stages_and_rejects_malformed_or_truncated_records() {
         let object = b"c".repeat(40);
         let mut unmerged = Vec::new();
-        for stage in [b'1', b'2', b'3'] {
+        for stage in *b"123" {
             unmerged.extend(record(b'M', b"100644", &object, stage, b"conflict.txt"));
         }
         let parsed = parse_index_records(&unmerged, GitObjectAlgorithm::Sha1)

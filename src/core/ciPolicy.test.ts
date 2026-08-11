@@ -1,6 +1,7 @@
 /// <reference types="node" />
 
 import { describe, expect, it } from "vitest";
+import gitAttributes from "../../.gitattributes?raw";
 import ciWorkflow from "../../.github/workflows/ci.yml?raw";
 import firstSprint from "../../docs/13_FIRST_SPRINT.md?raw";
 
@@ -37,6 +38,7 @@ describe("CI branch gate policy", () => {
 
     expect(windowsJob).toContain("runs-on: windows-2022");
     expect(windowsJob).toContain("npx vitest run scripts/version-bump.test.mjs");
+    expect(gitAttributes).toMatch(/^\*\.mjs text eol=lf$/m);
   });
 
   it("does not publish artifacts or release builds from the PR validation workflow", () => {
