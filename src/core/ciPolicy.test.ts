@@ -38,6 +38,12 @@ describe("CI branch gate policy", () => {
 
     expect(windowsJob).toContain("runs-on: windows-2022");
     expect(windowsJob).toContain("npx vitest run scripts/version-bump.test.mjs");
+    expect(gitAttributes).toMatch(
+      /^fixtures\/three-way\/cases\/\*\/\*\.txt text eol=lf$/m,
+    );
+    expect(gitAttributes).toMatch(
+      /^fixtures\/three-way\/cases\/crlf-non-overlap\/\*\.txt -text$/m,
+    );
     expect(gitAttributes).toMatch(/^\*\.mjs text eol=lf$/m);
   });
 

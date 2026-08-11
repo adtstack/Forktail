@@ -1375,11 +1375,10 @@ fn replace_target_windows(temporary: NamedTempFile, target: &Path) -> CommandRes
     }
 
     let persist_result = temporary.persist(target);
-    let outcome = persist_result.map_err(|error| {
-        CommandError::io(
+    let outcome = persist_result.map_err(|_| {
+        CommandError::new(
             AppErrorCode::WriteFailed,
             "최종 파일로 교체하지 못했습니다. 파일이 다른 프로그램에서 사용 중일 수 있습니다.",
-            error.error,
         )
     });
 

@@ -1,4 +1,7 @@
-# Preserve fixture bytes where line endings are part of the test case.
+# Keep ordinary byte-exact merge fixtures on LF across every checkout.
+fixtures/three-way/cases/*/*.txt text eol=lf
+
+# Preserve the intentional CRLF fixture bytes after the general fixture rule.
 fixtures/three-way/cases/crlf-non-overlap/*.txt -text
 
 # Node/Vitest source must not be rewritten to CRLF on Windows runners.

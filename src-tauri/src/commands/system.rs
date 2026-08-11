@@ -237,27 +237,34 @@ mod tests {
 
     #[test]
     fn returns_one_authoritative_runtime_profile_without_a_manual_os_choice() {
+        #[cfg(target_os = "windows")]
+        let (expected_path, expected_platform) =
+            (r"C:\Program Files\forktail\forktail.exe", "windows");
+        #[cfg(target_os = "macos")]
+        let (expected_path, expected_platform) = (
+            "/Applications/forktail.app/Contents/MacOS/forktail",
+            "macos",
+        );
+        #[cfg(target_os = "linux")]
+        let (expected_path, expected_platform) = ("/opt/forktail/forktail", "linux");
+
+        let platform = current_runtime_platform();
         let profile = runtime_integration_profile_from(
-            RuntimePlatform::Macos,
+            platform,
             false,
             false,
             None,
-            Ok(PathBuf::from(
-                "/Applications/forktail.app/Contents/MacOS/forktail",
-            )),
+            Ok(PathBuf::from(expected_path)),
         );
 
-        assert_eq!(profile.platform, RuntimePlatform::Macos);
+        assert_eq!(profile.platform, platform);
         assert_eq!(profile.detection, RuntimeIntegrationDetection::Detected);
-        assert_eq!(
-            profile.executable_path.as_deref(),
-            Some("/Applications/forktail.app/Contents/MacOS/forktail")
-        );
+        assert_eq!(profile.executable_path.as_deref(), Some(expected_path));
         assert_eq!(
             serde_json::to_value(profile).expect("runtime profile JSON"),
             serde_json::json!({
-                "platform": "macos",
-                "executablePath": "/Applications/forktail.app/Contents/MacOS/forktail",
+                "platform": expected_platform,
+                "executablePath": expected_path,
                 "detection": "detected"
             })
         );
@@ -265,8 +272,9 @@ mod tests {
 
     #[test]
     fn keeps_the_compile_target_and_requests_only_a_manual_path_in_dev() {
+        let platform = current_runtime_platform();
         let profile = runtime_integration_profile_from(
-            RuntimePlatform::Linux,
+            platform,
             true,
             true,
             None,
@@ -276,7 +284,7 @@ mod tests {
         assert_eq!(
             profile,
             RuntimeIntegrationProfile {
-                platform: RuntimePlatform::Linux,
+                platform,
                 executable_path: None,
                 detection: RuntimeIntegrationDetection::ManualRequired,
             }
