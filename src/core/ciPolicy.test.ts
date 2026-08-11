@@ -29,6 +29,16 @@ describe("CI branch gate policy", () => {
     expect(ciWorkflow).toContain("timeout-minutes: 30");
   });
 
+  it("exercises the version bump transaction on a real Windows filesystem", () => {
+    const windowsJob = ciWorkflow.slice(
+      ciWorkflow.indexOf("git-tool-harness-windows:"),
+      ciWorkflow.indexOf("\n  rust:"),
+    );
+
+    expect(windowsJob).toContain("runs-on: windows-2022");
+    expect(windowsJob).toContain("npx vitest run scripts/version-bump.test.mjs");
+  });
+
   it("does not publish artifacts or release builds from the PR validation workflow", () => {
     const forbiddenFragments = [
       "actions/upload-artifact",

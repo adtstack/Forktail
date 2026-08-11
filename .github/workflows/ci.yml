@@ -42,6 +42,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run test:git-tools
+      - run: npx vitest run scripts/version-bump.test.mjs
 
   rust:
     # SAV-007 requires the Windows atomic-replace path to be validated on

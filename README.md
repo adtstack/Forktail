@@ -151,12 +151,22 @@ open src-tauri/target/release/bundle/macos/forktail.app
 
 ### GitHub 릴리스 빌드
 
-릴리스 workflow는 `vX.Y.Z` 태그 또는 수동 실행으로만 동작한다. 실행 전에 `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`의 버전이 태그와 일치해야 한다.
+릴리스 workflow는 `vX.Y.Z` 태그 또는 수동 실행으로만 동작한다. 먼저 `version:bump`로 `package.json`,
+`package-lock.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`을 함께
+갱신한다. 명령은 현재보다 높은 strict SemVer만 허용하며, 모든 기존 버전 필드가 일치하지 않으면 아무
+파일도 바꾸지 않고 실패한다.
+감지된 교체 오류는 원문으로 rollback하지만 프로세스나 OS의 강제 종료까지 다중 파일 원자성을 보장하지는
+않으므로, 커밋과 태그 생성 전 `release:validate`를 반드시 실행한다. 실행 중에는 위 버전 파일을 다른
+프로세스에서 동시에 수정하지 않는다.
 
 ```bash
-npm run release:validate -- v0.1.0
-git tag v0.1.0
-git push origin v0.1.0
+npm run version:bump -- 0.2.3 --dry-run
+npm run version:bump -- 0.2.3
+npm run release:validate -- v0.2.3
+git add package.json package-lock.json src-tauri/tauri.conf.json src-tauri/Cargo.toml src-tauri/Cargo.lock
+git commit -m "chore: bump version to 0.2.3"
+git tag v0.2.3
+git push origin main v0.2.3
 ```
 
 GitHub Actions는 frontend/Rust 검증과 SBOM/NOTICE 생성을 먼저 실행한 뒤 macOS `.dmg`, Windows NSIS `.exe`, Linux `.AppImage` 산출물을 각 OS별로 빌드해 `checksums.txt`와 함께 unsigned draft prerelease에 첨부한다. 산출물은 Developer ID 서명이나 notarization을 거치지 않았으므로, macOS는 Gatekeeper, Windows는 SmartScreen 경고가 표시된다. 코드 서명, notarization, 세 OS clean smoke가 끝나기 전에는 stable release로 승격하지 않는다. 서명 상태와 공개 배포 시 필요한 추가 단계는 `docs/RELEASE_SIGNING_POLICY.md`를, M5 beta 배포 종료 조건은 `docs/BETA_CHECKLIST.md`를 참고한다.

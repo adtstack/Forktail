@@ -22,6 +22,7 @@
     "smoke:git-tools:verify": "node scripts/git-tool-smoke.mjs --verify",
     "smoke:git-tools:cleanup": "node scripts/git-tool-smoke.mjs --cleanup",
     "sbom:generate": "node scripts/generate-sbom.mjs",
+    "version:bump": "node scripts/version-bump.mjs",
     "release:validate": "node scripts/validate-release.mjs",
     "updater:config": "node scripts/write-updater-config.mjs",
     "updater:manifest": "node scripts/generate-updater-manifest.mjs",
