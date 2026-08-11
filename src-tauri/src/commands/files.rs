@@ -1339,7 +1339,7 @@ fn sync_parent_directory(_parent: &Path) -> std::io::Result<()> {
 fn replace_target(temporary: NamedTempFile, target: &Path) -> CommandResult<()> {
     #[cfg(windows)]
     {
-        return replace_target_windows(temporary, target);
+        replace_target_windows(temporary, target)
     }
 
     #[cfg(not(windows))]
@@ -3797,9 +3797,7 @@ mod tests {
         }
 
         // Restore writability so tempdir cleanup works.
-        let mut perms = fs::metadata(&target).expect("metadata").permissions();
-        perms.set_readonly(false);
-        let _ = fs::set_permissions(&target, perms);
+        let _ = clear_readonly_attribute(&target);
     }
 
     #[cfg(windows)]

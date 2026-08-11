@@ -1104,7 +1104,7 @@ impl ProcessTree {
     fn attach(child: &mut Child) -> Result<Self, RunnerError> {
         #[cfg(windows)]
         {
-            return windows_process_tree::Job::attach(child).map(|job| Self { job });
+            windows_process_tree::Job::attach(child).map(|job| Self { job })
         }
         #[cfg(not(windows))]
         {
@@ -1136,7 +1136,7 @@ impl ProcessTree {
             if child.try_wait().ok().flatten().is_some() {
                 return Ok(());
             }
-            return Err(RunnerError::ProcessControlFailed);
+            Err(RunnerError::ProcessControlFailed)
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -1312,6 +1312,7 @@ pub(crate) mod fixture {
             }
         }
 
+        #[cfg(unix)]
         pub(crate) fn with_environment(
             mut self,
             key: impl Into<OsString>,
