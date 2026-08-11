@@ -1133,8 +1133,23 @@ mod tests {
             fs::write(fixture.repository.join("conflict.txt"), b"main\n").expect("main change");
             fixture.run(["add", "--", "conflict.txt"]);
             fixture.commit("main change");
-            let merge = fixture.run_allow_failure(["merge", "--no-edit", "other"]);
-            assert!(!merge.status.success(), "fixture merge must conflict");
+            let merge = fixture.run_allow_failure([
+                "-c",
+                "user.useConfigOnly=true",
+                "-c",
+                "user.name=Forktail Fixture",
+                "-c",
+                "user.email=fixture@example.invalid",
+                "merge",
+                "--no-edit",
+                "other",
+            ]);
+            assert_eq!(
+                merge.status.code(),
+                Some(1),
+                "fixture merge must produce a conflict: {}",
+                String::from_utf8_lossy(&merge.stderr)
+            );
             fixture
         }
 

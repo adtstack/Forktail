@@ -2710,7 +2710,7 @@ mod tests {
         git(&root, &["add", "--", "conflict.txt"]);
         git(&root, &["commit", "-m", "theirs"]);
         git(&root, &["checkout", "master"]);
-        git_expect_failure(&root, &["merge", "theirs"]);
+        git_expect_conflict(&root, &["merge", "theirs"]);
         ConflictSessionFixture { _temp: temp, root }
     }
 
@@ -2954,7 +2954,7 @@ mod tests {
         );
     }
 
-    fn git_expect_failure(root: &Path, arguments: &[&str]) {
+    fn git_expect_conflict(root: &Path, arguments: &[&str]) {
         let output = Command::new("git")
             .current_dir(root)
             .args(arguments)
@@ -2962,9 +2962,11 @@ mod tests {
             .env("GIT_TERMINAL_PROMPT", "0")
             .output()
             .expect("run failing Git fixture command");
-        assert!(
-            !output.status.success(),
-            "git {arguments:?} unexpectedly succeeded",
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "git {arguments:?} must produce a conflict: {}",
+            String::from_utf8_lossy(&output.stderr),
         );
     }
 
